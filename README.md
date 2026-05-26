@@ -225,7 +225,10 @@ println(square(7))      // 49
 
 A seed stdlib lives in [`std/`](std/) — `std/math.ail` (`min`/`max`/
 `pow`/`gcd`/libc `abs`) and `std/str.ail` (libc `strcmp`/`atoi` and a
-`parse_int` wrapper).
+`parse_int` wrapper). The same files are mirrored at
+[`examples/std/`](examples/std/) so in-tree e2e tests can
+`im "std/…"` against a path that resolves relative to the example
+file — keep both copies in sync when editing.
 
 For the full language reference (every keyword, every operator, the
 EBNF), see [`spec/grammar.ebnf`](spec/grammar.ebnf).
