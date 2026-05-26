@@ -1,0 +1,13 @@
+// Heap-allocated string concatenation via unified `+`.
+// Backed by Boehm GC — no malloc/free in user code.
+
+fn greet(name:str) "Hello, " + name + "!"
+
+msg := greet("AiLang")
+println(msg)
+println(len(msg))            // 14: "Hello, AiLang!"
+
+println("a" + "bc" + "def")  // abcdef
+
+who := "world"
+println("hi, " + who)

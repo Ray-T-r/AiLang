@@ -1,0 +1,179 @@
+// bench.ail — performance benchmark for AiLang's compiler-generated code.
+// Each section exercises a different hot-path the codegen + clang -O2 stack
+// should handle well. clock() is libc's CPU-time clock; on POSIX it ticks
+// once per microsecond (CLOCKS_PER_SEC = 1_000_000), so t1-t0 is microseconds.
+
+ex fn clock() -> i64
+
+// --- workloads ----------------------------------------------------------
+
+fn fib(n:i64) -> i64 {
+  if n < 2 rt n
+  fib(n-1) + fib(n-2)
+}
+
+fn ackermann(m:i64, n:i64) -> i64 {
+  if m == 0 rt n + 1
+  if n == 0 rt ackermann(m - 1, 1)
+  ackermann(m - 1, ackermann(m, n - 1))
+}
+
+fn collatz_steps(n:i64) -> i64 {
+  mu x := n
+  mu steps := 0
+  lp x > 1 {
+    if x % 2 == 0 x = x / 2
+    el           x = 3 * x + 1
+    steps = steps + 1
+  }
+  steps
+}
+
+fn collatz_total(upto:i64) -> i64 {
+  mu total := 0
+  lp i in 1..=upto {
+    total = total + collatz_steps(i)
+  }
+  total
+}
+
+fn count_primes(upto:i64) -> i64 {
+  // Trial-division sieve. No arrays yet, so we recompute divisibility
+  // per candidate — this stresses tight nested integer loops.
+  mu count := 0
+  lp i in 2..=upto {
+    mu is_prime := true
+    mu d := 2
+    lp d * d <= i {
+      if i % d == 0 is_prime = false
+      d = d + 1
+    }
+    if is_prime count = count + 1
+  }
+  count
+}
+
+fn triple_nested(n:i64) -> i64 {
+  // O(n^3) integer work — measures loop + arithmetic throughput once
+  // LLVM has unrolled and CSE'd what it can.
+  mu acc := 0
+  lp i in 0..n {
+    lp j in 0..n {
+      lp k in 0..n {
+        acc = acc + (i * j + k * 7) % 1009
+      }
+    }
+  }
+  acc
+}
+
+fn fizzbuzz_score(n:i64) -> i64 {
+  // Dense branch dispatch — same shape as fizzbuzz but in if/el form,
+  // because `mt` as an expression isn't wired through codegen yet (M2
+  // emits a stub `0` for it). This still exercises branch prediction
+  // and the optimizer's ability to fuse modulus checks.
+  mu hits := 0
+  lp i in 1..=n {
+    if i % 15 == 0 hits = hits + 4
+    el if i % 3 == 0 hits = hits + 1
+    el if i % 5 == 0 hits = hits + 2
+  }
+  hits
+}
+
+fn pipe_chain(n:i64, seed:i64) -> i64 {
+  // Pipe sugar + small-fn inlining. XOR-accumulate so each iteration's
+  // input depends on the previous acc; otherwise clang -O2 sees a pure
+  // polynomial sum and folds the whole loop to a constant at compile
+  // time (the previous version of this benchmark clocked 0us — true,
+  // but uninteresting). The `seed` (a runtime clock() value) also
+  // prevents the compiler from precomputing the final result.
+  mu acc := seed
+  lp i in 1..=n {
+    acc = acc ^ ((i + (acc & 7)) |> double |> add(3) |> square)
+  }
+  acc
+}
+
+fn double(x:i64) -> i64 x * 2
+fn add(a:i64, b:i64) -> i64 a + b
+fn square(x:i64) -> i64 x * x
+
+fn string_build(n:i64) -> i64 {
+  // GC-allocated string concat. Stresses ailang_str_concat + GC throughput,
+  // not pure arithmetic — expect this one to be the slowest per op.
+  mu s := ""
+  lp i in 0..n {
+    s = s ++ "x"
+  }
+  len(s)
+}
+
+// --- harness ------------------------------------------------------------
+
+fn report(label:str, t0:i64, t1:i64, result:i64) {
+  print(label)
+  print(": ")
+  print(t1 - t0)
+  print(" us  (result=")
+  print(result)
+  println(")")
+}
+
+fn main() {
+  println("== AiLang codegen perf benchmark ==")
+  println("(times are CPU microseconds via libc clock())")
+  println("")
+
+  // Warm caches & GC.
+  mu warm := fib(20)
+  warm = warm + collatz_steps(27)
+  print("warmup ok, warm=")
+  println(warm)
+  println("")
+
+  mu t0 := clock()
+  mu r := fib(35)
+  mu t1 := clock()
+  report("fib(35)            ", t0, t1, r)
+
+  t0 = clock()
+  r = ackermann(3, 11)
+  t1 = clock()
+  report("ackermann(3,11)    ", t0, t1, r)
+
+  t0 = clock()
+  r = collatz_total(200000)
+  t1 = clock()
+  report("collatz_total(2e5) ", t0, t1, r)
+
+  t0 = clock()
+  r = count_primes(50000)
+  t1 = clock()
+  report("count_primes(5e4)  ", t0, t1, r)
+
+  t0 = clock()
+  r = triple_nested(300)
+  t1 = clock()
+  report("triple_nested(300) ", t0, t1, r)
+
+  t0 = clock()
+  r = fizzbuzz_score(2000000)
+  t1 = clock()
+  report("fizzbuzz_score(2e6)", t0, t1, r)
+
+  // Seed with t0 to keep the result runtime-dependent and prevent
+  // whole-loop constant folding.
+  t0 = clock()
+  r = pipe_chain(2000000, t0)
+  t1 = clock()
+  report("pipe_chain(2e6)    ", t0, t1, r)
+
+  t0 = clock()
+  r = string_build(20000)
+  t1 = clock()
+  report("string_build(2e4)  ", t0, t1, r)
+
+  println("")
+  println("== done ==")
+}

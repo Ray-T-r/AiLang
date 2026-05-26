@@ -1,0 +1,4 @@
+fn main() {
+  x := `bad backtick`
+  y := 42
+}

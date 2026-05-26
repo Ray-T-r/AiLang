@@ -1,0 +1,50 @@
+# ---- Rust / build ----
+/target
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# ---- Local-only (not shared via git) ----
+CLAUDE.md
+
+# ---- Editor / OS junk ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- Generic build output ----
+*.o
+*.ll
+*.bc
+/build
+/dist
+
+# ---- Cargo registry mirror ----
+# Keep .cargo/config.toml tracked — it holds the China mirror config.
+
+# ---- ailangc-generated artifacts (next to .ail sources) ----
+# Whitelist style: ignore everything in the dir, re-include the sources
+# we want tracked. New generated files get ignored automatically.
+
+# examples/: only .ail sources + the std/ subdir
+/examples/*
+!/examples/*.ail
+!/examples/std/
+
+# bench/ailang_v2/ and bench/perf/ailang/: only .ail sources
+/bench/ailang_v2/*
+!/bench/ailang_v2/*.ail
+/bench/perf/ailang/*
+!/bench/perf/ailang/*.ail
+
+# bench/perf/{c,go,rust,java}/: keep hand-written sources, drop binaries / .class
+/bench/perf/c/*
+!/bench/perf/c/*.c
+/bench/perf/go/*
+!/bench/perf/go/*.go
+/bench/perf/rust/*
+!/bench/perf/rust/*.rs
+/bench/perf/java/*
+!/bench/perf/java/*.java

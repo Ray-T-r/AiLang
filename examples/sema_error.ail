@@ -1,0 +1,5 @@
+// Demo: sema reports undefined names and wrong arg counts with ariadne diagnostics.
+fn main() {
+  x := unknown_name
+  println(undefined_function(1, 2, 3))
+}

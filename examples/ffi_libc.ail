@@ -1,0 +1,10 @@
+// Direct FFI to libc — no shim, no wrapper.
+// AiLang's `str` is `const char*` underneath, so it lines up directly
+// with `int puts(const char*)`.
+
+ex fn puts(s:str) -> i32
+ex fn abs(n:i32) -> i32
+
+puts("hello via libc puts!")
+println(abs(-7))      // 7
+println(abs(42))      // 42

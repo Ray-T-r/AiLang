@@ -1,0 +1,11 @@
+fn wc(text:str) -> {str:i64} {
+  m : {str:i64} = {}
+  lp w in text.split(" ") {
+    m[w] = (m[w] ?? 0) + 1
+  }
+  m
+}
+
+fn main() {
+  println(wc("the quick brown fox the lazy dog the fox"))
+}

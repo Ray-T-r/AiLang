@@ -1,0 +1,15 @@
+[package]
+name        = "ailang-runtime"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+
+# This crate becomes a no_std staticlib in M3 (panic handler, GC init,
+# print intrinsics). For now it builds as a regular lib so cargo check
+# passes without requiring the no_std bootstrap.
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

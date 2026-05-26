@@ -1,0 +1,32 @@
+// std/math.ail — seed math helpers, wrapping libc where useful.
+
+ex fn abs(n:i32) -> i32
+ex fn rand() -> i32
+ex fn srand(seed:u32)
+
+fn min(a, b) {
+  if a < b rt a
+  b
+}
+
+fn max(a, b) {
+  if a > b rt a
+  b
+}
+
+fn pow(base, exp) {
+  mu r := 1
+  lp i in 0..exp {
+    r = r * base
+  }
+  r
+}
+
+fn gcd(a, b) {
+  lp b != 0 {
+    t := b
+    b = a % b
+    a = t
+  }
+  a
+}

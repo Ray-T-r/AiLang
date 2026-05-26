@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ailang-syntax",
+    "crates/ailang-lexer",
+    "crates/ailang-parser",
+    "crates/ailang-diag",
+    "crates/ailang-sema",
+    "crates/ailang-hir",
+    "crates/ailang-codegen-llvm",
+    "crates/ailang-codegen-ir",
+    "crates/ailang-driver",
+    "crates/ailang-runtime",
+    "crates/ailangc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Ray-T-r/AiLang"
+
+[workspace.dependencies]
+ailang-syntax       = { path = "crates/ailang-syntax" }
+ailang-lexer        = { path = "crates/ailang-lexer" }
+ailang-parser       = { path = "crates/ailang-parser" }
+ailang-diag         = { path = "crates/ailang-diag" }
+ailang-sema         = { path = "crates/ailang-sema" }
+ailang-hir          = { path = "crates/ailang-hir" }
+ailang-codegen-llvm = { path = "crates/ailang-codegen-llvm" }
+ailang-codegen-ir   = { path = "crates/ailang-codegen-ir" }
+ailang-driver       = { path = "crates/ailang-driver" }
+ailang-runtime      = { path = "crates/ailang-runtime" }
+
+logos     = "0.14"
+clap      = { version = "4.5", features = ["derive"] }
+ariadne   = "0.4"
+serde     = { version = "1", features = ["derive"] }
+thiserror = "1"
+insta     = { version = "1.40", features = ["yaml"] }
+
+[profile.release]
+opt-level = 3
+lto       = "thin"
+codegen-units = 1

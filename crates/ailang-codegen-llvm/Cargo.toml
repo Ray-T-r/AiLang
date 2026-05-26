@@ -1,0 +1,15 @@
+[package]
+name        = "ailang-codegen-llvm"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+
+# NOTE: inkwell dependency added in M2 once we have something to codegen.
+# Keeping this crate minimal until then avoids forcing every dev build to
+# resolve LLVM headers.
+
+[dependencies]
+ailang-hir    = { workspace = true }
+ailang-syntax = { workspace = true }
+ailang-sema   = { workspace = true }

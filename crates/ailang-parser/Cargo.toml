@@ -1,0 +1,14 @@
+[package]
+name        = "ailang-parser"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+
+[dependencies]
+ailang-syntax = { workspace = true }
+ailang-diag   = { workspace = true }
+
+[dev-dependencies]
+ailang-lexer = { workspace = true }
+insta        = { workspace = true }

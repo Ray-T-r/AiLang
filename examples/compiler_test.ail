@@ -1,0 +1,67 @@
+// Compiler smoke test — exercises a wide slice of AiLang features
+// in one program so any regression in the pipeline shows up here.
+
+ex fn puts(s:str) -> i32
+
+fn square(n:i64) -> i64 n * n
+
+fn add(a:i64, b:i64) -> i64 a + b
+
+fn fib(n:i64) -> i64 {
+  if n < 2 rt n
+  fib(n-1) + fib(n-2)
+}
+
+fn is_even(n:i64) -> bool n % 2 == 0
+
+fn classify(n:i64) {
+  mt (n % 3, n % 5) {
+    (0,0) => println("FizzBuzz");
+    (0,_) => println("Fizz");
+    (_,0) => println("Buzz");
+    _     => println(n);
+  }
+}
+
+fn greet(name:str) -> str {
+  "hello, " ++ name ++ "!"
+}
+
+fn main() {
+  // --- direct FFI ---
+  puts("== compiler_test ==")
+
+  // --- recursion ---
+  println(fib(10))                       // 55
+  println(fib(20))                       // 6765
+
+  // --- expression-bodied + pipe chain ---
+  println(3 |> square |> add(1))         // square(3)=9, add(9,1)=10
+
+  // --- mutable + while-form lp ---
+  mu n := 5
+  mu acc := 0
+  lp n > 0 {
+    acc = acc + n
+    n = n - 1
+  }
+  println(acc)                           // 15
+
+  // --- for-in + inclusive range + match dispatch ---
+  println("classify 1..=15:")
+  lp i in 1..=15 {
+    classify(i)
+  }
+
+  // --- if/el branches with single-statement bodies ---
+  lp i in 1..=5 {
+    if is_even(i) print("even ")
+    el           print("odd  ")
+    println(i)
+  }
+
+  // --- string concat through Boehm GC ---
+  msg := greet("AiLang")
+  println(msg)
+  println(len(msg))                      // 14
+}

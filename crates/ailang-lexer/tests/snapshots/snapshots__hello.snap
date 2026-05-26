@@ -1,0 +1,10 @@
+---
+source: crates/ailang-lexer/tests/snapshots.rs
+assertion_line: 38
+expression: "render(src, & toks)"
+---
+   0..7    ident "println"
+   7..8    ( "("
+   8..23   string "\"hello, AiLang\""
+  23..24   ) ")"
+  25..25   <eof>

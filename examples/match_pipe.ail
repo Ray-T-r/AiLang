@@ -1,0 +1,24 @@
+// Showcases: `mt` with tuple pattern + literal + wildcard + binding,
+// pipe `|>`, expression-bodied fns, and the `lp ... in ..= ...` range.
+
+fn double(x:i64) -> i64 x * 2
+
+fn describe(n:i64) {
+  mt (n % 2, n) {
+    (0, 0) => println("zero, even");
+    (1, 1) => println("one, odd");
+    (0, x) => println(x);
+    (_, x) => println(x);
+  }
+}
+
+fn main() {
+  // Pipe a value through two transformations.
+  result := 3 |> double |> double
+  println(result)
+
+  // Iterate 0..=4 and describe each one.
+  lp i in 0..=4 {
+    describe(i)
+  }
+}

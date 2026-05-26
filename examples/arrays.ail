@@ -1,0 +1,16 @@
+// Arrays — M4+ runtime, backed by Boehm GC.
+
+nums := [10, 20, 30, 40, 50]
+println(len(nums))     // 5
+println(nums[2])       // 30
+
+mu total := 0
+lp x in nums {
+  total += x
+}
+println(total)          // 150
+
+words := ["alice", "bob", "carol"]
+lp w in words {
+  println(w)
+}

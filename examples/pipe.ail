@@ -1,0 +1,15 @@
+// Pipe operator: `x |> f(args)` is `f(x, args)`.
+// Reads left-to-right, no nesting parens.
+
+fn double(x) x * 2
+fn add(a, b) a + b
+fn square(x) x * x
+
+// 5 |> double  ⇒  double(5)            = 10
+// 10 |> add(7) ⇒  add(10, 7)           = 17
+// 17 |> square ⇒  square(17)           = 289
+result := 5 |> double |> add(7) |> square
+println(result)
+
+also := square(add(double(5), 7))
+println(also)

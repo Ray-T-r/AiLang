@@ -1,0 +1,7 @@
+fn greet(name:str) -> str {
+  "Hello, " ++ name ++ "!"
+}
+
+fn main() {
+  println(greet("AiLang"))
+}

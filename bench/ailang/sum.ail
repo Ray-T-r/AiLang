@@ -1,0 +1,7 @@
+fn main() {
+  mu s := 0
+  lp i in 1..101 {
+    s = s + i
+  }
+  println(s)
+}

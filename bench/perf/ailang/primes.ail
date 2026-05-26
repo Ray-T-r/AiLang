@@ -1,0 +1,17 @@
+fn is_prime(n) {
+  if n < 2 rt 0
+  if n == 2 rt 1
+  if n % 2 == 0 rt 0
+  mu i := 3
+  lp i*i <= n {
+    if n % i == 0 rt 0
+    i += 2
+  }
+  1
+}
+
+mu c := 0
+lp k in 2..500001 {
+  c += is_prime(k)
+}
+println(c)

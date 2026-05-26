@@ -1,0 +1,31 @@
+// A self-contained demo of the M2 feature set:
+// recursion, mutual function calls, while + for loops, mutable locals,
+// arithmetic, comparisons, polymorphic println.
+
+fn square(n:i64) -> i64 n * n
+
+fn sum_of_squares(n:i64) -> i64 {
+  mu total := 0
+  lp i in 1..=n {
+    total = total + square(i)
+  }
+  total
+}
+
+fn is_even(n:i64) -> bool n % 2 == 0
+
+fn classify(n:i64) {
+  if is_even(n) print("even ")
+  el           print("odd  ")
+  println(n)
+}
+
+fn main() {
+  println("sum of squares 1..10:")
+  println(sum_of_squares(10))
+
+  println("classify 1..6:")
+  lp i in 1..=6 {
+    classify(i)
+  }
+}

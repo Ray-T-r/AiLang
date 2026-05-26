@@ -1,0 +1,128 @@
+(* AiLang Grammar v0.1 — M0–M5 subset *)
+(* Status: living document. Aligned with plan §1.5. *)
+
+program       = { top_decl | stmt } ;
+                (* Implicit `main`: top-level statements with no explicit
+                   `fn main()` are auto-wrapped in `int main()`. *)
+
+top_decl      = import
+              | extern_decl
+              | fn_decl
+              | struct_decl ;
+
+import        = "im" string [ "as" ident ] ;
+
+extern_decl   = "ex" [ string ] fn_sig ;          (* string = lib name; default "c" *)
+
+fn_decl       = "fn" ident "(" [ params ] ")" [ "->" type ] ( block | expr ) ;
+                (* `block` form requires `{}`; `expr` form is the single-
+                   expression body: `fn add(a, b) a + b`. *)
+fn_sig        = "fn" ident "(" [ params [ "," "..." ] ] ")" [ "->" type ] ;
+                                                  (* trailing `...` = C variadic; extern only *)
+params        = param { "," param } ;
+param         = ident [ ":" type ] ;
+                (* Unannotated params default to `i64`. Sema infers the
+                   return type from the body when not stated. *)
+
+struct_decl   = "st" ident "{" { field ";" } "}" ;
+field         = ident ":" type ;
+
+stmt          = decl
+              | assign
+              | expr_stmt
+              | ctrl
+              | "rt" [ expr ]
+              | "br"
+              | "ct" ;
+
+decl          = [ "mu" ] ident [ ":" type ] ":=" expr ;
+assign        = lvalue ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) expr ;
+                (* Compound forms desugar: `x += y` → `x = x + y`. *)
+expr_stmt     = expr ;
+lvalue        = ident | index | field_access ;
+
+ctrl          = if_stmt | loop_stmt | match_stmt ;
+
+if_stmt       = "if" expr ( block | stmt )
+                [ "el" ( if_stmt | block | stmt ) ] ;
+
+loop_stmt     = "lp" [ loop_head ] block ;
+loop_head     = ident "in" expr        (* for-in *)
+              | expr ;                 (* while *)
+
+match_stmt    = "mt" expr "{" { match_arm } "}" ;
+match_arm     = pattern "=>" expr ";" ;
+pattern       = literal | ident | "_" | "(" pattern { "," pattern } ")" ;
+
+block         = "{" { stmt } [ expr ] "}" ;
+                (* Implicit return: trailing expression is the block's value *)
+
+expr          = literal
+              | ident
+              | call
+              | binop
+              | unop
+              | ternary
+              | lambda
+              | index
+              | field_access
+              | pipe
+              | block
+              | array_lit
+              | map_lit
+              | "(" expr ")" ;
+
+call          = expr "(" [ expr { "," expr } ] ")" ;
+binop         = expr binop_op expr ;
+unop          = unop_op expr ;
+ternary       = expr "?" expr ":" expr ;
+lambda        = "fn" "(" [ params ] ")" expr ;       (* expression lambda *)
+              | "fn" "(" [ params ] ")" block ;       (* multi-statement *)
+index         = expr "[" expr "]" ;
+field_access  = expr "." ident ;
+pipe          = expr "|>" expr ;
+
+array_lit     = "[" [ expr { "," expr } ] "]" ;
+map_lit       = "{" [ expr ":" expr { "," expr ":" expr } ] "}" ;
+
+binop_op      = "+" | "-" | "*" | "/" | "%"
+                (* `+` is overloaded: numeric add OR string concat when
+                   either operand is statically known to be a string. *)
+              | "==" | "!=" | "<" | "<=" | ">" | ">="
+              | "&&" | "||"
+              | "&" | "|" | "^" | "<<" | ">>"
+              | "++"               (* explicit string concat (legacy) *)
+              | ".."               (* range *)
+              | "??" ;             (* nil coalesce *)
+unop_op       = "-" | "!" | "*" | "&" | "?" ;
+
+literal       = int_lit | float_lit | string_lit | char_lit | bool_lit | nil_lit ;
+int_lit       = digit { digit | "_" } [ int_suffix ] ;
+int_suffix    = "_i8" | "_i16" | "_i32" | "_i64"
+              | "_u8" | "_u16" | "_u32" | "_u64" ;
+float_lit     = digit { digit | "_" } "." digit { digit | "_" } [ float_suffix ] ;
+float_suffix  = "_f32" | "_f64" ;
+string_lit    = '"' { char } '"' ;
+char_lit      = "'" char "'" ;
+bool_lit      = "true" | "false" ;
+nil_lit       = "nil" ;
+
+type          = prim_type
+              | "[" type "]"                      (* array/slice *)
+              | "{" type ":" type "}"             (* map *)
+              | "fn" "(" [ type { "," type } ] ")" [ "->" type ]
+              | "*" type                          (* raw pointer; extern only *)
+              | "?" type                          (* optional = T | nil *)
+              | "!" type                          (* result = Ok(T) | Err *)
+              | ident ;                           (* user-defined *)
+
+prim_type     = "i8" | "i16" | "i32" | "i64"
+              | "u8" | "u16" | "u32" | "u64"
+              | "f32" | "f64"
+              | "bool" | "str" ;
+
+ident         = letter { letter | digit | "_" } ;
+letter        = "a".."z" | "A".."Z" | "_" ;
+digit         = "0".."9" ;
+
+(* Keywords reserved: fn if el lp rt mt st tr im ex mu br ct true false nil as in _ *)

@@ -1,0 +1,6 @@
+// 100k string concatenations — exercises Boehm GC.
+mu acc := "x"
+lp i in 1..100001 {
+  acc = acc + "y"
+}
+println(len(acc))

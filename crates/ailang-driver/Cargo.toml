@@ -1,0 +1,17 @@
+[package]
+name        = "ailang-driver"
+version     = { workspace = true }
+edition     = { workspace = true }
+rust-version = { workspace = true }
+license     = { workspace = true }
+
+[dependencies]
+ailang-syntax       = { workspace = true }
+ailang-lexer        = { workspace = true }
+ailang-parser       = { workspace = true }
+ailang-diag         = { workspace = true }
+ailang-sema         = { workspace = true }
+ailang-hir          = { workspace = true }
+ailang-codegen-llvm = { workspace = true }
+ailang-codegen-ir   = { workspace = true }
+thiserror           = { workspace = true }

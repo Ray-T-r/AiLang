@@ -1,0 +1,16 @@
+// Maps — open-addressing hash table, M4+.
+// Reference value (mutation through the same binding persists).
+
+m := {1: 10, 2: 20, 3: 30}
+println(len(m))         // 3
+println(m[2])           // 20
+println(m[99])          // 0 (missing → zero)
+
+m[4] = 40
+m[2] = 200
+println(m[4])           // 40
+println(m[2])           // 200
+println(len(m))         // 4
+
+println(has(m, 4))      // true
+println(has(m, 99))     // false

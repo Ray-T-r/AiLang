@@ -1,0 +1,41 @@
+// Comprehensive token coverage test — exercises every TokenKind.
+/* multi-line
+   block comment with * and / inside */
+
+ex "c" fn printf(fmt:*u8, ...) -> i32
+
+st Point {
+  x : f64;
+  y : f64;
+}
+
+fn add(a:i64, b:i64) -> i64 a + b
+
+fn main() {
+  mu count := 0
+  lp i in 1..=10 {
+    if i % 2 == 0 && i > 0 {
+      count = count + 1
+    } el {
+      ct
+    }
+  }
+
+  flag : bool = true
+  name : str  = "hello\n"
+  ch          = 'x'
+  pi          = 3.14
+  big         = 100_u64
+  maybe : ?i64 = nil
+  v           = maybe ?? -1
+
+  arr : [i64]   = [1, 2, 3]
+  m   : {str:i64} = {"a": 1, "b": 2}
+  pipe = arr |> add(_, 10)
+  cond = flag ? "yes" : "no"
+
+  mt count {
+    0 => println("zero");
+    _ => println(count);
+  }
+}

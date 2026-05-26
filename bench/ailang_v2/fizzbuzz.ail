@@ -1,0 +1,6 @@
+lp i in 1..16 {
+  if i%15 == 0 println("FizzBuzz")
+  el if i%3 == 0 println("Fizz")
+  el if i%5 == 0 println("Buzz")
+  el println(i)
+}

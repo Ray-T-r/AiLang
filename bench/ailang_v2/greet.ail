@@ -1,0 +1,3 @@
+fn greet(name:str) "Hello, " + name + "!"
+
+println(greet("AiLang"))
