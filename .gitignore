@@ -1,8 +1,9 @@
 # ---- Rust / build ----
 /target
-Cargo.lock
 **/*.rs.bk
 *.pdb
+# Cargo.lock is committed — this is a binary crate (`ailangc`), so locking
+# dependency versions for contributors and CI is the right default.
 
 # ---- Local-only (not shared via git) ----
 CLAUDE.md

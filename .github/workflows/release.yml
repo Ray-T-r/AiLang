@@ -1,0 +1,86 @@
+name: Release
+
+# Builds per-platform `ailangc` binaries and uploads them to the GitHub
+# Release matching the pushed tag (e.g. `v0.1.0`). Tag your release on
+# main; this workflow handles the rest. Re-runnable: assets are
+# overwritten on re-upload.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # softprops/action-gh-release uploads need this
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest        # arm64 Apple Silicon runners
+            target: aarch64-apple-darwin
+            asset: ailangc-macos-aarch64
+          - os: macos-13            # Intel runners
+            target: x86_64-apple-darwin
+            asset: ailangc-macos-x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: ailangc-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: ailangc-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build ailangc
+        run: cargo build --release --target ${{ matrix.target }} -p ailangc
+
+      - name: Stage asset
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "target/${{ matrix.target }}/release/ailangc.exe" "${{ matrix.asset }}"
+          else
+            cp "target/${{ matrix.target }}/release/ailangc" "${{ matrix.asset }}"
+            chmod +x "${{ matrix.asset }}"
+          fi
+          ls -lh "${{ matrix.asset }}"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+          fail_on_unmatched_files: true
+
+  # Installer scripts and the Claude skill don't depend on platform —
+  # upload them once after the binaries are in place.
+  upload-scripts:
+    name: install scripts + skill
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            install.sh
+            install.ps1
+            skill/SKILL.md
+          fail_on_unmatched_files: true
