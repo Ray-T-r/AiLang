@@ -6,6 +6,8 @@ All notable changes are documented here. Loosely follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-27
+
 Major language + stdlib expansion. **55 automated tests pass; 25 end-to-end
 example programs compile and run correctly.**
 
@@ -102,5 +104,6 @@ pass and 12 end-to-end example programs compile and run correctly**.
   + x86_64, Linux x86_64, Windows x86_64) on `v*.*.*` tag push starting
   with the next release
 
-[Unreleased]: https://github.com/Ray-T-r/AiLang/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Ray-T-r/AiLang/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Ray-T-r/AiLang/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ray-T-r/AiLang/releases/tag/v0.1.0
