@@ -1,0 +1,29 @@
+// Implicit return when a fn body ends in if/match — no explicit `rt`.
+
+fn classify(n) {
+  if n < 0 "negative"
+  el if n == 0 "zero"
+  el "positive"
+}
+
+println(classify(-5))         // negative
+println(classify(0))          // zero
+println(classify(42))         // positive
+
+fn label(n) {
+  mt n {
+    0 => "zero";
+    1 => "one";
+    _ => "many";
+  }
+}
+
+println(label(0))
+println(label(1))
+println(label(99))
+
+// Capturing closures returning a string also work.
+greeting := "hello, "
+greet := fn(name:str) greeting + name + "!"
+println(greet("alice"))
+println(greet("bob"))

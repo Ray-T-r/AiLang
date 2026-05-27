@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
         use TokenKind::*;
         loop {
             match self.peek_kind() {
-                Eof | KwFn | KwSt | KwEx | KwIm | KwTr => break,
+                Eof | KwFn | KwSt | KwEn | KwEx | KwIm | KwTr => break,
                 _ => {
                     self.bump();
                 }
@@ -143,7 +143,7 @@ impl Parser<'_> {
             // 1) Item keyword? Parse it as an item.
             if matches!(
                 self.peek_kind(),
-                TokenKind::KwFn | TokenKind::KwSt | TokenKind::KwIm | TokenKind::KwEx
+                TokenKind::KwFn | TokenKind::KwSt | TokenKind::KwEn | TokenKind::KwIm | TokenKind::KwEx
             ) {
                 if let Some(item) = self.parse_item() {
                     items.push(item);
@@ -240,10 +240,41 @@ impl Parser<'_> {
         match self.peek_kind() {
             TokenKind::KwFn => self.parse_fn_item().map(Item::Fn),
             TokenKind::KwSt => self.parse_struct_item().map(Item::Struct),
+            TokenKind::KwEn => self.parse_enum_item().map(Item::Enum),
             TokenKind::KwIm => self.parse_import_item().map(Item::Import),
             TokenKind::KwEx => self.parse_extern_item().map(Item::Extern),
             _ => None,
         }
+    }
+
+    /// `en Name { Variant, Variant(field:T), … }`. Trailing commas/semis
+    /// are fine; field type annotations are required (no inference yet).
+    fn parse_enum_item(&mut self) -> Option<EnumDecl> {
+        let start = self.peek().span;
+        self.expect(TokenKind::KwEn)?;
+        let name = self.parse_ident()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut variants = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let v_name = self.parse_ident()?;
+            let mut fields = Vec::new();
+            let mut v_end = v_name.span;
+            if self.eat(TokenKind::LParen) {
+                while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
+                    let fname = self.parse_ident()?;
+                    self.expect(TokenKind::Colon)?;
+                    let ty = self.parse_type()?;
+                    let end = ty.span;
+                    fields.push(Field { span: fname.span.join(end), name: fname, ty });
+                    if !self.eat(TokenKind::Comma) { break; }
+                }
+                v_end = self.expect(TokenKind::RParen)?.span;
+            }
+            variants.push(EnumVariant { span: v_name.span.join(v_end), name: v_name, fields });
+            if !self.eat(TokenKind::Comma) && !self.eat(TokenKind::Semi) { break; }
+        }
+        let end = self.expect(TokenKind::RBrace)?.span;
+        Some(EnumDecl { name, variants, span: start.join(end) })
     }
 
     fn parse_fn_item(&mut self) -> Option<FnDecl> {
@@ -306,9 +337,15 @@ impl Parser<'_> {
             let fname = self.parse_ident()?;
             self.expect(TokenKind::Colon)?;
             let ty = self.parse_type()?;
-            let semi = self.expect(TokenKind::Semi).map(|t| t.span).unwrap_or(ty.span);
+            // Accept either `;` or `,` as separators; both are optional
+            // before the closing `}`.
+            let end = if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
+                self.bump().span
+            } else {
+                ty.span
+            };
             fields.push(Field {
-                span: fname.span.join(semi),
+                span: fname.span.join(end),
                 name: fname,
                 ty,
             });
@@ -389,6 +426,11 @@ impl Parser<'_> {
                 variadic = true;
                 break;
             }
+            // Optional `mu` prefix marks the param as locally mutable.
+            // C already passes by value, so we just discard the marker —
+            // it's a parser-level affordance to skip the `mu x := x` dance
+            // at the top of a body that wants to mutate its parameter.
+            let start = if self.at(TokenKind::KwMu) { self.bump().span } else { self.peek().span };
             let name = self.parse_ident()?;
             let mut ty = None;
             let mut end = name.span;
@@ -398,7 +440,7 @@ impl Parser<'_> {
                 ty = Some(t);
             }
             params.push(Param {
-                span: name.span.join(end),
+                span: start.join(end),
                 name,
                 ty,
             });
@@ -638,46 +680,63 @@ impl Parser<'_> {
 
     /// `if`/`el`/`lp` bodies may be a block `{...}` or a single statement.
     /// Wrap a single stmt in a synthetic block to keep downstream uniform.
+    /// If the single body is a tail expression (not a real statement),
+    /// preserve it as the block's `tail_expr` so codegen can recognize
+    /// implicit return when the if/match is in a value-yielding position.
     fn parse_block_or_single_stmt(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
         let start = self.peek().span;
-        let stmt = match self.parse_stmt_or_tail()? {
-            StmtOrTail::Stmt(s) => s,
-            StmtOrTail::TailExpr(e) => Stmt::Expr(e),
-        };
-        let span = match &stmt {
-            Stmt::Decl { span, .. }
-            | Stmt::Assign { span, .. }
-            | Stmt::Return { span, .. }
-            | Stmt::Break(span)
-            | Stmt::Continue(span) => *span,
-            Stmt::If(s) => s.span,
-            Stmt::Loop(s) => s.span,
-            Stmt::Match(s) => s.span,
-            Stmt::Expr(e) => e.span,
-        };
-        Some(Block {
-            stmts: vec![stmt],
-            tail_expr: None,
-            span: start.join(span),
-        })
+        match self.parse_stmt_or_tail()? {
+            StmtOrTail::Stmt(stmt) => {
+                let span = match &stmt {
+                    Stmt::Decl { span, .. }
+                    | Stmt::Assign { span, .. }
+                    | Stmt::Return { span, .. }
+                    | Stmt::Break(span)
+                    | Stmt::Continue(span) => *span,
+                    Stmt::If(s) => s.span,
+                    Stmt::Loop(s) => s.span,
+                    Stmt::Match(s) => s.span,
+                    Stmt::Expr(e) => e.span,
+                };
+                Some(Block { stmts: vec![stmt], tail_expr: None, span: start.join(span) })
+            }
+            StmtOrTail::TailExpr(e) => {
+                let span = e.span;
+                Some(Block { stmts: vec![], tail_expr: Some(Box::new(e)), span: start.join(span) })
+            }
+        }
     }
 
     fn parse_loop(&mut self) -> Option<LoopStmt> {
         let start = self.expect(TokenKind::KwLp)?.span;
-        // Three shapes:
-        //   lp { ... }                 -> infinite
-        //   lp ident in expr { ... }   -> for-in
-        //   lp expr { ... }            -> while
+        // Four shapes:
+        //   lp { ... }                       -> infinite
+        //   lp ident in expr { ... }         -> for-in (single var)
+        //   lp (k, v) in expr { ... }        -> for-in with tuple destructure
+        //                                       (intended for map iteration)
+        //   lp expr { ... }                  -> while
         let head = if self.at(TokenKind::LBrace) {
             None
         } else if self.at(TokenKind::Ident) && self.peek_ahead(1) == TokenKind::KwIn {
             let var = self.parse_ident()?;
             self.expect(TokenKind::KwIn)?;
             let iter = self.parse_expr()?;
-            Some(LoopHead::ForIn { var, iter })
+            Some(LoopHead::ForIn { vars: vec![var], iter })
+        } else if self.at(TokenKind::LParen) && self.peek_ahead(1) == TokenKind::Ident {
+            // Tuple destructure: `(k, v, …)`. Only valid when followed by `in`.
+            self.bump(); // (
+            let mut vars = Vec::new();
+            while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
+                vars.push(self.parse_ident()?);
+                if !self.eat(TokenKind::Comma) { break; }
+            }
+            self.expect(TokenKind::RParen)?;
+            self.expect(TokenKind::KwIn)?;
+            let iter = self.parse_expr()?;
+            Some(LoopHead::ForIn { vars, iter })
         } else {
             let e = self.parse_expr()?;
             Some(LoopHead::While(e))
@@ -729,7 +788,32 @@ impl Parser<'_> {
             }
             Ident => {
                 let id = self.parse_ident()?;
-                Some(Pattern::Binding(id))
+                // Capitalized + `(` → variant pattern that binds positional
+                // fields (`Some(v)`). Bare capitalized → unit variant
+                // (`None`). Lowercase → plain binding.
+                let starts_upper = id.name.chars().next().map_or(false, |c| c.is_ascii_uppercase());
+                if starts_upper {
+                    let mut bindings = Vec::new();
+                    let mut end = id.span;
+                    if self.at(LParen) {
+                        self.bump();
+                        while !self.at(RParen) && !self.at(Eof) {
+                            if self.at(Underscore) {
+                                bindings.push(ailang_syntax::ast::Ident {
+                                    name: "_".to_string(), span: self.bump().span,
+                                });
+                            } else {
+                                bindings.push(self.parse_ident()?);
+                            }
+                            if !self.eat(Comma) { break; }
+                        }
+                        end = self.expect(RParen)?.span;
+                    }
+                    let id_span = id.span;
+                    Some(Pattern::Variant { name: id, bindings, span: id_span.join(end) })
+                } else {
+                    Some(Pattern::Binding(id))
+                }
             }
             LParen => {
                 let start = self.bump().span;
@@ -756,11 +840,12 @@ impl Parser<'_> {
 
 fn pattern_span(p: &Pattern) -> Span {
     match p {
-        Pattern::Wildcard(s) | Pattern::Tuple { span: s, .. } => *s,
+        Pattern::Wildcard(s) | Pattern::Tuple { span: s, .. } | Pattern::Variant { span: s, .. } => *s,
         Pattern::Literal(l) => l.span,
         Pattern::Binding(i) => i.span,
     }
 }
+
 
 fn stmt_span(s: &Stmt) -> Span {
     match s {

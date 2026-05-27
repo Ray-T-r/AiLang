@@ -1,0 +1,19 @@
+// json_demo — parse flat JSON objects using the pure-AiLang stdlib.
+
+im "std/json.ail"
+
+cfg := parse_flat_obj_str("{\"name\": \"alice\", \"role\": \"admin\", \"team\": \"core\"}")
+println(cfg["name"])              // alice
+println(cfg["role"])              // admin
+println(cfg["team"])              // core
+println(has(cfg, "name"))         // true
+println(has(cfg, "missing"))      // false
+
+counts := parse_flat_obj_int("{\"hits\": 42, \"errors\": 0, \"warnings\": 7}")
+mu total := 0
+lp k in keys(counts) {
+  if k != "_" total = total + counts[k]
+}
+println(total)                    // 49
+
+println(len(cfg))                 // 4 (3 user keys + the "_" pin)

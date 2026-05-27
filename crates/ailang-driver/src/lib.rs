@@ -309,6 +309,9 @@ fn invoke_c_compiler(
             cmd.arg(format!("-L{prefix}/lib"));
         }
         cmd.arg("-lgc");
+        // libm is universally available and harmless to link unconditionally;
+        // `std/math.ail` declares sqrt/sin/cos/log/exp/... as externs.
+        cmd.arg("-lm");
     }
 
     for extra in &opts.extra_cc_args {

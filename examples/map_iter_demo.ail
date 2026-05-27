@@ -1,0 +1,20 @@
+// Iterate over map entries via keys() / values().
+
+scores := {"alice": 90, "bob": 75, "carol": 88}
+
+mu total := 0
+lp k in keys(scores) {
+  total = total + scores[k]
+}
+println(total)              // 253
+
+// Sum via reduce on values().
+sum := reduce(values(scores), 0, fn(a, b) a + b)
+println(sum)                // 253
+
+// Filter keys to "names with the letter a".
+mu with_a := 0
+lp k in keys(scores) {
+  if contains(k, "a") with_a = with_a + 1
+}
+println(with_a)             // 2 (alice + carol)

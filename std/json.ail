@@ -1,0 +1,160 @@
+// std/json.ail — minimal JSON parsers for flat objects.
+//
+// Two entry points:
+//
+//   parse_flat_obj_str(text) -> {str:str}
+//     For `{"k": "v", ...}` where all values are JSON strings.
+//
+//   parse_flat_obj_int(text) -> {str:i64}
+//     For `{"k": 123, ...}` where all values are JSON integers.
+//
+// Flat-only — nested objects/arrays aren't supported. The language
+// doesn't yet have sum types, so a fully general JSON parser would need
+// a struct-with-tag representation; that lands later. Whitespace is
+// skipped, but `\uXXXX` Unicode escapes aren't decoded.
+
+// -- internal helpers ---------------------------------------------------
+
+fn _is_space(c) {
+  if c == 32 rt 1            // ' '
+  if c == 9  rt 1            // '\t'
+  if c == 10 rt 1            // '\n'
+  if c == 13 rt 1            // '\r'
+  0
+}
+
+fn _skip_ws(s:str, start) {
+  mu i := start
+  lp i < len(s) {
+    c := s[i]
+    if _is_space(c) == 0 rt i
+    i = i + 1
+  }
+  i
+}
+
+// Position of the closing `"` for the JSON string that starts at `start`
+// (which must point at the opening `"`). Returns len(s) if unterminated.
+fn _str_end_pos(s:str, start) {
+  mu i := start + 1
+  lp i < len(s) {
+    c := s[i]
+    if c == 34 rt i              // closing '"'
+    if c == 92 {                  // backslash: skip next char
+      i = i + 2
+    } el {
+      i = i + 1
+    }
+  }
+  i
+}
+
+fn _decode_str(s:str, content_start, end_quote) -> str {
+  mu out := ""
+  mu i := content_start
+  lp i < end_quote {
+    c := s[i]
+    if c == 92 && i + 1 < end_quote {
+      n := s[i + 1]
+      if n == 110 { out = out + "\n"; i = i + 2 }
+      el if n == 116 { out = out + "\t"; i = i + 2 }
+      el if n == 114 { out = out + "\r"; i = i + 2 }
+      el if n == 34  { out = out + "\""; i = i + 2 }
+      el if n == 92  { out = out + "\\"; i = i + 2 }
+      el if n == 47  { out = out + "/";  i = i + 2 }
+      el { out = out + substring(s, i, i + 1); i = i + 1 }
+    } el {
+      out = out + substring(s, i, i + 1)
+      i = i + 1
+    }
+  }
+  out
+}
+
+// Returns the end position of an integer starting at `start`. The caller
+// uses substring(s, start, end) + str_to_int to get the value.
+fn _int_end_pos(s:str, start) {
+  mu i := start
+  if i < len(s) && (s[i] == 45 || s[i] == 43) i = i + 1
+  lp i < len(s) {
+    c := s[i]
+    if c >= 48 && c <= 57 i = i + 1
+    el rt i
+  }
+  i
+}
+
+// -- public: {str:str} flat object parser -------------------------------
+
+fn parse_flat_obj_str(text:str) -> {str:str} {
+  mu out := {"_": "_"}      // type-pin so codegen picks {str:str}
+  out["_"] = ""             // keep the pin slot occupied
+  mu i := _skip_ws(text, 0)
+  if i >= len(text) || text[i] != 123 rt out
+  i = i + 1
+
+  lp i < len(text) {
+    i = _skip_ws(text, i)
+    if i >= len(text) rt out
+    if text[i] == 125 rt out
+    if text[i] != 34 rt out
+
+    key_end := _str_end_pos(text, i)
+    key := _decode_str(text, i + 1, key_end)
+    i = key_end + 1
+
+    i = _skip_ws(text, i)
+    if i >= len(text) || text[i] != 58 rt out
+    i = i + 1
+
+    i = _skip_ws(text, i)
+    if i >= len(text) || text[i] != 34 rt out
+    val_end := _str_end_pos(text, i)
+    val := _decode_str(text, i + 1, val_end)
+    i = val_end + 1
+
+    out[key] = val
+
+    i = _skip_ws(text, i)
+    if i < len(text) && text[i] == 44 i = i + 1
+  }
+  out
+}
+
+// -- public: {str:i64} flat object parser -------------------------------
+
+fn parse_flat_obj_int(text:str) -> {str:i64} {
+  mu out := {"_": 0_i64}
+  out["_"] = 0
+  mu i := _skip_ws(text, 0)
+  if i >= len(text) || text[i] != 123 rt out
+  i = i + 1
+
+  lp i < len(text) {
+    i = _skip_ws(text, i)
+    if i >= len(text) rt out
+    if text[i] == 125 rt out
+    if text[i] != 34 rt out
+
+    key_end := _str_end_pos(text, i)
+    key := _decode_str(text, i + 1, key_end)
+    i = key_end + 1
+
+    i = _skip_ws(text, i)
+    if i >= len(text) || text[i] != 58 rt out
+    i = i + 1
+
+    i = _skip_ws(text, i)
+    val_start := i
+    val_end := _int_end_pos(text, i)
+    if val_end == val_start rt out
+    val := str_to_int(substring(text, val_start, val_end))
+    i = val_end
+
+    out[key] = val
+
+    i = _skip_ws(text, i)
+    if i < len(text) && text[i] == 44 i = i + 1
+  }
+  out
+}

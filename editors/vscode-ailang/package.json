@@ -1,0 +1,76 @@
+{
+  "name": "vscode-ailang",
+  "displayName": "AiLang",
+  "description": "Syntax highlighting and diagnostics for the AiLang programming language (.ail).",
+  "version": "0.2.0",
+  "publisher": "ailang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "ailang",
+    "ail",
+    "syntax"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:ailang"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "ailang",
+        "aliases": [
+          "AiLang",
+          "ailang"
+        ],
+        "extensions": [
+          ".ail"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/ailang.svg",
+          "dark": "./icons/ailang.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ailang",
+        "scopeName": "source.ailang",
+        "path": "./syntaxes/ailang.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "AiLang",
+      "properties": {
+        "ailang.compilerPath": {
+          "type": "string",
+          "default": "ailangc",
+          "description": "Path to the AiLang compiler. Use an absolute path if `ailangc` is not on $PATH."
+        },
+        "ailang.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `ailangc` on save/open and show error & warning squiggles."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[ailang]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      },
+      "code-runner.executorMap": {
+        "ailang": "ailangc run $fullFileName"
+      },
+      "code-runner.executorMapByFileExtension": {
+        ".ail": "ailangc run $fullFileName"
+      }
+    }
+  }
+}

@@ -20,7 +20,7 @@ use ailang_diag::Diagnostic;
 use ailang_syntax::ast::*;
 use ailang_syntax::token::Span;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Ty {
     Unit,
     I64,
@@ -33,6 +33,12 @@ pub enum Ty {
     /// Map `{K:V}`. M4+ ships only `{i64:i64}`; other instantiations are
     /// follow-up work.
     Map(Box<Ty>, Box<Ty>),
+    /// User-defined struct, identified by name. Field types live in
+    /// `ResolvedModule.struct_table`.
+    Struct(String),
+    /// `!T` — result-like wrapper. Codegen lowers to `ailang_result_<T>`
+    /// (one C struct per primitive T). `?` postfix propagates.
+    Result(Box<Ty>),
     /// Catch-all when we can't determine more precisely. Codegen falls back
     /// to `int64_t` and prints a warning.
     Unknown,
@@ -57,14 +63,21 @@ pub struct ResolvedModule {
     /// Side table: an expression's `Span` → its inferred `Ty`. Keyed by the
     /// full span (start + end) so an outer expression and its first child
     /// — which share `span.start` — don't collide.
-    /// Populated by the body-checking pass. Codegen consults this to decide
-    /// e.g. whether `lp x in arr` should treat `arr` as `[i64]` or `[str]`.
     pub expr_types: HashMap<Span, Ty>,
+    /// User struct decls indexed by name.
+    pub struct_table: HashMap<String, StructDecl>,
+    /// User enum (ADT) decls indexed by name.
+    pub enum_table: HashMap<String, EnumDecl>,
+    /// Variant name → enum name. Lets codegen recognize bare `Some(x)` /
+    /// `None` as constructor calls instead of plain idents/calls.
+    pub variant_to_enum: HashMap<String, String>,
 }
 
 pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut fn_table: HashMap<String, FnSigResolved> = HashMap::new();
+    let mut struct_table: HashMap<String, StructDecl> = HashMap::new();
+    let mut enum_table: HashMap<String, EnumDecl> = HashMap::new();
 
     // Built-in functions — registered before user code so user can call them
     // and so codegen knows their signatures.
@@ -111,8 +124,14 @@ pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
                 };
                 fn_table.insert(e.sig.name.name.clone(), sig);
             }
-            Item::Struct(_) | Item::Import(_) => {
-                // Structs/imports not wired through M2; ignore for now.
+            Item::Struct(s) => {
+                struct_table.insert(s.name.name.clone(), s.clone());
+            }
+            Item::Enum(e) => {
+                enum_table.insert(e.name.name.clone(), e.clone());
+            }
+            Item::Import(_) => {
+                // Imports are resolved by the driver pre-sema; ignore here.
             }
         }
     }
@@ -140,10 +159,18 @@ pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
     // Pass 2: name-resolve every function body. We also harvest per-expression
     // inferred types so codegen can ask "what's the type of this identifier?"
     // for cases the AST shape alone can't decide (e.g. `lp x in arr`).
+    // Build the variant lookup early so the per-fn env can reference it.
+    let mut variant_lookup: HashMap<String, String> = HashMap::new();
+    for (en_name, en) in &enum_table {
+        for v in &en.variants {
+            variant_lookup.insert(v.name.name.clone(), en_name.clone());
+        }
+    }
+
     let mut expr_types: HashMap<Span, Ty> = HashMap::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
-            let mut env = LocalEnv::new();
+            let mut env = LocalEnv::new(&struct_table, &variant_lookup);
             for p in &f.params {
                 env.insert(p.name.name.clone(), ast_ty_to_ty(p.ty.as_ref()));
             }
@@ -160,7 +187,10 @@ pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
         ));
     }
 
-    (ResolvedModule { module, fn_table, expr_types }, diags)
+    (ResolvedModule {
+        module, fn_table, expr_types, struct_table, enum_table,
+        variant_to_enum: variant_lookup,
+    }, diags)
 }
 
 fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
@@ -206,18 +236,127 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
             span: Span::empty(),
         },
     );
+
+    // I/O + string conversion builtins (resolved to C helpers baked into
+    // the prelude). All string results are GC-allocated.
+    let io_builtins: &[(&str, &[(&str, Ty)], Ty)] = &[
+        ("read_file",  &[("path", Ty::Str)],                   Ty::Str),
+        ("write_file", &[("path", Ty::Str), ("contents", Ty::Str)], Ty::Bool),
+        ("read_line",  &[],                                    Ty::Str),
+        ("int_to_str", &[("n", Ty::I64)],                      Ty::Str),
+        ("str_to_int", &[("s", Ty::Str)],                      Ty::I64),
+        ("args",       &[],                                    Ty::Array(Box::new(Ty::Str))),
+        ("exit",       &[("code", Ty::I64)],                   Ty::Unit),
+        // push/pop are polymorphic over array element type. Sema records
+        // them as Unknown → codegen reads expr_types on the first arg to
+        // decide the C call (ailang_arr_i64_push vs ailang_arr_str_push).
+        ("push",       &[("arr", Ty::Unknown), ("x", Ty::Unknown)], Ty::Unknown),
+        ("pop",        &[("arr", Ty::Unknown)],                Ty::Unknown),
+        // String operations — byte-oriented (not Unicode-aware).
+        // `contains` and `index_of` are polymorphic (str / [i64] / [str]);
+        // sema keeps loose Unknown params and codegen dispatches per-arg.
+        ("contains",   &[("haystack", Ty::Unknown), ("needle", Ty::Unknown)], Ty::Bool),
+        ("starts_with",&[("s", Ty::Str), ("prefix", Ty::Str)], Ty::Bool),
+        ("ends_with",  &[("s", Ty::Str), ("suffix", Ty::Str)], Ty::Bool),
+        ("index_of",   &[("haystack", Ty::Unknown), ("needle", Ty::Unknown)], Ty::I64),
+        ("to_upper",   &[("s", Ty::Str)],                      Ty::Str),
+        ("to_lower",   &[("s", Ty::Str)],                      Ty::Str),
+        ("trim",       &[("s", Ty::Str)],                      Ty::Str),
+        ("substring",  &[("s", Ty::Str), ("start", Ty::I64), ("end", Ty::I64)], Ty::Str),
+        ("replace",    &[("s", Ty::Str), ("old", Ty::Str), ("new", Ty::Str)], Ty::Str),
+        ("split",      &[("s", Ty::Str), ("sep", Ty::Str)],    Ty::Array(Box::new(Ty::Str))),
+        // Float ↔ str conversions.
+        ("float_to_str", &[("x", Ty::F64)],                    Ty::Str),
+        ("str_to_float", &[("s", Ty::Str)],                    Ty::F64),
+        ("get_env",      &[("name", Ty::Str)],                 Ty::Str),
+        // POSIX regex (extended), libc-backed.
+        ("regex_match",  &[("pat", Ty::Str), ("text", Ty::Str)], Ty::Bool),
+        ("regex_find",   &[("pat", Ty::Str), ("text", Ty::Str)], Ty::Str),
+        // Higher-order: codegen reads first-arg type to dispatch; sema
+        // returns Unknown and trusts user code on element shape.
+        ("map",          &[("arr", Ty::Unknown), ("f", Ty::Unknown)], Ty::Unknown),
+        ("filter",       &[("arr", Ty::Unknown), ("p", Ty::Unknown)], Ty::Unknown),
+        ("reduce",       &[("arr", Ty::Unknown), ("init", Ty::Unknown), ("f", Ty::Unknown)], Ty::Unknown),
+        // Map introspection — return arrays of keys/values. Codegen reads
+        // expr_types of the map arg to pick the right element shape.
+        ("keys",         &[("m", Ty::Unknown)], Ty::Unknown),
+        ("values",       &[("m", Ty::Unknown)], Ty::Unknown),
+        // Array helpers — sort/reverse return same array type as arg.
+        ("sort",         &[("arr", Ty::Unknown)], Ty::Unknown),
+        ("reverse",      &[("arr", Ty::Unknown)], Ty::Unknown),
+        // i64-only abs to complement libc abs (which is i32).
+        ("abs_i64",      &[("n", Ty::I64)], Ty::I64),
+        // !T result-type builtins. `ok` is polymorphic via _Generic;
+        // `err_T` are explicit per-T because the return type isn't
+        // recoverable from a `str` argument alone.
+        ("ok",       &[("v", Ty::Unknown)], Ty::Unknown),
+        ("err_i64",  &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::I64))),
+        ("err_str",  &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::Str))),
+        ("err_bool", &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::Bool))),
+        ("err_f64",  &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::F64))),
+        ("unwrap",   &[("r", Ty::Unknown)], Ty::Unknown),
+        ("is_ok",    &[("r", Ty::Unknown)], Ty::Bool),
+        ("is_err",   &[("r", Ty::Unknown)], Ty::Bool),
+        ("err_msg",  &[("r", Ty::Unknown)], Ty::Str),
+        // slice/join return same array type / str — codegen infers element.
+        ("slice",        &[("arr", Ty::Unknown), ("start", Ty::I64), ("end", Ty::I64)], Ty::Unknown),
+        ("join",         &[("arr", Ty::Unknown), ("sep", Ty::Str)], Ty::Str),
+        // String builders.
+        ("repeat",       &[("s", Ty::Str), ("n", Ty::I64)], Ty::Str),
+        ("pad_left",     &[("s", Ty::Str), ("width", Ty::I64), ("pad", Ty::Str)], Ty::Str),
+        ("pad_right",    &[("s", Ty::Str), ("width", Ty::I64), ("pad", Ty::Str)], Ty::Str),
+        // Char ↔ int.
+        ("chr",          &[("i", Ty::I64)], Ty::Str),
+        ("ord",          &[("s", Ty::Str)], Ty::I64),
+        // More numeric helpers.
+        ("str_to_bool",  &[("s", Ty::Str)], Ty::Bool),
+        ("abs_f64",      &[("x", Ty::F64)], Ty::F64),
+        ("sign",         &[("n", Ty::I64)], Ty::I64),
+        ("clamp",        &[("n", Ty::I64), ("lo", Ty::I64), ("hi", Ty::I64)], Ty::I64),
+    ];
+
+    // `format(fmt, ...)` — variadic printf-style. Sema doesn't check arg
+    // count/types; caller is responsible for matching format directives.
+    fn_table.insert(
+        "format".to_string(),
+        FnSigResolved {
+            name: "format".to_string(),
+            params: vec![("fmt".to_string(), Ty::Str)],
+            variadic: true,
+            return_ty: Ty::Str,
+            is_extern: false,
+            extern_lib: None,
+            span: Span::empty(),
+        },
+    );
+    for (name, params, ret) in io_builtins {
+        fn_table.insert(
+            name.to_string(),
+            FnSigResolved {
+                name: name.to_string(),
+                params: params.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
+                variadic: false,
+                return_ty: ret.clone(),
+                is_extern: false,
+                extern_lib: None,
+                span: Span::empty(),
+            },
+        );
+    }
 }
 
-struct LocalEnv {
+struct LocalEnv<'a> {
     scopes: Vec<HashMap<String, Ty>>,
-    /// Per-expression inferred type, collected as we walk the function body.
-    /// Merged into `ResolvedModule.expr_types` after each function checks.
     expr_types: HashMap<Span, Ty>,
+    structs: &'a HashMap<String, StructDecl>,
+    /// Variant name → enum name (so sema lets `Some(42)` and `None`
+    /// through without "undefined name" errors).
+    variants: &'a HashMap<String, String>,
 }
 
-impl LocalEnv {
-    fn new() -> Self {
-        Self { scopes: vec![HashMap::new()], expr_types: HashMap::new() }
+impl<'a> LocalEnv<'a> {
+    fn new(structs: &'a HashMap<String, StructDecl>, variants: &'a HashMap<String, String>) -> Self {
+        Self { scopes: vec![HashMap::new()], expr_types: HashMap::new(), structs, variants }
     }
     fn push(&mut self) {
         self.scopes.push(HashMap::new());
@@ -306,10 +445,23 @@ fn check_loop(
 ) {
     env.push();
     match &lp.head {
-        Some(LoopHead::ForIn { var, iter }) => {
-            check_expr(iter, fns, env, diags);
-            // Range elements are i64 (M2 supports only integer ranges).
-            env.insert(var.name.clone(), Ty::I64);
+        Some(LoopHead::ForIn { vars, iter }) => {
+            let iter_ty = check_expr(iter, fns, env, diags);
+            match (vars.len(), &iter_ty) {
+                // `lp (k, v) in m` — destructure map entries.
+                (2, Ty::Map(k, v)) => {
+                    env.insert(vars[0].name.clone(), (**k).clone());
+                    env.insert(vars[1].name.clone(), (**v).clone());
+                }
+                // `lp x in [a, b, c]` — element binding.
+                (1, Ty::Array(elem)) => {
+                    env.insert(vars[0].name.clone(), (**elem).clone());
+                }
+                // Range / unknown / mismatched → fall back to i64.
+                _ => {
+                    for v in vars { env.insert(v.name.clone(), Ty::I64); }
+                }
+            }
         }
         Some(LoopHead::While(cond)) => {
             check_expr(cond, fns, env, diags);
@@ -342,6 +494,13 @@ fn bind_pattern(p: &Pattern, env: &mut LocalEnv) {
         Pattern::Tuple { elems, .. } => {
             for e in elems {
                 bind_pattern(e, env);
+            }
+        }
+        Pattern::Variant { bindings, .. } => {
+            for b in bindings {
+                if b.name != "_" {
+                    env.insert(b.name.clone(), Ty::Unknown);
+                }
             }
         }
     }
@@ -377,7 +536,11 @@ fn check_expr_inner(
             if let Some(t) = env.lookup(name) {
                 t.clone()
             } else if fns.contains_key(name) {
-                Ty::Unknown // function references — value-level not used much
+                Ty::Unknown
+            } else if let Some(en_name) = env.variants.get(name) {
+                // Bare unit variant — e.g. `None`. The value type is the
+                // owning enum.
+                Ty::Struct(en_name.clone())
             } else {
                 diags.push(Diagnostic::error(
                     format!("undefined name `{name}`"),
@@ -388,24 +551,34 @@ fn check_expr_inner(
         }
         ExprKind::Underscore => Ty::Unknown,
         ExprKind::Call { callee, args } => {
-            // Only direct calls by name supported in M2.
-            let ExprKind::Ident(fname) = &callee.kind else {
-                diags.push(Diagnostic::error(
-                    "only direct calls `f(...)` are supported in this milestone",
-                    callee.span,
-                ));
-                for a in args { check_expr(a, fns, env, diags); }
-                return Ty::Unknown;
-            };
-            let sig = match fns.get(fname) {
+            // Direct calls `f(...)` look up `f` in the fn table. If `f` is
+            // instead a local var (e.g. a lambda bound by `add := fn(a,b) ...`)
+            // we fall through to a permissive indirect-call path: no arity
+            // check, return type `Unknown` — codegen still emits `f(args)`.
+            let fname = if let ExprKind::Ident(n) = &callee.kind { Some(n.as_str()) } else { None };
+            // Variant constructor call: `Some(42)` is not a fn but an
+            // enum constructor. Just check the args; the result type is
+            // the enclosing enum.
+            if let Some(n) = fname {
+                if let Some(en_name) = env.variants.get(n) {
+                    for a in args { check_expr(a, fns, env, diags); }
+                    return Ty::Struct(en_name.clone());
+                }
+            }
+            let sig = match fname.and_then(|n| fns.get(n)) {
                 Some(s) => s.clone(),
                 None => {
-                    diags.push(Diagnostic::error(
-                        format!("call to undefined function `{fname}`"),
-                        callee.span,
-                    ));
+                    let callee_ty = check_expr(callee, fns, env, diags);
+                    if let Some(n) = fname {
+                        if env.lookup(n).is_none() && callee_ty == Ty::Unknown {
+                            diags.push(Diagnostic::error(
+                                format!("call to undefined function `{n}`"),
+                                callee.span,
+                            ));
+                        }
+                    }
                     for a in args { check_expr(a, fns, env, diags); }
-                    return Ty::Unknown;
+                    return callee_ty;
                 }
             };
             // Arg count: variadic allows >=, otherwise ==.
@@ -415,9 +588,10 @@ fn check_expr_inner(
                 args.len() == sig.params.len()
             };
             if !ok {
+                let nm = fname.unwrap_or("?");
                 diags.push(Diagnostic::error(
                     format!(
-                        "wrong number of arguments to `{fname}`: expected {}{}, got {}",
+                        "wrong number of arguments to `{nm}`: expected {}{}, got {}",
                         sig.params.len(),
                         if sig.variadic { "+" } else { "" },
                         args.len(),
@@ -541,8 +715,19 @@ fn check_expr_inner(
                 _ => Ty::Unknown,
             }
         }
-        ExprKind::Field { container, .. } => {
-            check_expr(container, fns, env, diags);
+        ExprKind::Field { container, name } => {
+            let ct = check_expr(container, fns, env, diags);
+            if let Ty::Struct(sname) = ct {
+                if let Some(sd) = env.structs.get(&sname) {
+                    if let Some(f) = sd.fields.iter().find(|f| f.name.name == name.name) {
+                        return ast_ty_kind_to_ty(&f.ty);
+                    }
+                    diags.push(Diagnostic::error(
+                        format!("struct `{sname}` has no field `{}`", name.name),
+                        name.span,
+                    ));
+                }
+            }
             Ty::Unknown
         }
         ExprKind::If(if_) => {
@@ -590,12 +775,57 @@ fn check_expr_inner(
             }
             Ty::Unknown
         }
-        ExprKind::Lambda { .. } => {
-            diags.push(Diagnostic::error(
-                "lambdas are not supported in this milestone",
-                e.span,
-            ));
-            Ty::Unknown
+        ExprKind::Lambda { params, body } => {
+            // Walk the body with the lambda's params in scope and return
+            // its tail-expression type. This lets `f := fn(s:str) s + "!"`
+            // record `f`'s value type as Str, which the call-site dispatch
+            // uses to cast the closure_t.fn correctly.
+            env.push();
+            for p in params {
+                env.insert(p.name.name.clone(), ast_ty_to_ty(p.ty.as_ref()));
+            }
+            let ret_ty = match body {
+                LambdaBody::Expr(e) => check_expr(e, fns, env, diags),
+                LambdaBody::Block(b) => {
+                    check_block(b, fns, env, diags);
+                    if let Some(t) = &b.tail_expr {
+                        check_expr(t, fns, env, diags)
+                    } else {
+                        // Fallback: look at the last yielding stmt.
+                        match b.stmts.last() {
+                            Some(Stmt::Return { value: Some(e), .. }) => check_expr(e, fns, env, diags),
+                            _ => Ty::I64,
+                        }
+                    }
+                }
+            };
+            env.pop();
+            ret_ty
+        }
+        ExprKind::StructLit { name, fields } => {
+            // Sanity-check the struct exists and each field name is real.
+            if let Some(sd) = env.structs.get(&name.name) {
+                let known: std::collections::HashSet<_> =
+                    sd.fields.iter().map(|f| f.name.name.clone()).collect();
+                for (fname, fval) in fields {
+                    check_expr(fval, fns, env, diags);
+                    if !known.contains(&fname.name) {
+                        diags.push(Diagnostic::error(
+                            format!("struct `{}` has no field `{}`", name.name, fname.name),
+                            fname.span,
+                        ));
+                    }
+                }
+            } else {
+                diags.push(Diagnostic::error(
+                    format!("undefined struct `{}`", name.name),
+                    name.span,
+                ));
+                for (_, fval) in fields {
+                    check_expr(fval, fns, env, diags);
+                }
+            }
+            Ty::Struct(name.name.clone())
         }
         ExprKind::Try(inner) => {
             check_expr(inner, fns, env, diags);
@@ -654,6 +884,9 @@ fn stmt_yields_value(s: &Stmt, fn_table: &HashMap<String, FnSigResolved>) -> boo
                     None => false,
                 }
         }
+        // A `mt` with at least one arm whose body is a non-unit expression
+        // is treated as a value producer.
+        Stmt::Match(m) => m.arms.iter().any(|a| expr_yields_value(&a.body, fn_table)),
         Stmt::Loop(l) => fn_returns_value(&l.body, fn_table),
         _ => false,
     }
@@ -665,12 +898,15 @@ fn stmt_yields_value(s: &Stmt, fn_table: &HashMap<String, FnSigResolved>) -> boo
 /// computes a value.
 fn infer_fn_ret(f: &FnDecl, fn_table: &HashMap<String, FnSigResolved>) -> Ty {
     // Look at the body's tail expression (or trailing `rt expr`) and ask sema
-    // for its type using a param-aware local env.
-    let mut env = LocalEnv::new();
+    // for its type using a param-aware local env. Pass-1.5 runs before
+    // structs are needed for inference, so an empty table is safe here.
+    let empty_structs: HashMap<String, StructDecl> = HashMap::new();
+    let empty_variants: HashMap<String, String> = HashMap::new();
+    let mut env = LocalEnv::new(&empty_structs, &empty_variants);
     for p in &f.params {
         env.insert(p.name.name.clone(), ast_ty_to_ty(p.ty.as_ref()));
     }
-    let mut diags = Vec::new(); // discarded — we only want the ty
+    let mut diags = Vec::new();
     if let Some(t) = inferred_tail_ty(&f.body, fn_table, &mut env, &mut diags) {
         if matches!(t, Ty::Unit) { Ty::Unit } else { t }
     } else if fn_returns_value(&f.body, fn_table) {
@@ -686,15 +922,35 @@ fn inferred_tail_ty(
     env: &mut LocalEnv,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Ty> {
-    // We only look at the immediate tail; nested control flow stays I64.
     if let Some(t) = &b.tail_expr {
         let ty = check_expr(t, fn_table, env, diags);
         return Some(ty);
     }
-    // `rt expr` at the end of the body also tells us.
+    // `rt expr` or a value-yielding `if`/`mt` at the end also tells us.
     if let Some(last) = b.stmts.last() {
-        if let Stmt::Return { value: Some(e), .. } = last {
-            return Some(check_expr(e, fn_table, env, diags));
+        match last {
+            Stmt::Return { value: Some(e), .. } => {
+                return Some(check_expr(e, fn_table, env, diags));
+            }
+            Stmt::If(if_) => {
+                if let Some(t) = inferred_tail_ty(&if_.then_branch, fn_table, env, diags) {
+                    return Some(t);
+                }
+                if let Some(ElseBranch::Block(b)) = &if_.else_branch {
+                    if let Some(t) = inferred_tail_ty(b, fn_table, env, diags) {
+                        return Some(t);
+                    }
+                }
+            }
+            Stmt::Match(m) => {
+                for arm in &m.arms {
+                    let t = check_expr(&arm.body, fn_table, env, diags);
+                    if !matches!(t, Ty::Unit | Ty::Unknown) {
+                        return Some(t);
+                    }
+                }
+            }
+            _ => {}
         }
     }
     None
@@ -740,10 +996,14 @@ pub fn ast_ty_kind_to_ty(t: &Type) -> Ty {
             "f32" | "f64" => Ty::F64,
             "bool" => Ty::Bool,
             "str" => Ty::Str,
-            _ => Ty::Unknown,
+            // Any other path is assumed to name a user struct. Sema's
+            // struct_table is the authoritative source; codegen uses the
+            // name verbatim as the C type.
+            other => Ty::Struct(other.to_string()),
         },
         TypeKind::Array(inner) => Ty::Array(Box::new(ast_ty_kind_to_ty(inner))),
         TypeKind::Map(k, v) => Ty::Map(Box::new(ast_ty_kind_to_ty(k)), Box::new(ast_ty_kind_to_ty(v))),
+        TypeKind::Result(inner) => Ty::Result(Box::new(ast_ty_kind_to_ty(inner))),
         TypeKind::Ptr(_) => Ty::Unknown, // FFI pointers handled by codegen specially
         _ => Ty::Unknown,
     }

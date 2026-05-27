@@ -1,0 +1,26 @@
+// !T result type + ? propagation.
+
+fn parse_int_safe(s:str) -> !i64 {
+  if regex_match("^-?[0-9]+$", s) rt ok(str_to_int(s))
+  err_i64("not a number: " + s)
+}
+
+// Inspection helpers.
+println(is_ok(parse_int_safe("42")))      // true
+println(unwrap(parse_int_safe("42")))     // 42
+println(is_err(parse_int_safe("foo")))    // true
+println(err_msg(parse_int_safe("foo")))   // not a number: foo
+
+// ? propagates the first failure to the enclosing fn's return.
+fn parse_sum(a:str, b:str, c:str) -> !i64 {
+  x := parse_int_safe(a)?
+  y := parse_int_safe(b)?
+  z := parse_int_safe(c)?
+  ok(x + y + z)
+}
+
+println(unwrap(parse_sum("1", "2", "3")))   // 6
+
+r := parse_sum("1", "oops", "3")
+println(is_err(r))                          // true
+println(err_msg(r))                         // not a number: oops

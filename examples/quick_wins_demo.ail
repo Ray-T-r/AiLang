@@ -1,0 +1,30 @@
+// Quick wins: mu params, sort/reverse/contains/index_of,
+// abs_i64, auto pretty-print for user structs.
+
+// `mu` param — avoid the `mu copy := x` dance.
+fn shift(mu n, by) {
+  n = n + by
+  n
+}
+println(shift(10, 5))                       // 15
+
+// Array helpers + polymorphic contains/index_of.
+nums := [3, 1, 4, 1, 5, 9, 2, 6]
+println(sort(nums))                          // [1, 1, 2, 3, 4, 5, 6, 9]
+println(reverse(nums))                       // [6, 2, 9, 5, 1, 4, 1, 3]
+println(contains(nums, 4))                   // true
+println(index_of(nums, 5))                   // 4
+
+words := ["banana", "apple", "cherry"]
+println(sort(words))                         // ["apple", "banana", "cherry"]
+println(contains(words, "apple"))            // true
+
+println(abs_i64(-100))                       // 100
+println(contains("hello world", "world"))    // true (str case still works)
+
+// Auto pretty-print: every user struct gets println for free.
+st Point { x: i64; y: i64 }
+st Person { name: str; age: i64; admin: bool }
+
+println(Point { x: 3, y: 4 })
+println(Person { name: "alice", age: 30, admin: true })

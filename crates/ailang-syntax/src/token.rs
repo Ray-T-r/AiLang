@@ -83,6 +83,7 @@ pub enum TokenKind {
     KwCt,
     KwAs,
     KwIn,
+    KwEn,  // `en` — enum / ADT declaration
 
     // ----- Keywords (literals) -----
     KwTrue,
@@ -196,6 +197,7 @@ impl TokenKind {
             KwFn => "fn",        KwIf => "if",        KwEl => "el",
             KwLp => "lp",        KwRt => "rt",        KwMt => "mt",
             KwSt => "st",        KwTr => "tr",        KwIm => "im",
+            KwEn => "en",
             KwEx => "ex",        KwMu => "mu",        KwBr => "br",
             KwCt => "ct",        KwAs => "as",        KwIn => "in",
             KwTrue => "true",    KwFalse => "false",  KwNil => "nil",

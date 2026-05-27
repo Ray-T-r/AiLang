@@ -1,0 +1,22 @@
+// QoL stdlib batch: join, repeat, pad, chr/ord, slice, clamp.
+
+println(join([1, 2, 3, 4], ", "))           // 1, 2, 3, 4
+println(join(["red", "green", "blue"], "/")) // red/green/blue
+
+println(repeat("=", 20))                     // ====================
+println(pad_left("42", 6, "0"))              // 000042
+println(pad_right("hi", 8, "."))             // hi......
+
+println(chr(65) + chr(105) + chr(76))        // AiL
+println(ord("A"))                            // 65
+
+nums := [10, 20, 30, 40, 50]
+println(slice(nums, 1, 4))                   // [20, 30, 40]
+
+words := ["a", "b", "c", "d", "e"]
+println(slice(words, 0, 3))                  // ["a", "b", "c"]
+
+println(str_to_bool("true"))                 // true
+println(abs_f64(-3.14))                      // 3.14
+println(sign(-5))                            // -1
+println(clamp(15, 0, 10))                    // 10

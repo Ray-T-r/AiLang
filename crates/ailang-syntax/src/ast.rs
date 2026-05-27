@@ -21,8 +21,25 @@ pub struct Module {
 pub enum Item {
     Fn(FnDecl),
     Struct(StructDecl),
+    Enum(EnumDecl),
     Import(ImportDecl),
     Extern(ExternDecl),
+}
+
+/// `en Name { Variant, Variant(field:T), … }` — sum type (tagged union).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EnumDecl {
+    pub name: Ident,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EnumVariant {
+    pub name: Ident,
+    /// Empty for unit variants like `None`. Non-empty for `Some(v:i64)`.
+    pub fields: Vec<Field>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,8 +171,9 @@ pub struct LoopStmt {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LoopHead {
-    /// `ident in expr`
-    ForIn { var: Ident, iter: Expr },
+    /// `ident in expr` (single var) or `(k, v) in expr` (tuple destructure
+    /// for map iteration). `vars` always has at least one element.
+    ForIn { vars: Vec<Ident>, iter: Expr },
     /// `expr` — while-style.
     While(Expr),
 }
@@ -180,6 +198,9 @@ pub enum Pattern {
     Literal(LitExpr),
     Binding(Ident),
     Tuple { elems: Vec<Pattern>, span: Span },
+    /// `Variant` or `Variant(x, y)` — matches against an ADT variant
+    /// and binds its fields by position to the listed names.
+    Variant { name: Ident, bindings: Vec<Ident>, span: Span },
 }
 
 // ============================================================================
@@ -234,6 +255,13 @@ pub enum ExprKind {
     Array(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
     Tuple(Vec<Expr>),
+    /// Struct literal: `Point { x: 1, y: 2 }`. Field order in source is
+    /// preserved; codegen lowers to a C99 designated initializer so order
+    /// doesn't matter at the C level.
+    StructLit {
+        name: Ident,
+        fields: Vec<(Ident, Expr)>,
+    },
     Block(Block),
     If(Box<IfStmt>),
     Match(Box<MatchStmt>),

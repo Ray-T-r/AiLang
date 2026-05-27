@@ -1,0 +1,20 @@
+// io_demo — exercise the M6++ stdlib expansion:
+// file I/O, string conversion, args(), libm math.
+
+im "std/math.ail"
+
+// 1. Math via libm.
+println(int_to_str(7) + " squared is " + int_to_str(7 * 7))
+println("sqrt(2) ≈")
+println(sqrt(2.0))
+
+// 2. Round-trip through the filesystem.
+path := "/tmp/ailang_io_demo.txt"
+ok := write_file(path, "line1\nline2\n")
+println(ok)
+contents := read_file(path)
+println(len(contents))      // 12
+
+// 3. CLI args (if any).
+a := args()
+println("argc-1 = " + int_to_str(len(a)))

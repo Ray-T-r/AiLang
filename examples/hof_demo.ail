@@ -1,0 +1,19 @@
+// Lambdas + map/filter/reduce + pipe — i64 arrays.
+
+nums := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+doubled := map(nums, fn(x) x * 2)
+println(doubled)                 // [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+
+odds := filter(nums, fn(x) x % 2 == 1)
+println(odds)                    // [1, 3, 5, 7, 9]
+
+sum := reduce(nums, 0, fn(a, b) a + b)
+println(sum)                     // 55
+
+product := reduce(nums, 1, fn(a, b) a * b)
+println(product)                 // 3628800
+
+// Compose: sum of squares of odd numbers.
+result := reduce(map(filter(nums, fn(x) x % 2 == 1), fn(x) x * x), 0, fn(a, b) a + b)
+println(result)                  // 1 + 9 + 25 + 49 + 81 = 165

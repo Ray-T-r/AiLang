@@ -127,3 +127,81 @@ fn e2e_stdlib_demo() {
     if !project_has("examples/stdlib_demo.ail") { return; }
     run_case("stdlib_demo");
 }
+
+#[test]
+fn e2e_io_demo() {
+    if !project_has("examples/io_demo.ail") { return; }
+    run_case("io_demo");
+}
+
+#[test]
+fn e2e_strings_demo() {
+    if !project_has("examples/strings_demo.ail") { return; }
+    run_case("strings_demo");
+}
+
+#[test]
+fn e2e_word_count() {
+    if !project_has("examples/word_count.ail") { return; }
+    run_case("word_count");
+}
+
+#[test]
+fn e2e_structs_demo() {
+    if !project_has("examples/structs_demo.ail") { return; }
+    run_case("structs_demo");
+}
+
+#[test]
+fn e2e_hof_demo() {
+    if !project_has("examples/hof_demo.ail") { return; }
+    run_case("hof_demo");
+}
+
+#[test]
+fn e2e_map_iter_demo() {
+    if !project_has("examples/map_iter_demo.ail") { return; }
+    run_case("map_iter_demo");
+}
+
+#[test]
+fn e2e_json_demo() {
+    if !project_has("examples/json_demo.ail") { return; }
+    run_case("json_demo");
+}
+
+#[test]
+fn e2e_quick_wins_demo() {
+    if !project_has("examples/quick_wins_demo.ail") { return; }
+    run_case("quick_wins_demo");
+}
+
+#[test]
+fn e2e_qol_demo() {
+    if !project_has("examples/qol_demo.ail") { return; }
+    run_case("qol_demo");
+}
+
+#[test]
+fn e2e_medium_demo() {
+    if !project_has("examples/medium_demo.ail") { return; }
+    run_case("medium_demo");
+}
+
+#[test]
+fn e2e_result_demo() {
+    if !project_has("examples/result_demo.ail") { return; }
+    run_case("result_demo");
+}
+
+#[test]
+fn e2e_adt_demo() {
+    if !project_has("examples/adt_demo.ail") { return; }
+    run_case("adt_demo");
+}
+
+#[test]
+fn e2e_tail_if_demo() {
+    if !project_has("examples/tail_if_demo.ail") { return; }
+    run_case("tail_if_demo");
+}

@@ -1,8 +1,24 @@
-// std/math.ail — seed math helpers, wrapping libc where useful.
+// std/math.ail — seed math helpers wrapping libc + libm.
 
+// integer
 ex fn abs(n:i32) -> i32
 ex fn rand() -> i32
 ex fn srand(seed:u32)
+
+// libm — driver always links `-lm`.
+ex fn sqrt(x:f64) -> f64
+ex fn pow(base:f64, exp:f64) -> f64
+ex fn sin(x:f64) -> f64
+ex fn cos(x:f64) -> f64
+ex fn tan(x:f64) -> f64
+ex fn log(x:f64) -> f64        // natural log (ln)
+ex fn log2(x:f64) -> f64
+ex fn log10(x:f64) -> f64
+ex fn exp(x:f64) -> f64
+ex fn floor(x:f64) -> f64
+ex fn ceil(x:f64) -> f64
+
+// Pure-AiLang helpers built on top.
 
 fn min(a, b) {
   if a < b rt a
@@ -14,7 +30,8 @@ fn max(a, b) {
   b
 }
 
-fn pow(base, exp) {
+// Integer power, kept under the name `ipow` so it doesn't shadow libm `pow`.
+fn ipow(base, exp) {
   mu r := 1
   lp i in 0..exp {
     r = r * base

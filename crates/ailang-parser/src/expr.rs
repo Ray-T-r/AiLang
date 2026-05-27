@@ -293,8 +293,20 @@ impl Parser<'_> {
 
             Ident => {
                 let span = self.bump().span;
+                let name = self.ident_text(span);
+                // Struct-literal disambiguation: an identifier starting with
+                // an uppercase letter immediately followed by `{` parses as
+                // a struct literal. `if cond { body }` (lowercase cond) and
+                // expression blocks remain unaffected.
+                if self.at(TokenKind::LBrace)
+                    && name.chars().next().map_or(false, |c| c.is_ascii_uppercase())
+                {
+                    return self.parse_struct_literal(
+                        ailang_syntax::ast::Ident { name, span }
+                    );
+                }
                 Some(Expr {
-                    kind: ExprKind::Ident(self.ident_text(span)),
+                    kind: ExprKind::Ident(name),
                     span,
                 })
             }
@@ -315,6 +327,28 @@ impl Parser<'_> {
                 None
             }
         }
+    }
+
+    /// `StructName { field: value, field: value }`. The opening brace is
+    /// the current token. Returns the constructed expression on success.
+    fn parse_struct_literal(&mut self, name: Ident) -> Option<Expr> {
+        use TokenKind::*;
+        self.expect(LBrace)?;
+        let mut fields = Vec::new();
+        while !self.at(RBrace) && !self.at(Eof) {
+            let field_name = self.parse_ident()?;
+            self.expect(Colon)?;
+            let value = self.parse_expr()?;
+            fields.push((field_name, value));
+            if !self.eat(Comma) && !self.eat(Semi) {
+                break;
+            }
+        }
+        let end = self.expect(RBrace)?.span;
+        Some(Expr {
+            span: name.span.join(end),
+            kind: ExprKind::StructLit { name, fields },
+        })
     }
 
     fn parse_postfix(&mut self, lhs: Expr) -> Option<Expr> {

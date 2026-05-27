@@ -1,0 +1,29 @@
+// Medium-tier showcase:
+//   - Map iteration via `lp (k, v) in m`
+//   - Capturing closures (i64)
+//   - Real generic monomorphization across i64 and str
+
+// 1. Map tuple-pattern iteration.
+scores := {"alice": 90, "bob": 75, "carol": 88}
+mu total := 0
+lp (name, score) in scores {
+  total = total + score
+}
+println(total)                          // 253
+
+// 2. Capturing closures with HOF.
+threshold := 3
+nums := [1, 2, 3, 4, 5, 6]
+println(filter(nums, fn(x) x > threshold))     // [4, 5, 6]
+
+multiplier := 10
+println(map(nums, fn(x) x * multiplier))       // [10, 20, 30, 40, 50, 60]
+
+// 3. Real generics — one definition, dispatched per concrete type.
+fn id<T>(x:T) -> T x
+println(id(42))                                // 42 (id_i64)
+println(id("hello"))                           // hello (id_str)
+
+fn first<T>(arr:[T]) -> T arr[0]
+println(first([10, 20, 30]))                   // 10
+println(first(["alice", "bob", "carol"]))      // alice

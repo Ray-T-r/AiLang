@@ -1,0 +1,46 @@
+// ADTs (tagged unions / sum types) — `en` declarations + pattern match.
+
+en Shape {
+  Circle(r:i64),
+  Square(side:i64),
+  Rect(w:i64, h:i64),
+}
+
+fn area(s:Shape) {
+  mt s {
+    Circle(r)   => r * r * 3;          // π ≈ 3
+    Square(s)   => s * s;
+    Rect(w, h)  => w * h;
+  }
+}
+
+println(area(Circle(5)))                // 75
+println(area(Square(4)))                // 16
+println(area(Rect(3, 7)))               // 21
+
+// Unit-only variants — classic enum.
+en Color { Red, Green, Blue }
+
+fn name(c:Color) {
+  mt c {
+    Red   => "red";
+    Green => "green";
+    Blue  => "blue";
+  }
+}
+
+println(name(Red))
+println(name(Blue))
+
+// Sum type for a Maybe-like wrapper.
+en Maybe { None, Some(v:i64) }
+
+fn describe(m:Maybe) {
+  mt m {
+    None    => "nothing";
+    Some(v) => "got something";
+  }
+}
+
+println(describe(None))
+println(describe(Some(42)))

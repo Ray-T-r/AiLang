@@ -5,7 +5,7 @@ im "std/str.ail"
 
 println(min(3, 7))           // 3
 println(max(3, 7))           // 7
-println(pow(2, 10))          // 1024
+println(ipow(2, 10))         // 1024 (integer power; libm `pow` is f64)
 println(gcd(48, 36))         // 12
 println(eq("foo", "foo"))    // true
 println(parse_int("42"))     // 42

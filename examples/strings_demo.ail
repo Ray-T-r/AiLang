@@ -1,0 +1,17 @@
+// Exercise the A-tier string suite: split, trim, casing, contains,
+// substring, replace + format + pretty-printers.
+
+s := "  Hello, World!  "
+println(format("trimmed = [%s]", trim(s)))
+println(to_upper("ai"))
+println(to_lower("AILANG"))
+println(contains("hello world", "world"))
+println(starts_with("hello", "he"))
+println(ends_with("hello", "lo"))
+println(index_of("hello", "ll"))
+println(substring("hello world", 6, 11))
+println(replace("a-b-c-d", "-", "/"))
+
+parts := split("alice,bob,carol", ",")
+println(parts)
+println(format("got %lld parts", len(parts)))
