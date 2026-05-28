@@ -68,11 +68,15 @@ jobs:
           files: ${{ matrix.asset }}
           fail_on_unmatched_files: true
 
-  # Installer scripts and the Claude skill don't depend on platform —
-  # upload them once after the binaries are in place.
+  # Installer scripts and the Claude skill don't actually depend on the
+  # binaries — they're just files. `needs: build` + `if: always()` keeps
+  # the "scripts upload after binaries" ordering when everything works,
+  # but lets this job still run if one platform's build is slow or fails
+  # (otherwise a stuck Intel-Mac runner blocks the install URL forever).
   upload-scripts:
     name: install scripts + skill
     needs: build
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
