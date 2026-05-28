@@ -53,6 +53,19 @@ ailangc --version
 echo 'println("hello")' > /tmp/hi.ail && ailangc run /tmp/hi.ail
 ```
 
+> **macOS Gatekeeper note** — the released binary is not yet signed with
+> an Apple Developer ID. The `curl | bash` installer above avoids the
+> warning automatically. If you instead **download `ailangc-macos-*`
+> from the Releases page in your browser**, macOS will refuse to run it
+> with "Apple cannot verify ... safety." Clear the quarantine attribute
+> once and you're done:
+>
+> ```bash
+> xattr -d com.apple.quarantine ~/Downloads/ailangc-macos-aarch64
+> ```
+>
+> Or right-click the file in Finder → **Open** → confirm once.
+
 ### Build from source instead
 
 ```bash
@@ -85,20 +98,91 @@ both 1 BPE token.
 | Single-statement bodies skip `{...}`         | `if x>0 print(x)` is legal |
 | Expression-bodied fns: `fn add(a, b) a + b`  | no `{ return … }` boilerplate, no type stutter |
 
-Measured on a 4-program benchmark (fib, fizzbuzz, greet, sum) with
-GPT-4's `cl100k_base` tokenizer — no comments, idiomatic in every language:
+---
 
-| Language   | Tokens | vs AiLang |
-|------------|-------:|----------:|
-| **AiLang** | **130** | **1.00×** |
-| Python     | 136    | 1.05× |
-| JavaScript | 167    | 1.28× |
-| Rust       | 186    | 1.43× |
-| Go         | 223    | 1.72× |
-| Java       | 261    | 2.01× |
-| C          | 270    | 2.08× |
+## Three-program benchmark
 
-Source: [`bench/`](bench/) — reproduce with `python3 bench/count_all.py`.
+To check whether the syntax actually pays off and the runtime keeps
+up, we compare AiLang against six mainstream languages on three
+representative workloads — a script, a backend handler, and a numeric
+algorithm — measured for both **token count** (cl100k_base, the
+GPT-4 family BPE tokenizer) and **wall-clock runtime**. All sources
+live under [`bench/perf/`](bench/perf/); each program is comment-free
+and idiomatic for its language. Runtime measured with `hyperfine
+--warmup 1 --min-runs 5` on Apple Silicon, all compiled languages at
+`-O2`/`-O`/release.
+
+### The three programs
+
+| program     | what it does | category |
+|-------------|--------------|----------|
+| `wordcount` | repeat a 9-word seed 500 000× → split into ~4.5 M tokens → hash-count frequencies | script |
+| `jsonapi`   | iterate 50 000 user records → filter by `age >= 40` → format each as a JSON record → sum response bytes | backend |
+| `primes`    | count primes below 500 001 via trial division | algorithm |
+
+All seven implementations of each program produce the **exact same
+output** (verified) — `9 / 1000000` for wordcount, `28836 / 1198341`
+for jsonapi, `41538` for primes.
+
+### Token cost (lower is better)
+
+| program   | AiLang | Python | JS  | Rust | Go  | Java | C   |
+|-----------|-------:|-------:|----:|-----:|----:|-----:|----:|
+| wordcount |     67 |     62 |  74 |  107 |  86 |  107 | 421 |
+| jsonapi   |    100 |     92 | 110 |  128 | 139 |  141 | 148 |
+| primes    |    104 |    104 | 121 |  139 | 144 |  152 | 148 |
+| **TOTAL** |**271** |    258 | 305 |  374 | 369 |  400 | 717 |
+| vs AiLang |  1.00× |  0.95× |1.13×|1.38× |1.36×|1.48× |2.65× |
+
+AiLang is within **5%** of Python on tokens — Python is the
+generally-acknowledged king of script density, so being neck-and-neck
+with it is the goal of the syntax design. Against the other compiled
+languages AiLang wins by **30–50%**, and against hand-written C with
+its missing-batteries (no hash map, no `split`) it wins by **2.6×**.
+
+Reproduce: `python3 bench/count_three.py`.
+
+### Runtime (lower is better)
+
+| program   | C      | Go     | Rust   | **AiLang** | Java   | Node   | Python  |
+|-----------|-------:|-------:|-------:|-----------:|-------:|-------:|--------:|
+| wordcount | 32.1ms | 76.4ms | 83.9ms |**145.9ms** |188.1ms |302.5ms | 336.0ms |
+| jsonapi   |  3.3ms |  3.1ms |  2.6ms |  **9.4ms** | 32.1ms | 18.6ms |  19.6ms |
+| primes    |  9.5ms |  9.6ms |  9.9ms | **15.4ms** | 33.7ms | 28.9ms | 362.6ms |
+| **vs C**  |  1.00× |  ≈1.0× |  ≈1.0× |  **2.7×*** |  6.4×  |  6.0×  |  17×    |
+
+\* geomean across the three programs.
+
+The same data as ratios to the fastest compiled language for each row:
+
+| program   | vs fastest compiled | AiLang slowdown |
+|-----------|--------------------:|----------------:|
+| wordcount | C is fastest (32ms) |          4.55× |
+| jsonapi   | Rust is fastest (2.6ms) |      3.62× |
+| primes    | C is fastest (9.5ms) |         1.62× |
+
+AiLang **beats** every dynamic / JIT language (Python, Node, Java) on
+every program, and stays within a small constant factor of C/Rust/Go.
+The wordcount gap is the largest because AiLang's `{str:i64}` is a
+generic hash table with growing — the hand-written C version uses a
+9-entry linear scan, which is the right data structure for nine unique
+words but not what you'd reach for in production code. (Compare that
+421-token C wordcount to AiLang's 67 to see why.)
+
+Reproduce: `hyperfine` against the three programs under
+[`bench/perf/<lang>/`](bench/perf/) — see
+[`bench/results/SUMMARY.md`](bench/results/SUMMARY.md) for the raw
+numbers.
+
+### What this benchmark is *not*
+
+- Not a microbench of one operation (`fib(40)` etc.) — those over-emphasize
+  arithmetic and miss the actual cost shape of real programs.
+- Not a megabench — three programs is enough to triangulate
+  "scripting / backend / numeric" without cherry-picking.
+- Not run under JIT warmup conditions — Java and Node pay startup cost
+  the way they do in production (a CLI invocation), which matches the
+  scripting use case better than a benchmark harness that hides it.
 
 ---
 
@@ -165,6 +249,10 @@ grows incrementally.
 - `?` postfix and `!T` only support T = primitive.
 - ADT variants can't yet recurse into the enclosing enum (e.g.
   `Cons(head:i64, tail:List)`) — needs heap boxing for self-reference.
+- `arr[i] = x` from inside a function body currently mis-codegens
+  (the `ailang_at` macro is rvalue-only); top-level main works. Mutating
+  algorithms across function calls need to use functional rebuild
+  (`filter`/`push`) for now.
 
 ---
 
@@ -172,6 +260,66 @@ grows incrementally.
 
 All of these compile and run today. Each lives under [`examples/`](examples/)
 with an expected-output fixture in [`tests/e2e/`](tests/e2e/).
+
+### The three benchmark programs
+
+The full source of each row in the benchmark table — note that none of
+the AiLang files have comments and none wrap their top-level code in
+`fn main()`:
+
+**`bench/perf/ailang/wordcount.ail`** — 67 tokens:
+
+```
+seed := "the quick brown fox jumps over the lazy dog "
+text := repeat(seed, 500000)
+words := split(text, " ")
+mu counts:{str:i64} := {}
+lp w in words {
+  counts[w] = counts[w] + 1
+}
+println(len(counts))
+println(counts["the"])
+```
+
+**`bench/perf/ailang/jsonapi.ail`** — 100 tokens:
+
+```
+mu count := 0
+mu total := 2
+lp i in 0..50000 {
+  age := 18 + (i % 52)
+  if age >= 40 {
+    rec := format("{\"id\":%lld,\"name\":\"user_%lld\",\"age\":%lld}", i, i, age)
+    if count > 0 { total += 1 }
+    total += len(rec)
+    count += 1
+  }
+}
+println(count)
+println(total)
+```
+
+**`bench/perf/ailang/primes.ail`** — 104 tokens:
+
+```
+fn is_prime(n) {
+  if n < 2 rt 0
+  if n == 2 rt 1
+  if n % 2 == 0 rt 0
+  mu i := 3
+  lp i*i <= n {
+    if n % i == 0 rt 0
+    i += 2
+  }
+  1
+}
+
+mu c := 0
+lp k in 2..500001 {
+  c += is_prime(k)
+}
+println(c)
+```
 
 ### Functions, implicit return, braceless one-liners
 
@@ -281,37 +429,15 @@ println(alice.name)                  // alice
 
 ### Lambdas, closures, higher-order
 
-Lambdas are lifted to top-level static C functions, and the runtime
-value of a closure is a `{fn, env}` fat pointer. Capturing outer-scope
-locals just works — the env struct is GC-allocated and snapshots each
-captured variable by value at construction time.
-
 ```
-// Plain lambda, no capture.
 add := fn(a, b) a + b
 println(add(3, 4))                          // 7
 
-// Capturing closure — `threshold` is captured by value.
 threshold := 3
 nums := [1, 2, 3, 4, 5, 6]
 println(filter(nums, fn(x) x > threshold))  // [4, 5, 6]
-
-// String-returning closure.
-greeting := "hello, "
-greet := fn(name:str) greeting + name + "!"
-println(greet("alice"))                     // hello, alice!
-
-// HOF combinators.
 println(map(nums, fn(x) x * 2))             // [2, 4, 6, 8, 10, 12]
 println(reduce(nums, 0, fn(a, b) a + b))    // 21
-```
-
-User functions that take other functions need an annotated parameter
-type so codegen knows the C function-pointer shape:
-
-```
-fn apply(f:fn(i64,i64)->i64, x, y) f(x, y)
-println(apply(fn(a, b) a * b, 5, 6))        // 30
 ```
 
 ### ADTs / tagged unions
@@ -333,13 +459,7 @@ fn area(s:Shape) {
 
 println(area(Circle(5)))                    // 75
 println(area(Rect(3, 7)))                   // 21
-
-// Unit-only variants — classic enum.
-en Color { Red, Green, Blue }
 ```
-
-Each `en` lowers to a tagged union; constructor calls take the
-matching field types; `mt` arms can destructure by position.
 
 ### `!T` results + `?` propagation
 
@@ -350,7 +470,7 @@ fn parse_int_safe(s:str) -> !i64 {
 }
 
 fn parse_sum(a:str, b:str) -> !i64 {
-  x := parse_int_safe(a)?    // bail with err if not numeric
+  x := parse_int_safe(a)?
   y := parse_int_safe(b)?
   ok(x + y)
 }
@@ -372,183 +492,32 @@ println(first([10, 20, 30]))                // 10
 println(first(["alice", "bob"]))            // alice
 ```
 
-Each call site monomorphizes the generic fn for the concrete T, then
-a `#define` + `_Generic` dispatches the bare name to the right
-instance.
-
-### Modules
+### Modules + seed stdlib
 
 ```
-// in mathlib.ail
-fn square(x) x * x
-
 // in main.ail
-im "mathlib.ail"
-println(square(7))      // 49
+im "std/math.ail"
+
+println(max(3, 7))                          // 7
+println(gcd(36, 24))                        // 12
 ```
 
-A seed stdlib lives in [`std/`](std/):
+A small stdlib lives in [`std/`](std/):
 
 - `std/math.ail` — `min`/`max`/`ipow`/`gcd` + libc `abs`/`rand`/`srand`
   + libm `sqrt`/`pow`/`sin`/`cos`/`tan`/`log`/`log2`/`log10`/`exp`/
   `floor`/`ceil`.
 - `std/str.ail` — libc `strcmp`/`atoi` and an `eq`/`parse_int` wrapper.
 - `std/json.ail` — `parse_flat_obj_str(text) -> {str:str}` and
-  `parse_flat_obj_int(text) -> {str:i64}`. Hand-written in **pure
-  AiLang** (~150 lines) — proof the language is bootstrapping-capable
-  for its own libraries. Flat-only for now; nested objects/arrays land
-  alongside sum-type support.
+  `parse_flat_obj_int(text) -> {str:i64}`, hand-written in pure
+  AiLang (~150 lines).
 
 The same files are mirrored at [`examples/std/`](examples/std/) so
 in-tree e2e tests can `im "std/…"` against a path that resolves
 relative to the example file — keep both copies in sync when editing.
 
-### Builtins (always in scope, no `im` needed)
-
-Each maps to a `static` C helper baked into the codegen prelude; all
-returned strings are GC-allocated.
-
-**I/O & process**
-
-| Builtin | Signature | What it does |
-|---------|-----------|--------------|
-| `read_file(path)`        | `(str) -> str`        | Slurp the whole file. Returns `""` on error. |
-| `write_file(path, body)` | `(str, str) -> bool`  | Overwrite the file. `true` on success. |
-| `read_line()`            | `() -> str`           | One stdin line, trailing `\n` stripped. `""` at EOF. |
-| `args()`                 | `() -> [str]`         | `argv[1..]` of the running process. |
-| `exit(code)`             | `(i64) -> ()`         | Terminate with the given exit code. |
-| `get_env(name)`          | `(str) -> str`        | Read an env var; `""` if unset. |
-
-**Conversions & formatting**
-
-| Builtin | Signature |
-|---------|-----------|
-| `int_to_str(n)` / `str_to_int(s)`     | `(i64) -> str` / `(str) -> i64` |
-| `float_to_str(x)` / `str_to_float(s)` | `(f64) -> str` / `(str) -> f64` |
-| `str_to_bool(s)`                      | `(str) -> bool` (accepts `true`/`1`/`yes`) |
-| `chr(i)` / `ord(s)`                   | `(i64) -> str` (1 byte) / `(str) -> i64` |
-| `format(fmt, ...)`                    | printf-style → fresh GC string |
-
-**String operations** (byte-oriented; not Unicode-aware)
-
-| Builtin | Signature |
-|---------|-----------|
-| `contains(haystack, needle)`     | `(str, str) -> bool` (also works on arrays) |
-| `starts_with(s, prefix)` / `ends_with(s, suffix)` | `(str, str) -> bool` |
-| `index_of(haystack, needle)`     | `(str, str) -> i64` (`-1` if not found) |
-| `to_upper(s)` / `to_lower(s)`    | `(str) -> str` |
-| `trim(s)`                        | `(str) -> str` (strip ASCII whitespace) |
-| `substring(s, start, end)`       | `(str, i64, i64) -> str` (byte indices, clamped) |
-| `replace(s, old, new)`           | `(str, str, str) -> str` |
-| `split(s, sep)`                  | `(str, str) -> [str]` (Python-style) |
-| `repeat(s, n)`                   | `(str, i64) -> str` |
-| `pad_left(s, w, pad)` / `pad_right(s, w, pad)` | `(str, i64, str) -> str` |
-
-**Containers**
-
-| Builtin | Signature |
-|---------|-----------|
-| `len(x)`     | `(str / [T] / {K:V}) -> i64` |
-| `has(m, k)`  | `({K:V}, K) -> bool` |
-| `push(arr, x)` / `pop(arr)`       | value-semantics, returns a fresh array |
-| `sort(arr)` / `reverse(arr)` / `slice(arr, lo, hi)` | same |
-| `contains(arr, x)` / `index_of(arr, x)` | polymorphic over `[i64]` / `[str]` |
-| `join(arr, sep)`                  | `([i64] \| [str], str) -> str` |
-| `keys(m)` / `values(m)`           | per-map element type |
-| `map(arr, f)` / `filter(arr, p)` / `reduce(arr, init, f)` | higher-order |
-
-**Math** (`abs_i64` / `abs_f64` / `sign` / `clamp` always in scope;
-the rest via `im "std/math.ail"`)
-
-| Builtin | Signature |
-|---------|-----------|
-| `abs_i64(n)` / `abs_f64(x)`       | `(i64) -> i64` / `(f64) -> f64` |
-| `sign(n)`                         | `(i64) -> i64` (`-1` / `0` / `1`) |
-| `clamp(n, lo, hi)`                | `(i64, i64, i64) -> i64` |
-| `sqrt` / `pow` / `sin` / `cos` / `tan` / `log` / `log2` / `log10` / `exp` / `floor` / `ceil` | libm wrappers (need `im "std/math.ail"`) |
-
-**Regex** (POSIX extended, libc-backed)
-
-| Builtin | Signature |
-|---------|-----------|
-| `regex_match(pat, text)` | `(str, str) -> bool` |
-| `regex_find(pat, text)`  | `(str, str) -> str` (first match, `""` if none) |
-
-**Result `!T`**
-
-| Builtin | Signature |
-|---------|-----------|
-| `ok(v)`                                  | polymorphic: wraps `v:T` as `!T` |
-| `err_i64(msg)` / `err_str(msg)` / `err_bool(msg)` / `err_f64(msg)` | construct the error variant |
-| `unwrap(r)`                              | unwrap or abort with the err msg |
-| `is_ok(r)` / `is_err(r)` / `err_msg(r)`  | inspect |
-| `expr?`                                  | postfix; propagate err to the enclosing fn's return |
-
-```
-// Round-trip through the filesystem + use a CLI arg.
-a := args()
-path := a[0]
-write_file(path, "hello from AiLang\n")
-println(read_file(path))     // hello from AiLang
-
-// String pipeline + str-keyed map (word counter).
-mu counts := {"_pin": 0_i64}     // type-pin so codegen picks {str:i64}
-counts["_pin"] = 0               // clear the pin
-lp w in split("the fox and the dog", " ") {
-  counts[w] = counts[w] + 1
-}
-println(counts)                   // {"the": 2, "fox": 1, "and": 1, "dog": 1}
-
-// printf-style formatting + libm.
-im "std/math.ail"
-println(format("sqrt(2) = %.6f", sqrt(2.0)))   // sqrt(2) = 1.414214
-
-// POSIX regex.
-println(regex_match("[0-9]+", "user42"))    // true
-println(regex_find("[A-Z][a-z]+", "hello World")) // World
-```
-
 For the full language reference (every keyword, every operator, the
 EBNF), see [`spec/grammar.ebnf`](spec/grammar.ebnf).
-
----
-
-## Performance
-
-Two micro-benchmarks: a 1M-iteration trial-division prime sieve and
-recursive `fib(40)`. All compiled languages use `-O2`/release; all
-binaries verified to produce the same output. Measured with `hyperfine
---warmup 1 --min-runs 5` on Apple Silicon.
-
-`fib(40)` (recursive, 165M calls):
-
-| Implementation | mean ± σ      | vs fastest |
-|----------------|---------------|-----------:|
-| Rust (`-O`)    | (fastest)     |       1.00× |
-| C (`clang -O2`) | ≈ Rust        |       1.00× |
-| **AiLang**     | **+7%**       |   **1.07×** |
-| Java (HotSpot) | +13%          |       1.13× |
-| Go (`go build`) | +57%          |       1.57× |
-| Node.js v24    | +251%         |       3.51× |
-| Python 3.14    | +3700%        |      38.00× |
-
-Counting primes < 500 001:
-
-| Implementation | mean ± σ      | vs fastest |
-|----------------|---------------|-----------:|
-| C (`clang -O2`) | 9.4 ms       |       1.00× |
-| Go (`go build`) | 9.5 ms       |       1.01× |
-| Rust (`-O`)    | 9.8 ms        |       1.04× |
-| **AiLang**     | **10.2 ms**   |   **1.08×** |
-| Node.js v24    | 28.9 ms       |       3.09× |
-| Java (HotSpot) | 33.7 ms       |       3.60× |
-| Python 3.14    | 346 ms        |      36.8×  |
-
-AiLang lands within **~8% of hand-written C** and edges past Rust on
-the prime sieve — the C transpilation backend gives `clang -O2` the
-same IR clang would synthesize from C, so the optimizer's room is
-roughly the same. Reproduce with `hyperfine` against the programs in
-[`bench/perf/`](bench/perf/).
 
 ---
 

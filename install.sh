@@ -68,6 +68,12 @@ if ! curl -fL --progress-bar -o "$TMP_BIN" "${BASE_URL}/${ASSET}"; then
 fi
 [[ -s "$TMP_BIN" ]] || die "downloaded file is empty"
 install -m 755 "$TMP_BIN" "$BIN_PATH"
+# Defensive: strip macOS Gatekeeper quarantine xattr if present. curl
+# downloads normally don't get it, but if the user previously dragged a
+# browser-downloaded copy onto themselves, this clears any leftover.
+if [[ "$OS_NAME" == "Darwin" ]]; then
+    xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
+fi
 ok "installed to $BIN_PATH"
 
 # -------- 4. download skill --------
