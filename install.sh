@@ -48,12 +48,26 @@ if [[ "$OS_NAME" == "Darwin" ]]; then
     if ! pkg-config --exists bdw-gc 2>/dev/null \
             && [[ -z "${BDW_GC_PREFIX:-}" ]] \
             && ! brew --prefix bdw-gc >/dev/null 2>&1; then
-        warn "Boehm GC not installed. Run: brew install bdw-gc pkg-config"
+        warn "Boehm GC not installed (required). Run: brew install bdw-gc pkg-config"
         warn "Without it, programs that use strings / arrays / maps will fail to link."
+    fi
+    # Optional deps: only needed if the user imports the matching std/*.
+    if ! brew --prefix libpq >/dev/null 2>&1 && ! pkg-config --exists libpq 2>/dev/null; then
+        warn "libpq not found (optional — only needed if you 'im \"std/pg.ail\"').  brew install libpq"
+    fi
+    if ! brew --prefix openssl@3 >/dev/null 2>&1 && ! brew --prefix openssl >/dev/null 2>&1 \
+            && ! pkg-config --exists openssl 2>/dev/null; then
+        warn "OpenSSL not found (optional — only needed if you 'im \"std/tls.ail\"' or use HTTPS / WSS).  brew install openssl@3"
     fi
 elif [[ "$OS_NAME" == "Linux" ]]; then
     if ! pkg-config --exists bdw-gc 2>/dev/null && [[ -z "${BDW_GC_PREFIX:-}" ]]; then
-        warn "Boehm GC not installed. Debian/Ubuntu: sudo apt install libgc-dev pkg-config"
+        warn "Boehm GC not installed (required). Debian/Ubuntu: sudo apt install libgc-dev pkg-config"
+    fi
+    if ! pkg-config --exists libpq 2>/dev/null; then
+        warn "libpq not found (optional — only needed for std/pg.ail).  Debian/Ubuntu: sudo apt install libpq-dev"
+    fi
+    if ! pkg-config --exists openssl 2>/dev/null; then
+        warn "OpenSSL not found (optional — only needed for std/tls.ail / HTTPS / WSS).  Debian/Ubuntu: sudo apt install libssl-dev"
     fi
 fi
 ok "checked"

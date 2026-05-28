@@ -50,6 +50,9 @@ if (-not $cc) {
 } else {
     OK "found $($cc.Source)"
 }
+Warn 'Optional native deps (only if you use the matching stdlib):'
+Warn '  - std/pg.ail   → libpq      (https://www.postgresql.org/download/windows/)'
+Warn '  - std/tls.ail  → OpenSSL    (https://slproweb.com/products/Win32OpenSSL.html)'
 
 # -------- 3. download + extract binary --------
 Log "Downloading $asset"

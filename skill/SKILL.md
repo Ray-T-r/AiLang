@@ -320,20 +320,118 @@ Resolution: first relative to the importing file, then to cwd. Imported `fn main
 | `std/ws.ail`    | WebSocket server-side. `ws_handshake_response(client_key)` (101 Switching Protocols string), `ws_send_text(fd, payload)`, `ws_recv_text(fd) -> str`. Hard limit: payload < 126 bytes (short frames only). |
 | `std/json.ail`  | Flat (one-level) JSON parsers: `parse_flat_obj_str(s) -> {str:str}`, `parse_flat_obj_int(s) -> {str:i64}`. Result map includes a sentinel `"_"` key. |
 
-## Built-in functions
+## Built-in functions (all always in scope — no `im` needed)
 
+### Printing & pretty-print
 | Name | Signature | Notes |
 |------|-----------|-------|
-| `print(x)` | `(any) -> ()` | no newline; dispatched on arg type via C11 `_Generic` |
-| `println(x)` | `(any) -> ()` | adds `"\n"`. Pretty-prints structs/enums automatically |
-| `len(x)` | `(str \| bytes \| [T] \| {K:V}) -> i64` | byte length / element count |
-| `has(m, k)` | `({K:V}, K) -> bool` | map membership |
-| `ok(v)` | `(T) -> !T` | success constructor |
-| `err_i64`, `err_str`, `err_bool`, `err_f64` | `(str) -> !T` | error constructor (one per primitive) |
-| `unwrap(r)`, `is_ok(r)`, `is_err(r)`, `err_msg(r)` | inspectors for `!T` | `unwrap` aborts on err |
-| `str_to_bytes(s)`, `bytes_to_str(b)`, `bytes_at(b, i)`, `bytes_slice(b, lo, hi)` | bytes helpers | |
-| socket builtins (`tcp_listen`, `tcp_accept`, `sock_recv`, ...) | always in scope, no `im` needed | see `std/sock.ail` for wrappers |
-| time builtins (`now_ms`, `mono_ms`, `sleep_ms`, `time_iso`) | always in scope | see `std/time.ail` for wrappers |
+| `print(x)`   | `(any) -> ()` | no newline; dispatched on arg type via C11 `_Generic` |
+| `println(x)` | `(any) -> ()` | adds `"\n"`. Pretty-prints structs / enums / arrays / maps automatically |
+
+### I/O & process
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `read_file(path)`  | `(str) -> str`        | full file as a string |
+| `write_file(p, s)` | `(str, str) -> bool`  | true on success |
+| `read_line()`      | `() -> str`           | one line from stdin (no trailing `\n`) |
+| `args()`           | `() -> [str]`         | command-line args (program name at `[0]`) |
+| `get_env(name)`    | `(str) -> str`        | empty string if unset |
+| `exit(code)`       | `(i64) -> ()`         | does not return |
+
+### String ops (immutable — return fresh strings)
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `contains(s, sub)`    | `(str, str) -> bool`         | also polymorphic over `[i64]` / `[str]` |
+| `starts_with(s, p)`   | `(str, str) -> bool`         | |
+| `ends_with(s, p)`     | `(str, str) -> bool`         | |
+| `index_of(s, sub)`    | `(str, str) -> i64`          | -1 if not found; also polymorphic over arrays |
+| `to_upper(s)` / `to_lower(s)` | `(str) -> str`       | |
+| `trim(s)`             | `(str) -> str`               | strips ASCII whitespace both sides |
+| `substring(s, lo, hi)`| `(str, i64, i64) -> str`     | hi is exclusive |
+| `replace(s, old, new)`| `(str, str, str) -> str`     | replaces all non-overlapping occurrences |
+| `split(s, sep)`       | `(str, str) -> [str]`        | empty `sep` splits on every byte |
+| `repeat(s, n)`        | `(str, i64) -> str`          | |
+| `pad_left(s, w, pad)` / `pad_right(s, w, pad)` | `(str, i64, str) -> str` | `pad` is the fill char as a 1-char str |
+| `chr(n)`              | `(i64) -> str`               | code-point → 1-char str |
+| `ord(s)`              | `(str) -> i64`               | first byte/code-point of `s` |
+
+### Conversions & formatting
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `int_to_str(n)`     | `(i64) -> str`  | |
+| `str_to_int(s)`     | `(str) -> i64`  | returns 0 on parse failure (no error) — use `regex_match` to validate first if you care |
+| `float_to_str(x)`   | `(f64) -> str`  | |
+| `str_to_float(s)`   | `(str) -> f64`  | |
+| `str_to_bool(s)`    | `(str) -> bool` | accepts `"true"`/`"false"` (case-insensitive) |
+| `format(fmt, ...)`  | `(str, ...) -> str` | **printf-style** — `%lld` for i64, `%s` for str, `%f` for f64. Variadic. |
+
+### Containers (arrays / maps)
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `len(x)`        | `(str \| bytes \| [T] \| {K:V}) -> i64` | byte length or element count |
+| `has(m, k)`     | `({K:V}, K) -> bool` | map membership |
+| `push(arr, x)`  | `([T], T) -> [T]`    | **returns a new array** — `arr := push(arr, 7)` |
+| `pop(arr)`      | `([T]) -> [T]`       | returns new array minus last element |
+| `sort(arr)`     | `([T]) -> [T]`       | ascending; works on `[i64]` and `[str]` |
+| `reverse(arr)`  | `([T]) -> [T]`       | |
+| `slice(arr, lo, hi)` | `([T], i64, i64) -> [T]` | hi exclusive |
+| `join(arr, sep)`| `([T], str) -> str`  | both `[i64]` and `[str]`; i64 elements get `int_to_str` |
+| `keys(m)`       | `({K:V}) -> [K]`     | order undefined |
+| `values(m)`     | `({K:V}) -> [V]`     | order undefined |
+
+### Higher-order (pair with `fn(x) body` lambdas)
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `map(arr, f)`             | `([T], fn(T)->U) -> [U]` | both `[i64]` and `[str]` |
+| `filter(arr, pred)`       | `([T], fn(T)->bool) -> [T]` | |
+| `reduce(arr, init, f)`    | `([T], U, fn(U, T)->U) -> U` | left fold |
+
+### Regex (POSIX extended)
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `regex_match(pat, s)` | `(str, str) -> bool` | true iff `s` matches anywhere |
+| `regex_find(pat, s)`  | `(str, str) -> str`  | first match, or `""` if none |
+
+### Math (always available; more via `im "std/math.ail"`)
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `abs_i64(n)` / `abs_f64(x)` | `(i64) -> i64` / `(f64) -> f64` | |
+| `sign(n)`           | `(i64) -> i64` | -1 / 0 / 1 |
+| `clamp(n, lo, hi)`  | `(i64, i64, i64) -> i64` | |
+
+### Result `!T` + `?` propagation
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `ok(v)` | `(T) -> !T` | polymorphic success constructor |
+| `err_i64`, `err_str`, `err_bool`, `err_f64` | `(str) -> !T` | error constructor, **one per primitive** (no generic `err()`) |
+| `unwrap(r)` | `(!T) -> T` | aborts the program if `r` is err |
+| `is_ok(r)` / `is_err(r)` | `(!T) -> bool` | |
+| `err_msg(r)` | `(!T) -> str` | |
+
+### Bytes
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `str_to_bytes(s)` / `bytes_to_str(b)` | conversion | |
+| `bytes_at(b, i)` | `(bytes, i64) -> i64` | also `b[i]` works |
+| `bytes_slice(b, lo, hi)` | `(bytes, i64, i64) -> bytes` | |
+
+### TCP sockets
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `tcp_listen(host, port)` | `(str, i64) -> i64` | returns listener fd; -1 on error |
+| `tcp_accept(fd)`         | `(i64) -> i64`      | blocks; returns client fd |
+| `tcp_connect(host, port)`| `(str, i64) -> i64` | |
+| `sock_send(fd, b)` / `sock_send_str(fd, s)` | `(i64, bytes \| str) -> i64` | bytes written; partial OK — use `std/sock.ail` `sock_send_*_all` wrappers for the loop |
+| `sock_recv(fd, max)`     | `(i64, i64) -> bytes` | up to `max` bytes; empty on EOF |
+| `sock_close(fd)`         | `(i64) -> ()`       | |
+
+### Clocks & sleep
+| Name | Signature | Notes |
+|------|-----------|-------|
+| `now_ms()` / `now_us()` | `() -> i64` | wall-clock since UNIX epoch |
+| `mono_ms()`             | `() -> i64` | monotonic — safe for measuring durations |
+| `time_iso(ms)`          | `(i64) -> str` | "2026-05-28T17:42:01" form |
+| `sleep_ms(ms)`          | `(i64) -> ()` | |
 
 ## Compile and run
 
