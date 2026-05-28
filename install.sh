@@ -31,10 +31,10 @@ log "Detecting platform"
 OS_NAME="$(uname -s)"
 ARCH_NAME="$(uname -m)"
 case "${OS_NAME}-${ARCH_NAME}" in
-    Darwin-arm64)      ASSET="ailangc-macos-aarch64"  ;;
-    Darwin-x86_64)     ASSET="ailangc-macos-x86_64"   ;;
-    Linux-x86_64)      ASSET="ailangc-linux-x86_64"   ;;
-    Linux-aarch64)     ASSET="ailangc-linux-aarch64"  ;;
+    Darwin-arm64)      ASSET="ailangc-macos-aarch64.tar.gz"  ;;
+    Darwin-x86_64)     ASSET="ailangc-macos-x86_64.tar.gz"   ;;
+    Linux-x86_64)      ASSET="ailangc-linux-x86_64.tar.gz"   ;;
+    Linux-aarch64)     ASSET="ailangc-linux-aarch64.tar.gz"  ;;
     *) die "unsupported platform: ${OS_NAME} ${ARCH_NAME}. For Windows, use install.ps1." ;;
 esac
 ok "${OS_NAME} ${ARCH_NAME} → ${ASSET}"
@@ -58,19 +58,26 @@ elif [[ "$OS_NAME" == "Linux" ]]; then
 fi
 ok "checked"
 
-# -------- 3. download binary --------
+# -------- 3. download + extract binary --------
 log "Downloading ${ASSET}"
 mkdir -p "$BIN_DIR"
-TMP_BIN="$(mktemp -t ailangc.XXXXXX)"
-trap 'rm -f "$TMP_BIN"' EXIT
-if ! curl -fL --progress-bar -o "$TMP_BIN" "${BASE_URL}/${ASSET}"; then
+TMP_DIR="$(mktemp -d -t ailangc.XXXXXX)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+TMP_ARCHIVE="${TMP_DIR}/${ASSET}"
+if ! curl -fL --progress-bar -o "$TMP_ARCHIVE" "${BASE_URL}/${ASSET}"; then
     die "could not download ${BASE_URL}/${ASSET}. Has the release been published yet?"
 fi
-[[ -s "$TMP_BIN" ]] || die "downloaded file is empty"
-install -m 755 "$TMP_BIN" "$BIN_PATH"
+[[ -s "$TMP_ARCHIVE" ]] || die "downloaded file is empty"
+
+log "Extracting"
+tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" \
+    || die "could not extract ${TMP_ARCHIVE} (corrupt download?)"
+[[ -f "${TMP_DIR}/ailangc" ]] \
+    || die "archive did not contain an 'ailangc' binary at the top level"
+
+install -m 755 "${TMP_DIR}/ailangc" "$BIN_PATH"
 # Defensive: strip macOS Gatekeeper quarantine xattr if present. curl
-# downloads normally don't get it, but if the user previously dragged a
-# browser-downloaded copy onto themselves, this clears any leftover.
+# downloads + tar extracts don't normally set it, but clearing is cheap.
 if [[ "$OS_NAME" == "Darwin" ]]; then
     xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
 fi

@@ -26,16 +26,16 @@ jobs:
         include:
           - os: macos-latest        # arm64 Apple Silicon runners
             target: aarch64-apple-darwin
-            asset: ailangc-macos-aarch64
+            asset: ailangc-macos-aarch64.tar.gz
           - os: macos-13            # Intel runners
             target: x86_64-apple-darwin
-            asset: ailangc-macos-x86_64
+            asset: ailangc-macos-x86_64.tar.gz
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            asset: ailangc-linux-x86_64
+            asset: ailangc-linux-x86_64.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset: ailangc-windows-x86_64.exe
+            asset: ailangc-windows-x86_64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -52,13 +52,20 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} -p ailangc
 
       - name: Stage asset
+        # Archive the binary so browser-downloaders get a recognizable
+        # tar.gz / zip (Finder/Explorer won't try to open it as text).
+        # Archive contains a single top-level `ailangc` (or `ailangc.exe`)
+        # — install.sh / install.ps1 extract from that flat layout.
         shell: bash
         run: |
+          mkdir -p stage
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp "target/${{ matrix.target }}/release/ailangc.exe" "${{ matrix.asset }}"
+            cp "target/${{ matrix.target }}/release/ailangc.exe" stage/ailangc.exe
+            7z a "${{ matrix.asset }}" ./stage/ailangc.exe
           else
-            cp "target/${{ matrix.target }}/release/ailangc" "${{ matrix.asset }}"
-            chmod +x "${{ matrix.asset }}"
+            cp "target/${{ matrix.target }}/release/ailangc" stage/ailangc
+            chmod +x stage/ailangc
+            tar -czf "${{ matrix.asset }}" -C stage ailangc
           fi
           ls -lh "${{ matrix.asset }}"
 

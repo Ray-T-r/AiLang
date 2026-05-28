@@ -32,8 +32,8 @@ function Die    ($m) { Write-Host "ERROR $m" -ForegroundColor Red; exit 1 }
 Log 'Detecting platform'
 $arch = $env:PROCESSOR_ARCHITECTURE
 switch ($arch) {
-    'AMD64' { $asset = 'ailangc-windows-x86_64.exe' }
-    'ARM64' { $asset = 'ailangc-windows-aarch64.exe' }
+    'AMD64' { $asset = 'ailangc-windows-x86_64.zip' }
+    'ARM64' { $asset = 'ailangc-windows-aarch64.zip' }
     default { Die "unsupported architecture: $arch" }
 }
 OK "Windows $arch → $asset"
@@ -51,18 +51,30 @@ if (-not $cc) {
     OK "found $($cc.Source)"
 }
 
-# -------- 3. download binary --------
+# -------- 3. download + extract binary --------
 Log "Downloading $asset"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-$tmpBin = New-TemporaryFile
+$tmpDir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "ailangc-install-$([guid]::NewGuid())")
 try {
-    Invoke-WebRequest -Uri "$BaseUrl/$asset" -OutFile $tmpBin -UseBasicParsing
-} catch {
-    Die "could not download $BaseUrl/$asset. Has the release been published yet? ($_)"
+    $tmpZip = Join-Path $tmpDir $asset
+    try {
+        Invoke-WebRequest -Uri "$BaseUrl/$asset" -OutFile $tmpZip -UseBasicParsing
+    } catch {
+        Die "could not download $BaseUrl/$asset. Has the release been published yet? ($_)"
+    }
+    if ((Get-Item $tmpZip).Length -eq 0) { Die 'downloaded file is empty' }
+
+    Log "Extracting"
+    Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+    $extracted = Join-Path $tmpDir 'ailangc.exe'
+    if (-not (Test-Path $extracted)) {
+        Die "archive did not contain an 'ailangc.exe' at the top level"
+    }
+    Move-Item -Force $extracted $BinPath
+    OK "installed to $BinPath"
+} finally {
+    Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 }
-if ((Get-Item $tmpBin).Length -eq 0) { Die 'downloaded file is empty' }
-Move-Item -Force $tmpBin $BinPath
-OK "installed to $BinPath"
 
 # -------- 4. download skill --------
 Log 'Downloading SKILL.md'
