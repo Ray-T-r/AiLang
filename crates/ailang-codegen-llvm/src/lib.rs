@@ -1098,6 +1098,29 @@ fn emit_stmt(out: &mut String, stmt: &Stmt, level: usize, ctx: &EmitCtx) {
                     return;
                 }
             }
+            // Self-concat append: `name = name + rhs` (or `name ++ rhs`),
+            // where the value is a string concat with `name` itself on the
+            // LHS. Route through `ailang_str_append` so repeated appends
+            // amortize via a thread-local builder buffer. See the prelude
+            // doc for `ailang_str_append` for the aliasing caveat.
+            if let ExprKind::Ident(tname) = &target.kind {
+                if let ExprKind::Binary { op, lhs, rhs } = &value.kind {
+                    let is_concat = matches!(op, BinOp::Concat)
+                        || (matches!(op, BinOp::Add)
+                            && (is_str_expr(lhs, ctx) || is_str_expr(rhs, ctx)));
+                    if is_concat {
+                        if let ExprKind::Ident(lname) = &lhs.kind {
+                            if lname == tname {
+                                let safe = c_safe_name(tname);
+                                let _ = write!(out, "{safe} = ailang_str_append({safe}, ");
+                                emit_expr(out, rhs, ctx);
+                                out.push_str(");\n");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
             emit_expr(out, target, ctx);
             out.push_str(" = ");
             emit_expr(out, value, ctx);
@@ -2203,19 +2226,114 @@ static inline void ailang_println_str(const char* s) { printf("%s\n", s); }
  * libraries (printf, puts) without conversion. Allocation goes through
  * GC_malloc_atomic — the contents are bytes with no internal pointers,
  * so Boehm can skip scanning them, which is both faster and avoids spurious
- * retention. */
+ * retention.
+ *
+ * Length caching: `strlen()` is O(n), which makes naive `acc = acc + x`
+ * loops O(n²) twice over (once for each strlen plus the memcpy). We keep
+ * a tiny per-thread cache of recently-known (pointer, length) pairs so
+ * `ailang_str_len` and the strlen calls inside `concat` short-circuit
+ * when they recognize the pointer. Two slots: one for the last `concat`
+ * result (hits the accumulator in `acc = acc + x` loops), one for the
+ * last queried pointer (hits the other operand on the next iteration).
+ *
+ * Strings remain logically immutable — we never write past the existing
+ * NUL, so the cached length stays accurate for the lifetime of the
+ * pointer. The cache is a pure performance hint; correctness falls back
+ * to `strlen` on a miss. */
+static __thread const char* g_strlen_recent_concat = NULL;
+static __thread int64_t g_strlen_recent_concat_len = 0;
+static __thread const char* g_strlen_recent_query = NULL;
+static __thread int64_t g_strlen_recent_query_len = 0;
+
+static inline int64_t ailang_str_len(const char* s) {
+    if (!s) return 0;
+    if (s == g_strlen_recent_concat) return g_strlen_recent_concat_len;
+    if (s == g_strlen_recent_query) return g_strlen_recent_query_len;
+    int64_t n = (int64_t) strlen(s);
+    g_strlen_recent_query = s;
+    g_strlen_recent_query_len = n;
+    return n;
+}
+
 static inline const char* ailang_str_concat(const char* a, const char* b) {
-    size_t la = a ? strlen(a) : 0;
-    size_t lb = b ? strlen(b) : 0;
-    char* out = (char*) GC_malloc_atomic(la + lb + 1);
-    if (la) memcpy(out, a, la);
-    if (lb) memcpy(out + la, b, lb);
+    int64_t la = ailang_str_len(a);
+    int64_t lb = ailang_str_len(b);
+    char* out = (char*) GC_malloc_atomic((size_t)(la + lb + 1));
+    if (la) memcpy(out, a, (size_t)la);
+    if (lb) memcpy(out + la, b, (size_t)lb);
     out[la + lb] = '\0';
+    g_strlen_recent_concat = out;
+    g_strlen_recent_concat_len = la + lb;
     return out;
 }
 
-static inline int64_t ailang_str_len(const char* s) {
-    return s ? (int64_t) strlen(s) : 0;
+/* -------- ailang_str_append: in-place append for self-assignment pattern --------
+ *
+ * Emitted ONLY by codegen for the syntactic form `x = x + y` (or `x += y`,
+ * which desugars to the same AST). The compiler guarantees that `dst` on
+ * the LHS is the same variable as the `a` operand on the RHS, so any
+ * snapshot pointer the user took before this statement still observes the
+ * pre-append bytes [0, old_len) intact — we only ever write at offsets
+ * ≥ old_len.
+ *
+ * Mechanism: a per-thread "builder" buffer caches the last in-place-extended
+ * string. If `a` matches it and there's spare cap, we mutate in place.
+ * Otherwise we allocate a fresh buffer at 2× the needed size to seed the
+ * builder. Result: `acc = acc + "y"` in a loop is amortized O(1) per call,
+ * turning the classic O(n²) concat-accumulator into O(n).
+ *
+ * Aliasing caveat: if the user did `saved := acc` AFTER `acc` first became
+ * a heap string (i.e., `saved` holds the builder pointer), a subsequent
+ * `acc = acc + x` will extend the bytes past `saved`'s logical end. Any
+ * read of `saved` via libc (`printf("%s")`, `strlen`, ...) walks until
+ * `\0`, so it will see the appended bytes. Code that only uses `len(saved)`
+ * + indexed reads stays correct because `saved` still snapshots the
+ * intent — only nul-scanning APIs are affected. The risk is bounded:
+ * regular `+` outside the self-assign pattern still goes through
+ * `ailang_str_concat`, which always allocates fresh. */
+static __thread char* g_strbuf = NULL;
+static __thread int64_t g_strbuf_len = 0;
+static __thread int64_t g_strbuf_cap = 0;
+
+static const char* ailang_str_append(const char* a, const char* b) {
+    int64_t lb = ailang_str_len(b);
+    if (a == g_strbuf && a != NULL) {
+        int64_t need = g_strbuf_len + lb;
+        if (need + 1 <= g_strbuf_cap) {
+            if (lb) memcpy(g_strbuf + g_strbuf_len, b, (size_t)lb);
+            g_strbuf[need] = '\0';
+            g_strbuf_len = need;
+            g_strlen_recent_concat = g_strbuf;
+            g_strlen_recent_concat_len = need;
+            return g_strbuf;
+        }
+        int64_t new_cap = need * 2;
+        if (new_cap < 32) new_cap = 32;
+        char* new_buf = (char*) GC_malloc_atomic((size_t)(new_cap + 1));
+        if (g_strbuf_len) memcpy(new_buf, g_strbuf, (size_t)g_strbuf_len);
+        if (lb) memcpy(new_buf + g_strbuf_len, b, (size_t)lb);
+        new_buf[need] = '\0';
+        g_strbuf = new_buf;
+        g_strbuf_len = need;
+        g_strbuf_cap = new_cap;
+        g_strlen_recent_concat = new_buf;
+        g_strlen_recent_concat_len = need;
+        return new_buf;
+    }
+    int64_t la = ailang_str_len(a);
+    int64_t need = la + lb;
+    int64_t new_cap = need * 2;
+    if (new_cap < 32) new_cap = 32;
+    char* new_buf = (char*) GC_malloc_atomic((size_t)(new_cap + 1));
+    if (la) memcpy(new_buf, a, (size_t)la);
+    if (lb) memcpy(new_buf + la, b, (size_t)lb);
+    new_buf[need] = '\0';
+    g_strbuf = new_buf;
+    g_strbuf_len = need;
+    g_strbuf_cap = new_cap;
+    g_strlen_recent_concat = new_buf;
+    g_strlen_recent_concat_len = need;
+    return new_buf;
 }
 
 static inline int64_t ailang_str_at(const char* s, int64_t i) {
@@ -2979,16 +3097,25 @@ static const char* regex_find(const char* pat, const char* text) {
 
 /* -------- arrays (M4+): [T] for T = i64 / str --------
  *
- * Arrays are a struct-by-value (len + data pointer). The backing store is
- * GC_MALLOC'd so it survives across function boundaries without any user-side
- * memory management. We keep struct-by-value so `_Generic` can dispatch on
- * the static type — pointers to different element types would alias. */
-typedef struct { int64_t len; int64_t* data; } ailang_arr_i64;
-typedef struct { int64_t len; const char** data; } ailang_arr_str;
+ * Arrays are a struct-by-value (len + cap + data pointer). The backing
+ * store is GC_MALLOC'd so it survives across function boundaries without
+ * any user-side memory management. We keep struct-by-value so `_Generic`
+ * can dispatch on the static type — pointers to different element types
+ * would alias.
+ *
+ * Semantics: like a Go slice / Rust Vec with header-by-value. `cap` tracks
+ * the backing buffer's capacity so `push` can amortize via doubling
+ * instead of reallocating on every call (which was the previous O(n²)
+ * behavior for accumulator-style code). Two struct values may share a
+ * backing buffer; writes past one view's `len` but within `cap` are
+ * invisible to that view because iteration always uses `len`. */
+typedef struct { int64_t len; int64_t cap; int64_t* data; } ailang_arr_i64;
+typedef struct { int64_t len; int64_t cap; const char** data; } ailang_arr_str;
 
 static inline ailang_arr_i64 ailang_arr_i64_make(int64_t n, const int64_t* src) {
     ailang_arr_i64 a;
     a.len = n;
+    a.cap = n;
     a.data = (int64_t*) GC_MALLOC((size_t)n * sizeof(int64_t));
     for (int64_t i = 0; i < n; i++) a.data[i] = src[i];
     return a;
@@ -2996,6 +3123,7 @@ static inline ailang_arr_i64 ailang_arr_i64_make(int64_t n, const int64_t* src) 
 static inline ailang_arr_str ailang_arr_str_make(int64_t n, const char* const* src) {
     ailang_arr_str a;
     a.len = n;
+    a.cap = n;
     a.data = (const char**) GC_MALLOC((size_t)n * sizeof(const char*));
     for (int64_t i = 0; i < n; i++) a.data[i] = src[i];
     return a;
@@ -3128,38 +3256,51 @@ typedef struct {
     void* env;
 } ailang_closure_t;
 
-/* push/pop — value-semantics: produce a fresh array, leaving the input
- * alone. O(n) per call. Reference-semantics (in-place push) would need
- * the array type itself to become a pointer; deferred. */
+/* push — amortized O(1) via 2x doubling. When `cap > len` the new element
+ * is written in place and the same backing buffer is shared with the
+ * caller's value (caller's `len` is unchanged because the struct is
+ * passed by value, so they still see the old view). When `cap == len`
+ * we grow to max(8, cap*2) and copy. */
 static ailang_arr_i64 ailang_arr_i64_push(ailang_arr_i64 a, int64_t x) {
+    if (a.cap > a.len) {
+        a.data[a.len] = x;
+        a.len += 1;
+        return a;
+    }
+    int64_t new_cap = a.cap > 0 ? a.cap * 2 : 8;
+    int64_t* new_data = (int64_t*) GC_MALLOC((size_t)new_cap * sizeof(int64_t));
+    if (a.len) memcpy(new_data, a.data, (size_t)a.len * sizeof(int64_t));
+    new_data[a.len] = x;
     ailang_arr_i64 b;
     b.len = a.len + 1;
-    b.data = (int64_t*) GC_MALLOC((size_t)b.len * sizeof(int64_t));
-    if (a.len) memcpy(b.data, a.data, (size_t)a.len * sizeof(int64_t));
-    b.data[a.len] = x;
+    b.cap = new_cap;
+    b.data = new_data;
     return b;
 }
 static ailang_arr_str ailang_arr_str_push(ailang_arr_str a, const char* x) {
+    if (a.cap > a.len) {
+        a.data[a.len] = x;
+        a.len += 1;
+        return a;
+    }
+    int64_t new_cap = a.cap > 0 ? a.cap * 2 : 8;
+    const char** new_data = (const char**) GC_MALLOC((size_t)new_cap * sizeof(const char*));
+    if (a.len) memcpy(new_data, a.data, (size_t)a.len * sizeof(const char*));
+    new_data[a.len] = x;
     ailang_arr_str b;
     b.len = a.len + 1;
-    b.data = (const char**) GC_MALLOC((size_t)b.len * sizeof(const char*));
-    if (a.len) memcpy(b.data, a.data, (size_t)a.len * sizeof(const char*));
-    b.data[a.len] = x;
+    b.cap = new_cap;
+    b.data = new_data;
     return b;
 }
+/* pop — just decrements the view's len; the backing buffer is unchanged. */
 static ailang_arr_i64 ailang_arr_i64_pop(ailang_arr_i64 a) {
-    ailang_arr_i64 b;
-    b.len = a.len > 0 ? a.len - 1 : 0;
-    b.data = (int64_t*) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(int64_t));
-    if (b.len) memcpy(b.data, a.data, (size_t)b.len * sizeof(int64_t));
-    return b;
+    if (a.len > 0) a.len -= 1;
+    return a;
 }
 static ailang_arr_str ailang_arr_str_pop(ailang_arr_str a) {
-    ailang_arr_str b;
-    b.len = a.len > 0 ? a.len - 1 : 0;
-    b.data = (const char**) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(const char*));
-    if (b.len) memcpy(b.data, a.data, (size_t)b.len * sizeof(const char*));
-    return b;
+    if (a.len > 0) a.len -= 1;
+    return a;
 }
 #define push(arr, x) _Generic((arr), \
     ailang_arr_i64: ailang_arr_i64_push, \
@@ -3188,6 +3329,7 @@ static int ailang_cmp_str(const void* a, const void* b) {
 static ailang_arr_i64 ailang_arr_i64_sort(ailang_arr_i64 a) {
     ailang_arr_i64 b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (int64_t*) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(int64_t));
     if (b.len) memcpy(b.data, a.data, (size_t)b.len * sizeof(int64_t));
     if (b.len > 1) qsort(b.data, (size_t)b.len, sizeof(int64_t), ailang_cmp_i64);
@@ -3196,6 +3338,7 @@ static ailang_arr_i64 ailang_arr_i64_sort(ailang_arr_i64 a) {
 static ailang_arr_str ailang_arr_str_sort(ailang_arr_str a) {
     ailang_arr_str b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (const char**) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(const char*));
     if (b.len) memcpy((void*)b.data, a.data, (size_t)b.len * sizeof(const char*));
     if (b.len > 1) qsort((void*)b.data, (size_t)b.len, sizeof(const char*), ailang_cmp_str);
@@ -3205,6 +3348,7 @@ static ailang_arr_str ailang_arr_str_sort(ailang_arr_str a) {
 static ailang_arr_i64 ailang_arr_i64_reverse(ailang_arr_i64 a) {
     ailang_arr_i64 b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (int64_t*) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < b.len; i++) b.data[i] = a.data[b.len - 1 - i];
     return b;
@@ -3212,6 +3356,7 @@ static ailang_arr_i64 ailang_arr_i64_reverse(ailang_arr_i64 a) {
 static ailang_arr_str ailang_arr_str_reverse(ailang_arr_str a) {
     ailang_arr_str b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (const char**) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(const char*));
     for (int64_t i = 0; i < b.len; i++) b.data[i] = a.data[b.len - 1 - i];
     return b;
@@ -3268,6 +3413,7 @@ static ailang_arr_i64 ailang_arr_i64_map(ailang_arr_i64 a, ailang_closure_t f) {
     FN fp = (FN) f.fn;
     ailang_arr_i64 b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (int64_t*) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < a.len; i++) b.data[i] = fp(f.env, a.data[i]);
     return b;
@@ -3282,6 +3428,7 @@ static ailang_arr_i64 ailang_arr_i64_filter(ailang_arr_i64 a, ailang_closure_t p
         if (fp(pred.env, a.data[i])) b.data[n++] = a.data[i];
     }
     b.len = n;
+    b.cap = a.len;
     return b;
 }
 static int64_t ailang_arr_i64_reduce(ailang_arr_i64 a, int64_t init, ailang_closure_t f) {
@@ -3297,6 +3444,7 @@ static ailang_arr_str ailang_arr_str_map(ailang_arr_str a, ailang_closure_t f) {
     FN fp = (FN) f.fn;
     ailang_arr_str b;
     b.len = a.len;
+    b.cap = a.len;
     b.data = (const char**) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(const char*));
     for (int64_t i = 0; i < a.len; i++) b.data[i] = fp(f.env, a.data[i]);
     return b;
@@ -3311,6 +3459,7 @@ static ailang_arr_str ailang_arr_str_filter(ailang_arr_str a, ailang_closure_t p
         if (fp(pred.env, a.data[i])) b.data[n++] = a.data[i];
     }
     b.len = n;
+    b.cap = a.len;
     return b;
 }
 /* reduce on [str]: accumulator is i64. */
@@ -3339,6 +3488,7 @@ static ailang_arr_i64 ailang_arr_i64_slice(ailang_arr_i64 a, int64_t start, int6
     if (end < start) end = start;
     ailang_arr_i64 b;
     b.len = end - start;
+    b.cap = b.len;
     b.data = (int64_t*) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(int64_t));
     if (b.len) memcpy(b.data, a.data + start, (size_t)b.len * sizeof(int64_t));
     return b;
@@ -3349,6 +3499,7 @@ static ailang_arr_str ailang_arr_str_slice(ailang_arr_str a, int64_t start, int6
     if (end < start) end = start;
     ailang_arr_str b;
     b.len = end - start;
+    b.cap = b.len;
     b.data = (const char**) GC_MALLOC((size_t)(b.len > 0 ? b.len : 1) * sizeof(const char*));
     if (b.len) memcpy((void*)b.data, a.data + start, (size_t)b.len * sizeof(const char*));
     return b;
@@ -3482,6 +3633,7 @@ static ailang_arr_str split(const char* s, const char* sep) {
     if (!sep || !*sep) {
         ailang_arr_str a;
         a.len = 1;
+        a.cap = 1;
         a.data = (const char**) GC_MALLOC(sizeof(const char*));
         a.data[0] = s;
         return a;
@@ -3493,6 +3645,7 @@ static ailang_arr_str split(const char* s, const char* sep) {
     while ((p = strstr(p, sep)) != NULL) { pieces++; p += lsep; }
     ailang_arr_str a;
     a.len = pieces;
+    a.cap = pieces;
     a.data = (const char**) GC_MALLOC((size_t)pieces * sizeof(const char*));
     const char* r = s;
     int64_t i = 0;
@@ -3517,6 +3670,7 @@ static ailang_arr_str args(void) {
     int64_t n = ailang_argc_ > 1 ? (int64_t)(ailang_argc_ - 1) : 0;
     ailang_arr_str a;
     a.len = n;
+    a.cap = n;
     a.data = (const char**) GC_MALLOC((size_t)(n > 0 ? n : 1) * sizeof(const char*));
     for (int64_t i = 0; i < n; i++) a.data[i] = ailang_argv_[i + 1];
     return a;
@@ -3870,6 +4024,7 @@ static void ailang_println_map_ss(ailang_map_ss m) { ailang_print_map_ss(m); pri
 static ailang_arr_i64 ailang_map_ii_keys(ailang_map_ii m) {
     ailang_arr_i64 a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (int64_t*) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(int64_t));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->keys[i];
@@ -3878,6 +4033,7 @@ static ailang_arr_i64 ailang_map_ii_keys(ailang_map_ii m) {
 static ailang_arr_i64 ailang_map_ii_values(ailang_map_ii m) {
     ailang_arr_i64 a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (int64_t*) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(int64_t));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->values[i];
@@ -3886,6 +4042,7 @@ static ailang_arr_i64 ailang_map_ii_values(ailang_map_ii m) {
 static ailang_arr_str ailang_map_si_keys(ailang_map_si m) {
     ailang_arr_str a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (const char**) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(const char*));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->keys[i];
@@ -3894,6 +4051,7 @@ static ailang_arr_str ailang_map_si_keys(ailang_map_si m) {
 static ailang_arr_i64 ailang_map_si_values(ailang_map_si m) {
     ailang_arr_i64 a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (int64_t*) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(int64_t));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->values[i];
@@ -3902,6 +4060,7 @@ static ailang_arr_i64 ailang_map_si_values(ailang_map_si m) {
 static ailang_arr_str ailang_map_ss_keys(ailang_map_ss m) {
     ailang_arr_str a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (const char**) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(const char*));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->keys[i];
@@ -3910,6 +4069,7 @@ static ailang_arr_str ailang_map_ss_keys(ailang_map_ss m) {
 static ailang_arr_str ailang_map_ss_values(ailang_map_ss m) {
     ailang_arr_str a;
     a.len = m->len;
+    a.cap = m->len;
     a.data = (const char**) GC_MALLOC((size_t)(a.len > 0 ? a.len : 1) * sizeof(const char*));
     int64_t n = 0;
     for (int64_t i = 0; i < m->cap; i++) if (m->occupied[i]) a.data[n++] = m->values[i];
