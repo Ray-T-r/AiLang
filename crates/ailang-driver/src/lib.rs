@@ -312,6 +312,43 @@ fn invoke_c_compiler(
         // libm is universally available and harmless to link unconditionally;
         // `std/math.ail` declares sqrt/sin/cos/log/exp/... as externs.
         cmd.arg("-lm");
+
+        // libpq: only link if the generated C actually references the
+        // Postgres builtins. Probe order mirrors bdw-gc: $PG_PREFIX →
+        // pkg-config → brew. If detected, add -I/-L; -lpq is always
+        // appended when needed (link error if libpq is missing).
+        let c_uses_libpq = std::fs::read_to_string(&tmp_path)
+            .map(|s| s.contains("PQconnectdb") || s.contains("PQexec"))
+            .unwrap_or(false);
+        if c_uses_libpq {
+            let pg_prefix = std::env::var("PG_PREFIX")
+                .ok()
+                .or_else(|| pkgconfig_prefix("libpq"))
+                .or_else(|| brew_prefix("libpq"));
+            if let Some(prefix) = &pg_prefix {
+                cmd.arg(format!("-I{prefix}/include"));
+                cmd.arg(format!("-L{prefix}/lib"));
+            }
+            cmd.arg("-lpq");
+        }
+
+        // OpenSSL (libssl + libcrypto) — same conditional pattern.
+        let c_uses_openssl = std::fs::read_to_string(&tmp_path)
+            .map(|s| s.contains("SSL_new") || s.contains("SSL_CTX_new") || s.contains("SHA1("))
+            .unwrap_or(false);
+        if c_uses_openssl {
+            let ssl_prefix = std::env::var("OPENSSL_PREFIX")
+                .ok()
+                .or_else(|| pkgconfig_prefix("openssl"))
+                .or_else(|| brew_prefix("openssl@3"))
+                .or_else(|| brew_prefix("openssl"));
+            if let Some(prefix) = &ssl_prefix {
+                cmd.arg(format!("-I{prefix}/include"));
+                cmd.arg(format!("-L{prefix}/lib"));
+            }
+            cmd.arg("-lssl");
+            cmd.arg("-lcrypto");
+        }
     }
 
     for extra in &opts.extra_cc_args {

@@ -165,6 +165,36 @@ fn e2e_map_iter_demo() {
 }
 
 #[test]
+fn e2e_str_map_demo() {
+    if !project_has("examples/str_map_demo.ail") { return; }
+    run_case("str_map_demo");
+}
+
+#[test]
+fn e2e_bytes_demo() {
+    if !project_has("examples/bytes_demo.ail") { return; }
+    run_case("bytes_demo");
+}
+
+#[test]
+fn e2e_time_demo() {
+    if !project_has("examples/time_demo.ail") { return; }
+    run_case("time_demo");
+}
+
+#[test]
+fn e2e_http_format_demo() {
+    if !project_has("examples/http_format_demo.ail") { return; }
+    run_case("http_format_demo");
+}
+
+#[test]
+fn e2e_http_parse_demo() {
+    if !project_has("examples/http_parse_demo.ail") { return; }
+    run_case("http_parse_demo");
+}
+
+#[test]
 fn e2e_json_demo() {
     if !project_has("examples/json_demo.ail") { return; }
     run_case("json_demo");

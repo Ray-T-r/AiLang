@@ -1,0 +1,69 @@
+// Minimal HTTPS server. One connection, one request, hello response.
+//
+//   # Generate a self-signed cert (only needed once):
+//   openssl req -x509 -newkey rsa:2048 -nodes \
+//     -keyout /tmp/ailang_key.pem \
+//     -out /tmp/ailang_cert.pem \
+//     -days 1 -subj "/CN=localhost"
+//
+//   PORT=18443 \
+//   TLS_CERT=/tmp/ailang_cert.pem \
+//   TLS_KEY=/tmp/ailang_key.pem \
+//   ./examples/https_hello_server &
+//
+//   curl -k https://127.0.0.1:18443/healthz   # -k skips cert verification
+
+im "std/sock.ail"
+im "std/tls.ail"
+im "std/http.ail"
+
+cert := get_env("TLS_CERT")
+key := get_env("TLS_KEY")
+if len(cert) == 0 cert = "/tmp/ailang_cert.pem"
+if len(key) == 0 key = "/tmp/ailang_key.pem"
+
+ctx := tls_server_ctx(cert, key)
+if ctx < 0 {
+  println("tls_server_ctx failed (check cert/key): " + tls_error())
+  exit(1)
+}
+
+port_str := get_env("PORT")
+mu port := str_to_int(port_str)
+if port == 0 port = 18443
+
+fd := tcp_listen("127.0.0.1", port)
+if fd < 0 {
+  println("listen failed")
+  tls_free_ctx(ctx)
+  exit(1)
+}
+println("HTTPS on 127.0.0.1:" + int_to_str(port))
+
+cli := tcp_accept(fd)
+if cli < 0 {
+  println("accept failed")
+  tls_free_ctx(ctx)
+  sock_close(fd)
+  exit(1)
+}
+
+ssl := tls_accept(ctx, cli)
+if ssl < 0 {
+  println("tls handshake failed: " + tls_error())
+  sock_close(cli)
+  tls_free_ctx(ctx)
+  sock_close(fd)
+  exit(1)
+}
+
+// Read the request over TLS, parse, respond, tear down.
+req := bytes_to_str(tls_recv(ssl, 8192))
+path := http_path(req)
+body := "hello " + path + " (over TLS)"
+tls_send_str_all(ssl, http_text(200, body))
+
+tls_close(ssl)
+sock_close(cli)
+tls_free_ctx(ctx)
+sock_close(fd)

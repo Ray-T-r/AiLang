@@ -1,0 +1,30 @@
+// Time builtins: now_ms / mono_ms / sleep_ms / time_iso.
+// Plus the `std/time` helpers.
+
+im "std/time.ail"
+
+// Deterministic: format known Unix-ms timestamps as ISO 8601 (UTC).
+println(time_iso(0))                       // 1970-01-01T00:00:00Z
+println(time_iso(86400000))                // 1970-01-02T00:00:00Z (one day)
+println(time_iso(1000000000000))           // 2001-09-09T01:46:40Z
+
+// Stopwatch pattern (using `tick` + `since` from std/time).
+// Sleep ~60ms; the monotonic clock should report >= 50ms elapsed
+// even on a heavily loaded machine.
+start := tick()
+sleep_ms(60)
+ok := since(start) >= 50
+println(ok)                                // true
+
+// Sanity: wall-clock + monotonic clock are non-negative.
+t1 := now_ms()
+t2 := mono_ms()
+fresh := t1 > 0
+nonneg := t2 >= 0
+println(fresh)                             // true
+println(nonneg)                            // true
+
+// now_iso() emits a 20-char ISO timestamp (YYYY-MM-DDTHH:MM:SSZ).
+ts := now_iso()
+ts_ok := len(ts) == 20
+println(ts_ok)                             // true

@@ -1,0 +1,43 @@
+// Minimal HTTP server. Listens on 127.0.0.1:$PORT (env), serves one
+// request, prints the parsed method/path, sends a response, exits.
+//
+// Run:
+//   ailangc compile examples/http_hello_server.ail
+//   PORT=18080 ./examples/http_hello_server &
+//   curl -s http://127.0.0.1:18080/hi
+//   # -> "hello /hi"
+
+im "std/sock.ail"
+im "std/http.ail"
+
+port_str := get_env("PORT")
+port := str_to_int(port_str)
+if port == 0 port = 18080
+
+fd := tcp_listen("127.0.0.1", port)
+if fd < 0 {
+  println("listen failed")
+  exit(1)
+}
+println("listening on 127.0.0.1:" + int_to_str(port))
+
+cli := tcp_accept(fd)
+if cli < 0 {
+  println("accept failed")
+  sock_close(fd)
+  exit(1)
+}
+
+// Read whatever's available — fine for hello-world. A real server
+// would loop until "\r\n\r\n" is seen and then size the body via
+// Content-Length.
+req := bytes_to_str(sock_recv(cli, 4096))
+method := http_method(req)
+path := http_path(req)
+println("recv: " + method + " " + path)
+
+body := "hello " + path
+sock_send_str_all(cli, http_text(200, body))
+
+sock_close(cli)
+sock_close(fd)

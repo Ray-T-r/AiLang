@@ -1,0 +1,43 @@
+// Redis CRUD demo. Requires redis-server on localhost:6379.
+//
+//   brew install redis && redis-server --daemonize yes
+//   ./examples/redis_demo
+
+im "std/redis.ail"
+
+fd := redis_connect("127.0.0.1", 6379)
+if fd < 0 {
+  println("skipped: no redis")
+  exit(0)
+}
+
+// PING
+println(redis_ping(fd))                    // PONG
+
+// SET / GET
+println(redis_set(fd, "greeting", "hello world"))   // OK
+println(redis_get(fd, "greeting"))                  // hello world
+
+// EXISTS / INCR (numeric counters)
+println(redis_set(fd, "visits", "0"))
+println(redis_exists(fd, "visits"))                 // true
+println(redis_incr(fd, "visits"))                   // 1
+println(redis_incr(fd, "visits"))                   // 2
+println(redis_incr(fd, "visits"))                   // 3
+println(redis_get(fd, "visits"))                    // 3
+
+// Binary-safe value (embedded spaces, newlines, quotes — works because
+// RESP uses length-prefixing, not delimiters)
+weird := "line1\nline2\t\"quoted\""
+println(redis_set(fd, "weird", weird))              // OK
+println(redis_get(fd, "weird") == weird)            // true (printed as 1 or true)
+
+// DEL
+println(redis_del(fd, "greeting"))                  // 1
+println(redis_del(fd, "visits"))                    // 1
+println(redis_del(fd, "weird"))                     // 1
+println(redis_del(fd, "nonexistent"))               // 0
+println(redis_exists(fd, "greeting"))               // false
+
+redis_close(fd)
+println("done")

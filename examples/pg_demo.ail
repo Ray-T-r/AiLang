@@ -1,0 +1,90 @@
+// Postgres CRUD demo — connect, create, insert, select, escape, cleanup.
+//
+// Requires a running Postgres server. The DSN can be a libpq connection
+// string ("host=localhost dbname=test") or a postgres:// URL. Override
+// with the PG_DSN env var:
+//
+//   PG_DSN="postgresql://user:pw@localhost/test" ./examples/pg_demo
+//
+// If no PG_DSN is set and the default fails to connect, the program
+// prints "skipped: no postgres" and exits 0 — so this still works in
+// CI where Postgres isn't available.
+
+im "std/pg.ail"
+
+dsn := get_env("PG_DSN")
+mu effective_dsn := dsn
+if len(effective_dsn) == 0 effective_dsn = "host=127.0.0.1 dbname=postgres connect_timeout=2"
+
+conn := pg_connect(effective_dsn)
+if pg_status(conn) != 0 {
+  println("skipped: no postgres (" + trim(pg_error(conn)) + ")")
+  pg_close(conn)
+  exit(0)
+}
+println("connected")
+
+// Use a temp table — dropped at session end, no cleanup needed.
+r := pg_exec(conn, "CREATE TEMP TABLE ailang_demo (id serial PRIMARY KEY, name text, score int)")
+if !pg_ok(r) {
+  println("CREATE failed: " + trim(pg_result_error(r)))
+  pg_clear(r)
+  pg_close(conn)
+  exit(1)
+}
+pg_clear(r)
+
+// Insert three rows, demonstrate safe escaping for the messy second name.
+inserts := [
+  "INSERT INTO ailang_demo (name, score) VALUES ('alice', 10)",
+  "INSERT INTO ailang_demo (name, score) VALUES (" + pg_escape(conn, "bob O'Brien") + ", 20)",
+  "INSERT INTO ailang_demo (name, score) VALUES ('carol', 30)"
+]
+lp sql in inserts {
+  ir := pg_exec(conn, sql)
+  if !pg_ok(ir) {
+    println("INSERT failed: " + trim(pg_result_error(ir)))
+    pg_clear(ir)
+    pg_close(conn)
+    exit(1)
+  }
+  pg_clear(ir)
+}
+
+// Aggregate query via pg_one.
+total := pg_one(conn, "SELECT count(*)::text FROM ailang_demo")
+println("rows: " + total)
+
+sum_score := pg_one(conn, "SELECT sum(score)::text FROM ailang_demo")
+println("sum: " + sum_score)
+
+// Result-set walk: print all rows ordered by id.
+rs := pg_exec(conn, "SELECT id, name, score FROM ailang_demo ORDER BY id")
+if !pg_ok(rs) {
+  println("SELECT failed: " + trim(pg_result_error(rs)))
+  pg_clear(rs)
+  pg_close(conn)
+  exit(1)
+}
+println("=== table ===")
+pg_print_table(rs)
+pg_clear(rs)
+
+// First-column convenience helper.
+names := pg_first_col(conn, "SELECT name FROM ailang_demo ORDER BY name")
+println("=== names ===")
+lp n in names {
+  println(n)
+}
+
+// Demonstrate SQL injection defence: pg_escape neutralises a quote.
+nasty := "x'); DROP TABLE ailang_demo; --"
+safe_sql := "SELECT " + pg_escape(conn, nasty) + " AS got"
+res2 := pg_exec(conn, safe_sql)
+if pg_ok(res2) {
+  println("safe: " + pg_value(res2, 0, 0))
+}
+pg_clear(res2)
+
+pg_close(conn)
+println("done")

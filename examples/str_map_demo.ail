@@ -1,0 +1,30 @@
+// {str:i64} and {str:str} maps — useful for header tables, configs, word counts.
+
+// {str:i64}: a tiny word-count style table.
+counts := {"apple": 3, "banana": 1, "cherry": 2}
+counts["banana"] = 9
+counts["date"] = 4
+
+println(len(counts))          // 4
+println(counts["apple"])      // 3
+println(counts["banana"])     // 9
+println(has(counts, "cherry"))// true
+println(has(counts, "fig"))   // false
+
+// Iterate (sorted by key for stable output).
+ks := sort(keys(counts))
+lp k in ks {
+  print(k); print(" = "); println(counts[k])
+}
+
+// {str:str}: header-style table.
+hdr := {"host": "example.com", "ua": "ailang/0.2"}
+hdr["accept"] = "application/json"
+println(len(hdr))             // 3
+println(hdr["host"])          // example.com
+println(hdr["accept"])        // application/json
+
+ks2 := sort(keys(hdr))
+lp k in ks2 {
+  print(k); print(": "); println(hdr[k])
+}

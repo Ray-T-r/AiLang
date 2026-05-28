@@ -1,0 +1,53 @@
+// WebSocket echo server. One connection per process via fork.
+//
+//   PORT=18765 ./examples/ws_echo_server &
+//   # Use any browser console:
+//   #   const ws = new WebSocket("ws://127.0.0.1:18765/");
+//   #   ws.onmessage = e => console.log(e.data);
+//   #   ws.onopen = () => ws.send("hello");
+//
+// LIMITATION: text-frame payloads < 126 bytes only.
+
+im "std/sock.ail"
+im "std/http.ail"
+im "std/ws.ail"
+
+port_str := get_env("PORT")
+mu port := str_to_int(port_str)
+if port == 0 port = 18765
+
+proc_no_zombies()
+
+fd := tcp_listen("127.0.0.1", port)
+if fd < 0 {
+  println("listen failed")
+  exit(1)
+}
+println("WebSocket on 127.0.0.1:" + int_to_str(port))
+
+lp i in 0..1000000 {
+  cli := tcp_accept(fd)
+  if cli < 0 br
+  pid := proc_fork()
+  if pid == 0 {
+    sock_close(fd)
+    // 1. HTTP handshake.
+    req := bytes_to_str(sock_recv(cli, 4096))
+    key := http_header(req, "Sec-WebSocket-Key")
+    if len(key) == 0 {
+      sock_send_str(cli, http_text(400, "missing Sec-WebSocket-Key"))
+      sock_close(cli)
+      exit(0)
+    }
+    sock_send_str(cli, ws_handshake_response(key))
+    // 2. Echo loop.
+    lp j in 0..1000 {
+      msg := ws_recv_text(cli)
+      if len(msg) == 0 br
+      ws_send_text(cli, "echo: " + msg)
+    }
+    sock_close(cli)
+    exit(0)
+  }
+  sock_close(cli)
+}

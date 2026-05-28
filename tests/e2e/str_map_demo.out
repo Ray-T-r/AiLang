@@ -1,0 +1,15 @@
+4
+3
+9
+true
+false
+apple = 3
+banana = 9
+cherry = 2
+date = 4
+3
+example.com
+application/json
+accept: application/json
+host: example.com
+ua: ailang/0.2

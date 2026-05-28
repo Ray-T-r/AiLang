@@ -1,0 +1,192 @@
+// std/http.ail — minimal HTTP/1.1 formatter + request parsing.
+//
+// Pure helpers: take/return strings. The caller does socket I/O.
+// Covers: request line (method/path/version), headers (case-insensitive
+// lookup), body (everything after the blank line), and a typed
+// `content_length` accessor. Sufficient for hello-world routing, JSON
+// endpoints, healthchecks, and simple webhook receivers.
+
+// http_reason(status) — standard reason phrase for a status code.
+fn http_reason(status:i64) -> str {
+  if status == 200 rt "OK"
+  if status == 201 rt "Created"
+  if status == 204 rt "No Content"
+  if status == 301 rt "Moved Permanently"
+  if status == 302 rt "Found"
+  if status == 400 rt "Bad Request"
+  if status == 401 rt "Unauthorized"
+  if status == 403 rt "Forbidden"
+  if status == 404 rt "Not Found"
+  if status == 405 rt "Method Not Allowed"
+  if status == 500 rt "Internal Server Error"
+  "OK"
+}
+
+// http_response(status, content_type, body) — build a full HTTP/1.1
+// response string. Adds Content-Length, Content-Type, Connection: close.
+fn http_response(status:i64, content_type:str, body:str) -> str {
+  reason := http_reason(status)
+  blen := int_to_str(len(body))
+  scode := int_to_str(status)
+  "HTTP/1.1 " + scode + " " + reason + "\r\n"
+    + "Content-Length: " + blen + "\r\n"
+    + "Content-Type: " + content_type + "\r\n"
+    + "Connection: close\r\n"
+    + "\r\n"
+    + body
+}
+
+// Convenience: text/plain response.
+fn http_text(status:i64, body:str) -> str {
+  http_response(status, "text/plain; charset=utf-8", body)
+}
+
+// Convenience: application/json response.
+fn http_json(status:i64, body:str) -> str {
+  http_response(status, "application/json", body)
+}
+
+// Convenience: text/html response.
+fn http_html(status:i64, body:str) -> str {
+  http_response(status, "text/html; charset=utf-8", body)
+}
+
+// http_response_keepalive — same shape as http_response but with
+// Connection: keep-alive. Pair with http_recv_request on the server
+// side so a client can pipeline many requests over one TCP connection.
+fn http_response_keepalive(status:i64, content_type:str, body:str) -> str {
+  reason := http_reason(status)
+  blen := int_to_str(len(body))
+  scode := int_to_str(status)
+  "HTTP/1.1 " + scode + " " + reason + "\r\n"
+    + "Content-Length: " + blen + "\r\n"
+    + "Content-Type: " + content_type + "\r\n"
+    + "Connection: keep-alive\r\n"
+    + "\r\n"
+    + body
+}
+
+fn http_text_ka(status:i64, body:str) -> str {
+  http_response_keepalive(status, "text/plain; charset=utf-8", body)
+}
+
+fn http_json_ka(status:i64, body:str) -> str {
+  http_response_keepalive(status, "application/json", body)
+}
+
+// http_method(req) — parse the method from a request line.
+// Expects raw HTTP request as a str. Returns "" if malformed.
+fn http_method(req:str) -> str {
+  i := index_of(req, " ")
+  if i < 0 rt ""
+  substring(req, 0, i)
+}
+
+// http_path(req) — parse the path (URI) from a request line.
+// Returns "" if malformed.
+fn http_path(req:str) -> str {
+  i := index_of(req, " ")
+  if i < 0 rt ""
+  rest := substring(req, i + 1, len(req))
+  j := index_of(rest, " ")
+  if j < 0 {
+    k := index_of(rest, "\r")
+    if k < 0 rt rest
+    rt substring(rest, 0, k)
+  }
+  substring(rest, 0, j)
+}
+
+// http_version(req) — "HTTP/1.1" / "HTTP/1.0" / "" if malformed.
+fn http_version(req:str) -> str {
+  // Skip method + space
+  m := index_of(req, " ")
+  if m < 0 rt ""
+  rest1 := substring(req, m + 1, len(req))
+  // Skip path + space
+  p := index_of(rest1, " ")
+  if p < 0 rt ""
+  rest2 := substring(rest1, p + 1, len(rest1))
+  // Up to \r or end
+  e := index_of(rest2, "\r")
+  if e < 0 rt rest2
+  substring(rest2, 0, e)
+}
+
+// http_header(req, name) — case-insensitive lookup. "" if missing.
+fn http_header(req:str, name:str) -> str {
+  // Headers live between the first \r\n and the blank-line separator.
+  rl := index_of(req, "\r\n")
+  if rl < 0 rt ""
+  end := index_of(req, "\r\n\r\n")
+  hdr_end := end
+  if hdr_end < 0 hdr_end = len(req)
+  hdrs := substring(req, rl + 2, hdr_end)
+  lines := split(hdrs, "\r\n")
+  target := to_lower(name)
+  lp line in lines {
+    colon := index_of(line, ":")
+    if colon > 0 {
+      hname := to_lower(trim(substring(line, 0, colon)))
+      if hname == target {
+        rt trim(substring(line, colon + 1, len(line)))
+      }
+    }
+  }
+  ""
+}
+
+// http_body(req) — everything after the \r\n\r\n separator. "" if none.
+fn http_body(req:str) -> str {
+  sep := index_of(req, "\r\n\r\n")
+  if sep < 0 rt ""
+  substring(req, sep + 4, len(req))
+}
+
+// http_content_length(req) — parsed Content-Length header. 0 if missing
+// or unparseable.
+fn http_content_length(req:str) -> i64 {
+  v := http_header(req, "Content-Length")
+  if len(v) == 0 rt 0
+  str_to_int(v)
+}
+
+// http_wants_keepalive(req) — true if the client signalled it wants the
+// connection reused. HTTP/1.1 defaults to keep-alive unless `Connection:
+// close` is sent. HTTP/1.0 needs an explicit `Connection: keep-alive`.
+fn http_wants_keepalive(req:str) -> bool {
+  conn_hdr := to_lower(http_header(req, "Connection"))
+  if conn_hdr == "close" rt false
+  if conn_hdr == "keep-alive" rt true
+  // No header → fall back to version default.
+  v := http_version(req)
+  v == "HTTP/1.1"
+}
+
+// http_recv_request(fd) — read one full HTTP request from a socket.
+// Reads until `\r\n\r\n` then continues until `Content-Length` bytes of
+// body are in. "" on connection close before headers complete.
+fn http_recv_request(fd:i64) -> str {
+  mu buf := ""
+  // Phase 1: read until end-of-headers.
+  lp i in 0..10000 {
+    chunk := sock_recv(fd, 4096)
+    if len(chunk) == 0 br
+    buf = buf + bytes_to_str(chunk)
+    if index_of(buf, "\r\n\r\n") >= 0 br
+  }
+  hdr_end := index_of(buf, "\r\n\r\n")
+  if hdr_end < 0 rt ""
+  // Phase 2: read remaining body up to Content-Length.
+  cl := http_content_length(buf)
+  body_have := len(buf) - (hdr_end + 4)
+  mu remaining := cl - body_have
+  lp j in 0..10000 {
+    if remaining <= 0 br
+    chunk2 := sock_recv(fd, remaining)
+    if len(chunk2) == 0 br
+    buf = buf + bytes_to_str(chunk2)
+    remaining = remaining - len(chunk2)
+  }
+  buf
+}

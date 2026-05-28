@@ -1,0 +1,69 @@
+// Concurrent HTTP server — accept-fork-handle loop.
+//
+// Each connection runs in its own forked child; the parent loops back
+// to accept the next one. SIGCHLD is set to SIG_IGN so the kernel
+// auto-reaps zombie children. Single-process AiLang code stays simple
+// (no shared mutable state, no thread safety to worry about).
+//
+// Run:
+//   ailangc compile examples/http_concurrent_server.ail
+//   PORT=18080 ./examples/http_concurrent_server &
+//   curl http://127.0.0.1:18080/                  # -> hello /
+//   curl http://127.0.0.1:18080/echo -d "ping"    # -> POST body: ping
+//   curl http://127.0.0.1:18080/healthz           # -> ok <iso-time>
+//   # Stop the server with `kill <pid>` or Ctrl-C.
+
+im "std/sock.ail"
+im "std/http.ail"
+im "std/time.ail"
+
+fn route(req:str) -> str {
+  m := http_method(req)
+  p := http_path(req)
+  if p == "/" rt http_text(200, "hello " + p)
+  if p == "/healthz" rt http_text(200, "ok " + now_iso())
+  if p == "/echo" {
+    body := http_body(req)
+    rt http_text(200, m + " body: " + body)
+  }
+  http_text(404, "not found: " + p)
+}
+
+port_str := get_env("PORT")
+mu port := str_to_int(port_str)
+if port == 0 port = 18080
+
+proc_no_zombies()
+
+fd := tcp_listen("127.0.0.1", port)
+if fd < 0 {
+  println("listen failed")
+  exit(1)
+}
+println("listening on 127.0.0.1:" + int_to_str(port) + " (pid " + int_to_str(proc_getpid()) + ")")
+
+lp i in 0..1000000 {
+  cli := tcp_accept(fd)
+  if cli < 0 {
+    println("accept failed")
+    sock_close(fd)
+    exit(1)
+  }
+  pid := proc_fork()
+  if pid < 0 {
+    println("fork failed")
+    sock_close(cli)
+    sock_close(fd)
+    exit(1)
+  }
+  if pid == 0 {
+    // Child: handle one request and exit.
+    sock_close(fd)
+    req := bytes_to_str(sock_recv(cli, 8192))
+    sock_send_str_all(cli, route(req))
+    sock_close(cli)
+    exit(0)
+  }
+  // Parent: close client fd, loop back.
+  sock_close(cli)
+}

@@ -1,0 +1,85 @@
+// HTTP keep-alive server — multiple requests per TCP connection,
+// including HTTP/1.1 pipelining (the client can send several requests
+// back-to-back without waiting for each response).
+//
+// We keep a per-connection `pending` buffer so leftover bytes from one
+// recv() (the start of the next pipelined request) survive into the
+// next iteration of the request loop.
+//
+// Run:
+//   PORT=18081 ./examples/http_keepalive_server &
+//   curl -s --http1.1 http://127.0.0.1:18081/a http://127.0.0.1:18081/b
+//   # Two responses on a single TCP connection.
+
+im "std/sock.ail"
+im "std/http.ail"
+
+fn route(req:str) -> str {
+  p := http_path(req)
+  if p == "/" rt "root"
+  if p == "/healthz" rt "ok"
+  "echo " + p
+}
+
+port_str := get_env("PORT")
+mu port := str_to_int(port_str)
+if port == 0 port = 18081
+
+proc_no_zombies()
+
+fd := tcp_listen("127.0.0.1", port)
+if fd < 0 {
+  println("listen failed")
+  exit(1)
+}
+println("listening on 127.0.0.1:" + int_to_str(port))
+
+lp accept_i in 0..1000000 {
+  cli := tcp_accept(fd)
+  if cli < 0 br
+  pid := proc_fork()
+  if pid == 0 {
+    sock_close(fd)
+    // Per-connection request loop with a leftover buffer so pipelined
+    // requests don't get dropped.
+    mu pending := ""
+    mu keep := true
+    lp r in 0..1000 {
+      if !keep br
+      // Phase 1: ensure end-of-headers is in `pending`.
+      mu hdr_end := index_of(pending, "\r\n\r\n")
+      lp p1 in 0..10000 {
+        if hdr_end >= 0 br
+        chunk := sock_recv(cli, 4096)
+        if len(chunk) == 0 br
+        pending = pending + bytes_to_str(chunk)
+        hdr_end = index_of(pending, "\r\n\r\n")
+      }
+      if hdr_end < 0 br
+      // Phase 2: read remaining body up to Content-Length.
+      cl := http_content_length(pending)
+      req_total := hdr_end + 4 + cl
+      lp p2 in 0..10000 {
+        if len(pending) >= req_total br
+        chunk2 := sock_recv(cli, req_total - len(pending))
+        if len(chunk2) == 0 br
+        pending = pending + bytes_to_str(chunk2)
+      }
+      // Slice out this request, keep the rest for next loop.
+      req := substring(pending, 0, req_total)
+      pending = substring(pending, req_total, len(pending))
+      // Respond.
+      body := route(req)
+      ka := http_wants_keepalive(req)
+      if ka {
+        sock_send_str_all(cli, http_text_ka(200, body))
+      } el {
+        sock_send_str_all(cli, http_text(200, body))
+        keep = false
+      }
+    }
+    sock_close(cli)
+    exit(0)
+  }
+  sock_close(cli)
+}

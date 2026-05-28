@@ -1,0 +1,30 @@
+// Pure-function HTTP helpers — no sockets involved. Deterministic.
+
+im "std/http.ail"
+
+// 1. Reason phrases.
+println(http_reason(200))   // OK
+println(http_reason(404))   // Not Found
+println(http_reason(500))   // Internal Server Error
+
+// 2. Response shaping — Content-Length + headers + body.
+r := http_text(200, "hello")
+println(r)
+
+// 3. JSON response.
+j := http_json(201, "{\"ok\":true}")
+println(j)
+
+// 4. Parsing the request line.
+req := "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n"
+println(http_method(req))   // GET
+println(http_path(req))     // /healthz
+
+// 5. Malformed input → empty strings, not crashes.
+println(http_method(""))    // (empty)
+println(http_path("garbage"))   // (empty)
+
+// 6. POST with body.
+post := "POST /api/v1/items HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello"
+println(http_method(post))  // POST
+println(http_path(post))    // /api/v1/items

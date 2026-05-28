@@ -1,0 +1,13 @@
+POST
+/api/items
+HTTP/1.1
+example.com
+application/json
+22
+ailang/0.2
+
+22
+{"name":"widget","q":1}
+HTTP/1.0
+0
+true

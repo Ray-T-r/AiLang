@@ -1,0 +1,21 @@
+OK
+Not Found
+Internal Server Error
+HTTP/1.1 200 OK
+Content-Length: 5
+Content-Type: text/plain; charset=utf-8
+Connection: close
+
+hello
+HTTP/1.1 201 Created
+Content-Length: 11
+Content-Type: application/json
+Connection: close
+
+{"ok":true}
+GET
+/healthz
+
+
+POST
+/api/v1/items

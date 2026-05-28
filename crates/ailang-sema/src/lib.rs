@@ -27,6 +27,11 @@ pub enum Ty {
     F64,
     Bool,
     Str,
+    /// Binary buffer — can contain `\0`. Codegen lowers to `ailang_bytes`
+    /// (a `{ int64_t len; const uint8_t* data; }`). Distinct from `Str`
+    /// (which is a nul-terminated `const char*`) so protocol/IO code can
+    /// hold arbitrary bytes.
+    Bytes,
     /// Homogeneous array `[T]`. For M4+ we only generate code for the
     /// `[i64]` and `[str]` instantiations.
     Array(Box<Ty>),
@@ -242,6 +247,15 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
     let io_builtins: &[(&str, &[(&str, Ty)], Ty)] = &[
         ("read_file",  &[("path", Ty::Str)],                   Ty::Str),
         ("write_file", &[("path", Ty::Str), ("contents", Ty::Str)], Ty::Bool),
+        // Binary I/O — `bytes` keeps explicit length and may contain `\0`.
+        ("read_file_bytes",  &[("path", Ty::Str)],                  Ty::Bytes),
+        ("write_file_bytes", &[("path", Ty::Str), ("b", Ty::Bytes)], Ty::Bool),
+        ("str_to_bytes",     &[("s", Ty::Str)],                     Ty::Bytes),
+        ("bytes_to_str",     &[("b", Ty::Bytes)],                   Ty::Str),
+        // `bytes_at` is the long-form name for indexing into bytes; `b[i]`
+        // also works via the polymorphic `ailang_at`.
+        ("bytes_at",   &[("b", Ty::Bytes), ("i", Ty::I64)], Ty::I64),
+        ("bytes_slice",&[("b", Ty::Bytes), ("lo", Ty::I64), ("hi", Ty::I64)], Ty::Bytes),
         ("read_line",  &[],                                    Ty::Str),
         ("int_to_str", &[("n", Ty::I64)],                      Ty::Str),
         ("str_to_int", &[("s", Ty::Str)],                      Ty::I64),
@@ -286,6 +300,55 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
         ("reverse",      &[("arr", Ty::Unknown)], Ty::Unknown),
         // i64-only abs to complement libc abs (which is i32).
         ("abs_i64",      &[("n", Ty::I64)], Ty::I64),
+        // Time: wall-clock for timestamps; monotonic for durations.
+        ("now_ms",       &[],                 Ty::I64),
+        ("now_us",       &[],                 Ty::I64),
+        ("mono_ms",      &[],                 Ty::I64),
+        ("sleep_ms",     &[("ms", Ty::I64)],  Ty::Unit),
+        ("time_iso",     &[("ms", Ty::I64)],  Ty::Str),
+        // TCP sockets (POSIX). All ops return -1 on error (sock_recv: empty bytes).
+        ("tcp_listen",   &[("host", Ty::Str), ("port", Ty::I64)],     Ty::I64),
+        ("tcp_accept",   &[("fd", Ty::I64)],                          Ty::I64),
+        ("tcp_connect",  &[("host", Ty::Str), ("port", Ty::I64)],     Ty::I64),
+        ("sock_send",    &[("fd", Ty::I64), ("b", Ty::Bytes)],        Ty::I64),
+        ("sock_send_str",&[("fd", Ty::I64), ("s", Ty::Str)],          Ty::I64),
+        ("sock_recv",    &[("fd", Ty::I64), ("max", Ty::I64)],        Ty::Bytes),
+        ("sock_close",   &[("fd", Ty::I64)],                          Ty::I64),
+        // Process management (POSIX). Used for fork-per-request servers.
+        ("proc_fork",       &[],                Ty::I64),
+        ("proc_getpid",     &[],                Ty::I64),
+        ("proc_no_zombies", &[],                Ty::Unit),
+        ("proc_reap",       &[],                Ty::I64),
+        // Postgres (libpq). Handles are opaque i64 pointers; callers MUST
+        // `pg_close(conn)` and `pg_clear(res)`. Always `pg_escape` user
+        // input before concatenating into SQL.
+        ("pg_connect",      &[("conninfo", Ty::Str)],                          Ty::I64),
+        ("pg_status",       &[("conn", Ty::I64)],                              Ty::I64),
+        ("pg_error",        &[("conn", Ty::I64)],                              Ty::Str),
+        ("pg_close",        &[("conn", Ty::I64)],                              Ty::Unit),
+        ("pg_exec",         &[("conn", Ty::I64), ("sql", Ty::Str)],            Ty::I64),
+        ("pg_ok",           &[("res", Ty::I64)],                               Ty::Bool),
+        ("pg_result_error", &[("res", Ty::I64)],                               Ty::Str),
+        ("pg_clear",        &[("res", Ty::I64)],                               Ty::Unit),
+        ("pg_nrows",        &[("res", Ty::I64)],                               Ty::I64),
+        ("pg_ncols",        &[("res", Ty::I64)],                               Ty::I64),
+        ("pg_value",        &[("res", Ty::I64), ("row", Ty::I64), ("col", Ty::I64)], Ty::Str),
+        ("pg_isnull",       &[("res", Ty::I64), ("row", Ty::I64), ("col", Ty::I64)], Ty::Bool),
+        ("pg_col_name",     &[("res", Ty::I64), ("col", Ty::I64)],             Ty::Str),
+        ("pg_affected",     &[("res", Ty::I64)],                               Ty::I64),
+        ("pg_escape",       &[("conn", Ty::I64), ("s", Ty::Str)],              Ty::Str),
+        // TLS (OpenSSL).  Handles are i64 (`SSL_CTX*` and `SSL*`).
+        ("tls_server_ctx",  &[("cert", Ty::Str), ("key", Ty::Str)],  Ty::I64),
+        ("tls_client_ctx",  &[],                                     Ty::I64),
+        ("tls_free_ctx",    &[("ctx", Ty::I64)],                     Ty::Unit),
+        ("tls_accept",      &[("ctx", Ty::I64), ("fd", Ty::I64)],    Ty::I64),
+        ("tls_connect_fd",  &[("ctx", Ty::I64), ("fd", Ty::I64)],    Ty::I64),
+        ("tls_send",        &[("ssl", Ty::I64), ("b", Ty::Bytes)],   Ty::I64),
+        ("tls_send_str",    &[("ssl", Ty::I64), ("s", Ty::Str)],     Ty::I64),
+        ("tls_recv",        &[("ssl", Ty::I64), ("max", Ty::I64)],   Ty::Bytes),
+        ("tls_close",       &[("ssl", Ty::I64)],                     Ty::Unit),
+        ("tls_error",       &[],                                     Ty::Str),
+        ("sha1",            &[("s", Ty::Str)],                       Ty::Bytes),
         // !T result-type builtins. `ok` is polymorphic via _Generic;
         // `err_T` are explicit per-T because the return type isn't
         // recoverable from a `str` argument alone.
@@ -599,7 +662,38 @@ fn check_expr_inner(
                     callee.span,
                 ));
             }
-            for a in args { check_expr(a, fns, env, diags); }
+            let arg_tys: Vec<Ty> = args.iter().map(|a| check_expr(a, fns, env, diags)).collect();
+            // Polymorphic builtins are registered with `Unknown` return; refine
+            // them here from actual arg types so downstream (codegen, loop
+            // element-type inference) sees the right `Array(_)` or `Map(_,_)`.
+            if let Some(name) = fname {
+                match name {
+                    // Same-shape array transforms: pass through arg[0]'s type.
+                    "sort" | "reverse" | "slice" | "push" | "filter" | "map" => {
+                        if let Some(t) = arg_tys.first() {
+                            if matches!(t, Ty::Array(_)) {
+                                return t.clone();
+                            }
+                        }
+                    }
+                    // `pop(arr)` returns the same array (value-semantics).
+                    "pop" => {
+                        if let Some(t) = arg_tys.first() {
+                            if matches!(t, Ty::Array(_)) {
+                                return t.clone();
+                            }
+                        }
+                    }
+                    // `keys(m)` / `values(m)` derive element type from map.
+                    "keys" | "values" => {
+                        if let Some(Ty::Map(k, v)) = arg_tys.first() {
+                            let elem = if name == "keys" { (**k).clone() } else { (**v).clone() };
+                            return Ty::Array(Box::new(elem));
+                        }
+                    }
+                    _ => {}
+                }
+            }
             sig.return_ty.clone()
         }
         ExprKind::Binary { op, lhs, rhs } => {
@@ -996,6 +1090,7 @@ pub fn ast_ty_kind_to_ty(t: &Type) -> Ty {
             "f32" | "f64" => Ty::F64,
             "bool" => Ty::Bool,
             "str" => Ty::Str,
+            "bytes" => Ty::Bytes,
             // Any other path is assumed to name a user struct. Sema's
             // struct_table is the authoritative source; codegen uses the
             // name verbatim as the C type.

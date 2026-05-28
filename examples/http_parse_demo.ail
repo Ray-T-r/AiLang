@@ -1,0 +1,30 @@
+// Full HTTP request parsing — headers, body, Content-Length, version.
+
+im "std/http.ail"
+
+req := "POST /api/items HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\nContent-Length: 22\r\nUser-Agent: ailang/0.2\r\n\r\n{\"name\":\"widget\",\"q\":1}"
+
+// Request line.
+println(http_method(req))               // POST
+println(http_path(req))                 // /api/items
+println(http_version(req))              // HTTP/1.1
+
+// Headers — case-insensitive lookup.
+println(http_header(req, "Host"))               // example.com
+println(http_header(req, "content-type"))       // application/json (case-insensitive)
+println(http_header(req, "CONTENT-LENGTH"))     // 22
+println(http_header(req, "User-Agent"))         // ailang/0.2
+println(http_header(req, "X-Not-Present"))      // (empty)
+
+// Typed accessor.
+println(http_content_length(req))       // 22
+
+// Body.
+println(http_body(req))                 // {"name":"widget","q":1}
+
+// GET without body.
+get := "GET /healthz HTTP/1.0\r\nHost: x\r\n\r\n"
+println(http_version(get))              // HTTP/1.0
+println(http_content_length(get))       // 0
+empty_body := len(http_body(get)) == 0
+println(empty_body)                     // true

@@ -1,0 +1,31 @@
+// `bytes` — binary buffer that may contain `\0`, distinct from `str`.
+
+// 1. str → bytes → str round-trip preserves content.
+s := "hello"
+b := str_to_bytes(s)
+println(len(b))               // 5
+println(bytes_at(b, 0))       // 104  ('h')
+println(bytes_at(b, 4))       // 111  ('o')
+println(bytes_to_str(b))      // hello
+
+// 2. Pretty-print: printable ASCII verbatim, control bytes as \xNN.
+println(b)                    // b"hello"
+
+// 3. Slicing.
+sl := bytes_slice(b, 1, 4)
+println(len(sl))              // 3
+println(bytes_to_str(sl))     // ell
+println(sl)                   // b"ell"
+
+// 4. Indexing via `b[i]` (polymorphic ailang_at).
+println(b[1])                 // 101  ('e')
+
+// 5. File round-trip — write bytes, read bytes, verify.
+write_file_bytes("/tmp/ailang_bytes_demo.bin", b)
+got := read_file_bytes("/tmp/ailang_bytes_demo.bin")
+println(len(got))             // 5
+println(bytes_to_str(got))    // hello
+
+// 6. Empty bytes from a missing file.
+miss := read_file_bytes("/tmp/__definitely_not_a_real_file__.bin")
+println(len(miss))            // 0

@@ -1,0 +1,32 @@
+// std/time.ail — friendly wrappers around the time builtins.
+//
+// The primitives `now_ms`, `now_us`, `mono_ms`, `sleep_ms`, `time_iso`
+// are always in scope (no `im` needed). This module just adds a few
+// commonly used patterns on top.
+
+// elapsed_ms(t) — milliseconds since `t` was sampled with mono_ms().
+// Use mono_ms() (not now_ms()) so adjustments to the system clock can't
+// produce negative or jumpy durations.
+fn elapsed_ms(t:i64) -> i64 {
+  mono_ms() - t
+}
+
+// Alias for mono_ms() — reads better at the start of a timed block.
+fn tick() -> i64 {
+  mono_ms()
+}
+
+// since(t) — alias for elapsed_ms(t).
+fn since(t:i64) -> i64 {
+  mono_ms() - t
+}
+
+// sleep_s(seconds) — convenience over sleep_ms.
+fn sleep_s(s:i64) {
+  sleep_ms(s * 1000)
+}
+
+// now_iso() — ISO 8601 timestamp at this moment.
+fn now_iso() -> str {
+  time_iso(now_ms())
+}
