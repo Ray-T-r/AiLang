@@ -188,7 +188,7 @@ numbers.
 
 ## What works today
 
-The compiler runs the full pipeline: lex → parse → sema → codegen → `clang -O2` → native binary. **55 automated tests pass; 25 end-to-end example programs compile and run correctly.**
+The compiler runs the full pipeline: lex → parse → sema → codegen → `clang -O2` → native binary. **60 automated tests pass; 30 end-to-end example programs compile and run correctly.**
 
 Working: functions, recursion, mutual recursion, `if`/`el`, `lp` (for-in
 + while + map `(k,v)` destructure), `mt` match with tuple **and variant**
@@ -231,6 +231,14 @@ set of always-available builtins:
   `err_str(msg)` / etc. construct; `expr?` propagates the first failure
   to the enclosing fn's return; `is_ok` / `is_err` / `unwrap` / `err_msg`
   inspect
+- **Bytes type** (distinct from `str`, may contain NUL): `str_to_bytes`,
+  `bytes_to_str`, `bytes_at`, `bytes_slice`, indexable via `b[i]`,
+  `len(b)` returns byte count
+- **TCP sockets**: `tcp_listen(host, port)`, `tcp_accept(fd)`,
+  `tcp_connect(host, port)`, `sock_send` / `sock_send_str`, `sock_recv(fd, max) -> bytes`,
+  `sock_close` — always in scope, no `im` needed
+- **Clocks + sleep**: `now_ms`, `now_us`, `mono_ms`, `time_iso(ms)`,
+  `sleep_ms(ms)` — always in scope
 
 Default backend transpiles to C99/C11 — `clang -O2` produces the
 machine code. There's also an experimental LLVM IR text backend
@@ -492,6 +500,29 @@ println(first([10, 20, 30]))                // 10
 println(first(["alice", "bob"]))            // alice
 ```
 
+### Tiny HTTP server (TCP + HTTP stdlib)
+
+```
+im "std/sock.ail"
+im "std/http.ail"
+
+fd := tcp_listen("127.0.0.1", 18080)
+println("listening on :18080")
+lp true {
+  cli := tcp_accept(fd)
+  req := http_recv_request(cli)
+  body := "echoed path: " + http_path(req) + "\n"
+  sock_send_str_all(cli, http_text(200, body))
+  sock_close(cli)
+}
+```
+
+See [`examples/http_hello_server.ail`](examples/http_hello_server.ail),
+[`examples/http_keepalive_server.ail`](examples/http_keepalive_server.ail),
+[`examples/https_hello_server.ail`](examples/https_hello_server.ail) (TLS),
+and [`examples/ws_echo_server.ail`](examples/ws_echo_server.ail)
+(WebSocket) for the rest.
+
 ### Modules + seed stdlib
 
 ```
@@ -504,13 +535,18 @@ println(gcd(36, 24))                        // 12
 
 A small stdlib lives in [`std/`](std/):
 
-- `std/math.ail` — `min`/`max`/`ipow`/`gcd` + libc `abs`/`rand`/`srand`
-  + libm `sqrt`/`pow`/`sin`/`cos`/`tan`/`log`/`log2`/`log10`/`exp`/
-  `floor`/`ceil`.
-- `std/str.ail` — libc `strcmp`/`atoi` and an `eq`/`parse_int` wrapper.
-- `std/json.ail` — `parse_flat_obj_str(text) -> {str:str}` and
-  `parse_flat_obj_int(text) -> {str:i64}`, hand-written in pure
-  AiLang (~150 lines).
+| module | what it provides |
+|--------|------------------|
+| `std/math.ail`  | `min`/`max`/`ipow`/`gcd` + libc `abs`/`rand`/`srand` + libm `sqrt`/`pow`/`sin`/`cos`/`tan`/`log`/`log2`/`log10`/`exp`/`floor`/`ceil` |
+| `std/str.ail`   | libc `strcmp`/`atoi`, `eq(a, b)`, `parse_int(s)` |
+| `std/json.ail`  | `parse_flat_obj_str(s) -> {str:str}`, `parse_flat_obj_int(s) -> {str:i64}` — hand-written in pure AiLang, flat (one-level) only |
+| `std/time.ail`  | `tick()`/`since(t)` stopwatch over `mono_ms`, `now_iso()`, `sleep_s(s)` |
+| `std/sock.ail`  | `sock_send_all(fd, b)` and `sock_send_str_all(fd, s)` — write loops over the always-in-scope socket builtins |
+| `std/http.ail`  | HTTP/1.1 over the TCP builtins: `http_text(status, body)`, `http_json(status, body)`, request parsers `http_method` / `http_path` / `http_header(req, name)` / `http_body` / `http_content_length`, `http_recv_request(fd)` (full read incl. Content-Length). Keep-alive variants suffixed `_ka` |
+| `std/redis.ail` | RESP client: `redis_connect`, `redis_set`, `redis_get`, `redis_incr`, `redis_del`, `redis_exists`, `redis_ping`, `redis_close` |
+| `std/pg.ail`    | Postgres via libpq: `pg_connect`, `pg_exec`, `pg_value`, `pg_nrows`, `pg_ncols`, `pg_escape`, plus helpers `pg_must_connect`, `pg_one(conn, sql)`, `pg_first_col(conn, sql) -> [str]`, `pg_print_table(res)` |
+| `std/tls.ail`   | OpenSSL TLS: `tls_server_ctx`, `tls_client_ctx`, `tls_accept`, `tls_connect_fd`, `tls_send_str_all`, `tls_recv`, `tls_close` |
+| `std/ws.ail`    | WebSocket server: `ws_handshake_response(client_key)`, `ws_send_text(fd, payload)`, `ws_recv_text(fd) -> str` (short-text frames, <126 bytes) |
 
 The same files are mirrored at [`examples/std/`](examples/std/) so
 in-tree e2e tests can `im "std/…"` against a path that resolves

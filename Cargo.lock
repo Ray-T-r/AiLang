@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "ailang-codegen-ir"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-sema",
  "ailang-syntax",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "ailang-codegen-llvm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-hir",
  "ailang-sema",
@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "ailang-diag"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-syntax",
  "ariadne",
@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "ailang-driver"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-codegen-ir",
  "ailang-codegen-llvm",
@@ -44,14 +44,14 @@ dependencies = [
 
 [[package]]
 name = "ailang-hir"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-syntax",
 ]
 
 [[package]]
 name = "ailang-lexer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-syntax",
  "insta",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "ailang-parser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-diag",
  "ailang-lexer",
@@ -70,11 +70,11 @@ dependencies = [
 
 [[package]]
 name = "ailang-runtime"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "ailang-sema"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-diag",
  "ailang-syntax",
@@ -82,14 +82,14 @@ dependencies = [
 
 [[package]]
 name = "ailang-syntax"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ailangc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ailang-driver",
  "clap",
