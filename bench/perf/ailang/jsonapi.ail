@@ -3,7 +3,7 @@ mu total := 2
 lp i in 0..50000 {
   age := 18 + (i % 52)
   if age >= 40 {
-    rec := format("{\"id\":%lld,\"name\":\"user_%lld\",\"age\":%lld}", i, i, age)
+    rec := "{\"id\":${i},\"name\":\"user_${i}\",\"age\":${age}}"
     if count > 0 { total += 1 }
     total += len(rec)
     count += 1

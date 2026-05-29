@@ -155,6 +155,136 @@ fn unescape_char(raw: &str, span: Span, errors: &mut Vec<crate::ParseError>) -> 
     ch
 }
 
+/// Desugar `${expr}` interpolations inside a string literal into a `+`-concat
+/// chain of literal pieces and `to_str(expr)` calls. Returns `None` if the
+/// string contains no interpolation, in which case the caller falls back to
+/// emitting a plain `Lit::Str` expression.
+///
+/// The text inside `${...}` is re-parsed as a full expression, so field
+/// access (`${p.x}`), calls (`${f(a)}`), indexing (`${m[k]}`) and arithmetic
+/// (`${a + b}`) all work — not just bare idents. Anything that doesn't parse
+/// cleanly into a single expression (e.g. `${not an ident here}`) is kept
+/// verbatim, which is also what leaves JSON-ish brace runs untouched.
+///
+/// Brace matching is naive: the first `}` closes the interpolation, so a `}`
+/// *inside* the expression (a map/block literal) would truncate it. Those are
+/// vanishingly rare inside interpolations — store them in a local first.
+///
+/// Escape rule: a `$` not immediately followed by `{` is always literal
+/// (Kotlin/Scala style). This avoids breaking JSON-shaped string literals
+/// that contain `$` or stray `{`.
+pub(crate) fn desugar_interp(s: &str, span: Span) -> Option<Expr> {
+    if !s.contains("${") {
+        return None;
+    }
+
+    enum Part {
+        Lit(String),
+        Expr(Expr),
+    }
+    let mut parts: Vec<Part> = Vec::new();
+    let mut buf = String::new();
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+
+    while i < n {
+        if bytes[i] == b'$' && i + 1 < n && bytes[i + 1] == b'{' {
+            let start = i + 2;
+            let end = (start..n).find(|&j| bytes[j] == b'}');
+            let Some(end) = end else {
+                buf.push('$');
+                i += 1;
+                continue;
+            };
+            let inner = s[start..end].trim();
+            match parse_embedded_expr(inner) {
+                Some(expr) => {
+                    if !buf.is_empty() {
+                        parts.push(Part::Lit(std::mem::take(&mut buf)));
+                    }
+                    parts.push(Part::Expr(expr));
+                }
+                // Doesn't parse as one expression — keep `${...}` verbatim
+                // (e.g. `${not an ident here}`, or a stray JSON-ish brace run).
+                None => buf.push_str(&s[i..=end]),
+            }
+            i = end + 1;
+        } else {
+            let ch_end = next_char_boundary(bytes, i);
+            buf.push_str(&s[i..ch_end]);
+            i = ch_end;
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+    if !buf.is_empty() {
+        parts.push(Part::Lit(buf));
+    }
+
+    let lit_expr = |content: String| Expr {
+        span,
+        kind: ExprKind::Lit(LitExpr {
+            kind: Lit::Str(content),
+            span,
+        }),
+    };
+    let to_str_call = |inner: Expr| Expr {
+        span,
+        kind: ExprKind::Call {
+            callee: Box::new(Expr {
+                span,
+                kind: ExprKind::Ident("to_str".into()),
+            }),
+            args: vec![inner],
+        },
+    };
+    let mut iter = parts.into_iter().map(|p| match p {
+        Part::Lit(s) => lit_expr(s),
+        Part::Expr(e) => to_str_call(e),
+    });
+    let first = iter.next()?;
+    Some(iter.fold(first, |lhs, rhs| Expr {
+        span,
+        kind: ExprKind::Binary {
+            op: BinOp::Add,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+    }))
+}
+
+fn next_char_boundary(bytes: &[u8], i: usize) -> usize {
+    let mut j = i + 1;
+    while j < bytes.len() && (bytes[j] & 0xC0) == 0x80 {
+        j += 1;
+    }
+    j
+}
+
+/// Re-parse the text inside a `${...}` as a standalone expression. Returns
+/// `None` when it doesn't consume the whole slice cleanly into one expression
+/// (so the caller keeps the braces verbatim — e.g. `${not an ident here}`).
+fn parse_embedded_expr(src: &str) -> Option<Expr> {
+    if src.is_empty() {
+        return None;
+    }
+    let tokens = ailang_lexer::lex(src);
+    let mut p = Parser {
+        tokens: &tokens,
+        source: src,
+        cursor: 0,
+        errors: Vec::new(),
+    };
+    let expr = p.parse_expr()?;
+    if !p.at(TokenKind::Eof) || !p.errors.is_empty() {
+        return None;
+    }
+    Some(expr)
+}
+
 fn decode_escapes(s: &str, span: Span, errors: &mut Vec<crate::ParseError>) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
