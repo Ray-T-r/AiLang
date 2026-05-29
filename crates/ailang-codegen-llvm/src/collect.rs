@@ -1,5 +1,6 @@
 //! Collection passes: generic-instance discovery and lambda lifting.
 use crate::typegen::*;
+use crate::visit::{walk_block, walk_expr};
 use ailang_sema::{ResolvedModule, Ty};
 use ailang_syntax::ast::*;
 use ailang_syntax::token::Span;
@@ -34,179 +35,52 @@ pub(crate) fn collect_generic_instances<'a>(
     out
 }
 
-pub(crate) fn collect_calls_block(
+fn collect_calls_block(
     b: &Block,
     generic_names: &std::collections::HashSet<String>,
     generic_fns: &std::collections::HashMap<&String, &FnDecl>,
     res: &ResolvedModule,
     out: &mut std::collections::BTreeMap<String, std::collections::BTreeSet<Vec<Ty>>>,
 ) {
-    for s in &b.stmts {
-        collect_calls_stmt(s, generic_names, generic_fns, res, out);
-    }
-    if let Some(t) = &b.tail_expr {
-        collect_calls_expr(t, generic_names, generic_fns, res, out);
-    }
-}
-
-pub(crate) fn collect_calls_stmt(
-    s: &Stmt,
-    generic_names: &std::collections::HashSet<String>,
-    generic_fns: &std::collections::HashMap<&String, &FnDecl>,
-    res: &ResolvedModule,
-    out: &mut std::collections::BTreeMap<String, std::collections::BTreeSet<Vec<Ty>>>,
-) {
-    match s {
-        Stmt::Decl { value, .. } => collect_calls_expr(value, generic_names, generic_fns, res, out),
-        Stmt::Assign { target, value, .. } => {
-            collect_calls_expr(target, generic_names, generic_fns, res, out);
-            collect_calls_expr(value, generic_names, generic_fns, res, out);
+    walk_block(b, &mut |e| {
+        let ExprKind::Call { callee, args } = &e.kind else {
+            return;
+        };
+        let ExprKind::Ident(name) = &callee.kind else {
+            return;
+        };
+        if !generic_names.contains(name) {
+            return;
         }
-        Stmt::Expr(e) => collect_calls_expr(e, generic_names, generic_fns, res, out),
-        Stmt::Return { value: Some(e), .. } => {
-            collect_calls_expr(e, generic_names, generic_fns, res, out)
-        }
-        Stmt::If(i) => {
-            collect_calls_expr(&i.cond, generic_names, generic_fns, res, out);
-            collect_calls_block(&i.then_branch, generic_names, generic_fns, res, out);
-            match &i.else_branch {
-                Some(ElseBranch::Block(b)) => {
-                    collect_calls_block(b, generic_names, generic_fns, res, out)
-                }
-                Some(ElseBranch::If(inner)) => collect_calls_stmt(
-                    &Stmt::If((**inner).clone()),
-                    generic_names,
-                    generic_fns,
-                    res,
-                    out,
-                ),
-                None => {}
+        let Some(f) = generic_fns.get(name) else {
+            return;
+        };
+        let type_var_set: std::collections::HashSet<String> =
+            f.type_params.iter().map(|p| p.name.clone()).collect();
+        let mut subst: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
+        // Unify each (param ty, arg ty) pair.
+        for (i, param) in f.params.iter().enumerate() {
+            if let Some(pt) = &param.ty {
+                let arg_ty = args
+                    .get(i)
+                    .and_then(|a| res.expr_types.get(&a.span))
+                    .cloned()
+                    .unwrap_or(Ty::Unknown);
+                unify_ty(pt, &arg_ty, &type_var_set, &mut subst);
             }
         }
-        Stmt::Loop(l) => {
-            match &l.head {
-                Some(LoopHead::ForIn { iter, .. }) => {
-                    collect_calls_expr(iter, generic_names, generic_fns, res, out)
-                }
-                Some(LoopHead::While(c)) => {
-                    collect_calls_expr(c, generic_names, generic_fns, res, out)
-                }
-                None => {}
-            }
-            collect_calls_block(&l.body, generic_names, generic_fns, res, out);
+        // Build the concrete type-tuple in declaration order.
+        let type_args: Vec<Ty> = f
+            .type_params
+            .iter()
+            .map(|tp| subst.get(&tp.name).cloned().unwrap_or(Ty::I64))
+            .collect();
+        // Only register the instance if every type var resolved to a concrete
+        // primitive — otherwise we'd emit two instances mangled the same way.
+        if type_args.iter().all(|t| is_primitive_ty(t)) {
+            out.entry(name.clone()).or_default().insert(type_args);
         }
-        Stmt::Match(m) => {
-            collect_calls_expr(&m.scrutinee, generic_names, generic_fns, res, out);
-            for arm in &m.arms {
-                collect_calls_expr(&arm.body, generic_names, generic_fns, res, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(crate) fn collect_calls_expr(
-    e: &Expr,
-    generic_names: &std::collections::HashSet<String>,
-    generic_fns: &std::collections::HashMap<&String, &FnDecl>,
-    res: &ResolvedModule,
-    out: &mut std::collections::BTreeMap<String, std::collections::BTreeSet<Vec<Ty>>>,
-) {
-    if let ExprKind::Call { callee, args } = &e.kind {
-        if let ExprKind::Ident(name) = &callee.kind {
-            if generic_names.contains(name) {
-                if let Some(f) = generic_fns.get(name) {
-                    let type_var_set: std::collections::HashSet<String> =
-                        f.type_params.iter().map(|p| p.name.clone()).collect();
-                    let mut subst: std::collections::HashMap<String, Ty> =
-                        std::collections::HashMap::new();
-                    // Unify each (param ty, arg ty) pair.
-                    for (i, param) in f.params.iter().enumerate() {
-                        if let Some(pt) = &param.ty {
-                            let arg_ty = args
-                                .get(i)
-                                .and_then(|a| res.expr_types.get(&a.span))
-                                .cloned()
-                                .unwrap_or(Ty::Unknown);
-                            unify_ty(pt, &arg_ty, &type_var_set, &mut subst);
-                        }
-                    }
-                    // Build the concrete type-tuple in declaration order.
-                    let type_args: Vec<Ty> = f
-                        .type_params
-                        .iter()
-                        .map(|tp| subst.get(&tp.name).cloned().unwrap_or(Ty::I64))
-                        .collect();
-                    // Only register the instance if every type var resolved
-                    // to a concrete primitive — otherwise we'd emit two
-                    // instances mangled the same way.
-                    if type_args.iter().all(|t| is_primitive_ty(t)) {
-                        out.entry(name.clone()).or_default().insert(type_args);
-                    }
-                }
-            }
-        }
-        collect_calls_expr(callee, generic_names, generic_fns, res, out);
-        for a in args {
-            collect_calls_expr(a, generic_names, generic_fns, res, out);
-        }
-        return;
-    }
-    match &e.kind {
-        ExprKind::Index { container, index } => {
-            collect_calls_expr(container, generic_names, generic_fns, res, out);
-            collect_calls_expr(index, generic_names, generic_fns, res, out);
-        }
-        ExprKind::Field { container, .. } => {
-            collect_calls_expr(container, generic_names, generic_fns, res, out)
-        }
-        ExprKind::Binary { lhs, rhs, .. } => {
-            collect_calls_expr(lhs, generic_names, generic_fns, res, out);
-            collect_calls_expr(rhs, generic_names, generic_fns, res, out);
-        }
-        ExprKind::Unary { operand, .. } => {
-            collect_calls_expr(operand, generic_names, generic_fns, res, out)
-        }
-        ExprKind::Ternary { cond, then_, else_ } => {
-            collect_calls_expr(cond, generic_names, generic_fns, res, out);
-            collect_calls_expr(then_, generic_names, generic_fns, res, out);
-            collect_calls_expr(else_, generic_names, generic_fns, res, out);
-        }
-        ExprKind::Pipe { lhs, rhs } => {
-            collect_calls_expr(lhs, generic_names, generic_fns, res, out);
-            collect_calls_expr(rhs, generic_names, generic_fns, res, out);
-        }
-        ExprKind::Array(xs) => {
-            for x in xs {
-                collect_calls_expr(x, generic_names, generic_fns, res, out);
-            }
-        }
-        ExprKind::Map(es) => {
-            for (k, v) in es {
-                collect_calls_expr(k, generic_names, generic_fns, res, out);
-                collect_calls_expr(v, generic_names, generic_fns, res, out);
-            }
-        }
-        ExprKind::Tuple(xs) => {
-            for x in xs {
-                collect_calls_expr(x, generic_names, generic_fns, res, out);
-            }
-        }
-        ExprKind::StructLit { fields, .. } => {
-            for (_, v) in fields {
-                collect_calls_expr(v, generic_names, generic_fns, res, out);
-            }
-        }
-        ExprKind::Block(b) => collect_calls_block(b, generic_names, generic_fns, res, out),
-        ExprKind::Try(inner) => collect_calls_expr(inner, generic_names, generic_fns, res, out),
-        ExprKind::Lambda { body, .. } => match body {
-            LambdaBody::Expr(inner) => {
-                collect_calls_expr(inner, generic_names, generic_fns, res, out)
-            }
-            LambdaBody::Block(b) => collect_calls_block(b, generic_names, generic_fns, res, out),
-        },
-        _ => {}
-    }
+    });
 }
 
 /// Per-lambda info: the unique C name, params/body (cloned from AST), and
@@ -442,127 +316,18 @@ pub(crate) fn walk_expr_for_lambdas(
 /// inside a lambda body. Used by capture analysis.
 pub(crate) fn referenced_names_in_body(b: &LambdaBody) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
-    match b {
-        LambdaBody::Expr(e) => collect_refs(e, &mut out),
-        LambdaBody::Block(blk) => collect_refs_block(blk, &mut out),
+    {
+        let mut visit = |e: &Expr| {
+            if let ExprKind::Ident(n) = &e.kind {
+                out.insert(n.clone());
+            }
+        };
+        match b {
+            LambdaBody::Expr(e) => walk_expr(e, &mut visit),
+            LambdaBody::Block(blk) => walk_block(blk, &mut visit),
+        }
     }
     out
-}
-
-pub(crate) fn collect_refs_block(b: &Block, out: &mut std::collections::HashSet<String>) {
-    for s in &b.stmts {
-        match s {
-            Stmt::Decl { value, .. } => collect_refs(value, out),
-            Stmt::Expr(e) => collect_refs(e, out),
-            Stmt::Assign { target, value, .. } => {
-                collect_refs(target, out);
-                collect_refs(value, out);
-            }
-            Stmt::Return { value: Some(e), .. } => collect_refs(e, out),
-            Stmt::If(i) => {
-                collect_refs(&i.cond, out);
-                collect_refs_block(&i.then_branch, out);
-                match &i.else_branch {
-                    Some(ElseBranch::Block(b)) => collect_refs_block(b, out),
-                    Some(ElseBranch::If(inner)) => {
-                        collect_refs_stmt(&Stmt::If((**inner).clone()), out)
-                    }
-                    None => {}
-                }
-            }
-            Stmt::Loop(l) => {
-                match &l.head {
-                    Some(LoopHead::ForIn { iter, .. }) => collect_refs(iter, out),
-                    Some(LoopHead::While(c)) => collect_refs(c, out),
-                    None => {}
-                }
-                collect_refs_block(&l.body, out);
-            }
-            Stmt::Match(m) => {
-                collect_refs(&m.scrutinee, out);
-                for arm in &m.arms {
-                    collect_refs(&arm.body, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    if let Some(t) = &b.tail_expr {
-        collect_refs(t, out);
-    }
-}
-
-pub(crate) fn collect_refs_stmt(s: &Stmt, out: &mut std::collections::HashSet<String>) {
-    let mut tmp = Block {
-        stmts: vec![s.clone()],
-        tail_expr: None,
-        span: Span::empty(),
-    };
-    collect_refs_block(&mut tmp, out);
-}
-
-pub(crate) fn collect_refs(e: &Expr, out: &mut std::collections::HashSet<String>) {
-    match &e.kind {
-        ExprKind::Ident(n) => {
-            out.insert(n.clone());
-        }
-        ExprKind::Call { callee, args } => {
-            collect_refs(callee, out);
-            for a in args {
-                collect_refs(a, out);
-            }
-        }
-        ExprKind::Index { container, index } => {
-            collect_refs(container, out);
-            collect_refs(index, out);
-        }
-        ExprKind::Field { container, .. } => collect_refs(container, out),
-        ExprKind::Binary { lhs, rhs, .. } => {
-            collect_refs(lhs, out);
-            collect_refs(rhs, out);
-        }
-        ExprKind::Unary { operand, .. } => collect_refs(operand, out),
-        ExprKind::Ternary { cond, then_, else_ } => {
-            collect_refs(cond, out);
-            collect_refs(then_, out);
-            collect_refs(else_, out);
-        }
-        ExprKind::Pipe { lhs, rhs } => {
-            collect_refs(lhs, out);
-            collect_refs(rhs, out);
-        }
-        ExprKind::Lambda { body, .. } => {
-            // Nested lambdas: their body's references also reach up to us.
-            match body {
-                LambdaBody::Expr(inner) => collect_refs(inner, out),
-                LambdaBody::Block(b) => collect_refs_block(b, out),
-            }
-        }
-        ExprKind::Array(xs) => {
-            for x in xs {
-                collect_refs(x, out);
-            }
-        }
-        ExprKind::Map(es) => {
-            for (k, v) in es {
-                collect_refs(k, out);
-                collect_refs(v, out);
-            }
-        }
-        ExprKind::Tuple(xs) => {
-            for x in xs {
-                collect_refs(x, out);
-            }
-        }
-        ExprKind::StructLit { fields, .. } => {
-            for (_, v) in fields {
-                collect_refs(v, out);
-            }
-        }
-        ExprKind::Block(b) => collect_refs_block(b, out),
-        ExprKind::Try(inner) => collect_refs(inner, out),
-        _ => {}
-    }
 }
 
 /// Look up the type of an `Ident(name)` reference somewhere in the lambda

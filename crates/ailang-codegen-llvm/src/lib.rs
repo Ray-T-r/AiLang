@@ -13,6 +13,7 @@ mod decl;
 mod emit;
 mod names;
 mod typegen;
+mod visit;
 
 use crate::collect::*;
 use crate::decl::*;
