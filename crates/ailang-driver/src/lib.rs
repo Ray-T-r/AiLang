@@ -10,19 +10,88 @@
 //! actual code generator). LLVM-IR-via-inkwell is the planned long-term
 //! backend; swapping is local to `ailang-codegen-llvm`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use ailang_codegen_llvm::emit_c;
 use ailang_diag::{report, Diagnostic};
 use ailang_lexer::lex;
 use ailang_parser::parse;
 use ailang_sema::analyze;
-use ailang_syntax::ast::{Item, Module};
+use ailang_syntax::ast::{
+    Block, ElseBranch, Expr, ExprKind, Item, LambdaBody, LoopHead, Module, Stmt,
+};
 use ailang_syntax::{Token, TokenKind};
+
+// ============================================================================
+// Embedded stdlib + auto-import
+// ============================================================================
+//
+// The 10 `std/*.ail` modules ship bundled in the compiler binary via
+// `include_str!`. Two consequences:
+//
+//   1. `im "std/sock.ail"` works whether or not the user has the source
+//      tree checked out — installed `ailangc` doesn't need a sibling
+//      `std/` directory.
+//   2. Auto-import: after walking the user's explicit `im` statements,
+//      the driver scans for referenced-but-undefined names. Anything that
+//      matches a name exported by a stdlib module gets that module
+//      silently imported. So `redis_set(c, "k", "v")` without any `im`
+//      statement Just Works — the driver injects `im "std/redis.ail"`
+//      before sema runs.
+//
+// User definitions and explicit imports always win — auto-import only
+// fires when the name is genuinely unresolved. Stdlib modules that
+// aren't referenced are never parsed, so libpq/libssl/libhiredis stay
+// unlinked for hello-world programs.
+
+static STDLIB_FILES: &[(&str, &str)] = &[
+    ("std/sock.ail",  include_str!("../../../std/sock.ail")),
+    ("std/http.ail",  include_str!("../../../std/http.ail")),
+    ("std/redis.ail", include_str!("../../../std/redis.ail")),
+    ("std/pg.ail",    include_str!("../../../std/pg.ail")),
+    ("std/tls.ail",   include_str!("../../../std/tls.ail")),
+    ("std/ws.ail",    include_str!("../../../std/ws.ail")),
+    ("std/json.ail",  include_str!("../../../std/json.ail")),
+    ("std/math.ail",  include_str!("../../../std/math.ail")),
+    ("std/str.ail",   include_str!("../../../std/str.ail")),
+    ("std/time.ail",  include_str!("../../../std/time.ail")),
+];
+
+fn stdlib_source(path: &str) -> Option<&'static str> {
+    STDLIB_FILES.iter().find(|(p, _)| *p == path).map(|(_, s)| *s)
+}
+
+/// Exported fn name → owning stdlib path. Built once by parsing every
+/// embedded `std/*.ail`. Leaks owned `String`s into `&'static str` so the
+/// table can live for the process lifetime — total leakage is ~100 short
+/// strings (under 2KB), paid at first compile only.
+fn stdlib_symbol_index() -> &'static HashMap<&'static str, &'static str> {
+    static INSTANCE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let mut out: HashMap<&'static str, &'static str> = HashMap::new();
+        for (path, source) in STDLIB_FILES {
+            let tokens = lex(source);
+            let (module, _errs) = parse(source, &tokens);
+            for item in &module.items {
+                let name = match item {
+                    Item::Fn(f) => Some(f.name.name.clone()),
+                    Item::Extern(e) => Some(e.sig.name.name.clone()),
+                    _ => None,
+                };
+                if let Some(n) = name {
+                    let leaked: &'static str = Box::leak(n.into_boxed_str());
+                    out.entry(leaked).or_insert(*path);
+                }
+            }
+        }
+        out
+    })
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum DriverError {
@@ -200,6 +269,12 @@ pub fn compile(path: &Path, opts: &CompileOptions) -> Result<CompileResult, Driv
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut items: Vec<Item> = Vec::new();
     parse_with_imports(path, &source, &mut items, &mut visited, /*is_root=*/ true)?;
+
+    // ---- Auto-import: pull in stdlib modules whose exported names appear
+    //      in user code but haven't been defined or explicitly imported.
+    //      Loops to a fixpoint so transitive stdlib deps land too. ----
+    auto_import_stdlib(&mut items, &mut visited)?;
+
     let module = Module { items };
 
     // ---- Sema ----
@@ -419,7 +494,17 @@ fn parse_with_imports(
     visited: &mut HashSet<PathBuf>,
     is_root: bool,
 ) -> Result<(), DriverError> {
-    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // Stdlib paths route to embedded source — bypass the filesystem entirely
+    // so installed `ailangc` (which doesn't ship a sibling `std/` dir) keeps
+    // working. We key the visited set by the verbatim stdlib path string,
+    // since `canonicalize` would fail without a real file.
+    let path_str = path.to_string_lossy().to_string();
+    let stdlib_src = stdlib_source(&path_str);
+    let canonical = if stdlib_src.is_some() {
+        PathBuf::from(&path_str)
+    } else {
+        fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
     if !visited.insert(canonical) {
         return Ok(()); // already imported
     }
@@ -427,6 +512,8 @@ fn parse_with_imports(
     let path_disp = path.display().to_string();
     let source = if is_root {
         root_source.to_string()
+    } else if let Some(embedded) = stdlib_src {
+        embedded.to_string()
     } else {
         read_source(path)?
     };
@@ -463,21 +550,26 @@ fn parse_with_imports(
 
     // Walk imports first so libraries appear before the files that use them.
     // Resolution order:
-    //   1. relative to the importing file's directory (most common)
-    //   2. relative to the current working directory (lets a project that
-    //      uses `cwd = repo root` find `std/foo.ail` from anywhere)
+    //   1. embedded stdlib (any path matching a `std/*.ail` we ship)
+    //   2. relative to the importing file's directory (most common for
+    //      user code)
+    //   3. relative to the current working directory
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     for item in &module.items {
         if let Item::Import(imp) = item {
-            let candidates: Vec<PathBuf> = vec![
-                dir.join(&imp.path.value),
-                PathBuf::from(&imp.path.value),
-            ];
-            let import_path = candidates
-                .iter()
-                .find(|c| c.exists())
-                .cloned()
-                .unwrap_or_else(|| candidates[0].clone());
+            let import_path = if stdlib_source(&imp.path.value).is_some() {
+                PathBuf::from(&imp.path.value)
+            } else {
+                let candidates: Vec<PathBuf> = vec![
+                    dir.join(&imp.path.value),
+                    PathBuf::from(&imp.path.value),
+                ];
+                candidates
+                    .iter()
+                    .find(|c| c.exists())
+                    .cloned()
+                    .unwrap_or_else(|| candidates[0].clone())
+            };
             parse_with_imports(&import_path, root_source, items, visited, /*is_root=*/ false)?;
         }
     }
@@ -493,3 +585,171 @@ fn parse_with_imports(
 
     Ok(())
 }
+
+/// Scan all collected items for referenced-but-unresolved names. Any name
+/// that matches a stdlib export triggers `parse_with_imports` on the owning
+/// stdlib module. Loops to a fixpoint so transitive deps land — std/pg.ail
+/// might depend on names from std/str.ail, etc.
+fn auto_import_stdlib(
+    items: &mut Vec<Item>,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<(), DriverError> {
+    let index = stdlib_symbol_index();
+    loop {
+        let mut defined: HashSet<String> = HashSet::new();
+        for item in items.iter() {
+            match item {
+                Item::Fn(f) => { defined.insert(f.name.name.clone()); }
+                Item::Extern(e) => { defined.insert(e.sig.name.name.clone()); }
+                Item::Struct(s) => { defined.insert(s.name.name.clone()); }
+                Item::Enum(e) => {
+                    defined.insert(e.name.name.clone());
+                    for v in &e.variants { defined.insert(v.name.name.clone()); }
+                }
+                Item::Import(_) => {}
+            }
+        }
+        let mut referenced: HashSet<String> = HashSet::new();
+        collect_referenced_names(items, &mut referenced);
+
+        let mut to_import: HashSet<&'static str> = HashSet::new();
+        for name in referenced.difference(&defined) {
+            if let Some(stdlib_path) = index.get(name.as_str()) {
+                if !visited.contains(&PathBuf::from(*stdlib_path)) {
+                    to_import.insert(*stdlib_path);
+                }
+            }
+        }
+        if to_import.is_empty() {
+            return Ok(());
+        }
+        // Iterate in sorted order so the import sequence is deterministic
+        // across runs (purely for tidier diagnostics; behavior is identical).
+        let mut sorted: Vec<&'static str> = to_import.into_iter().collect();
+        sorted.sort();
+        for path in sorted {
+            parse_with_imports(
+                Path::new(path),
+                /* root_source unused for non-root */ "",
+                items,
+                visited,
+                /*is_root=*/ false,
+            )?;
+        }
+    }
+}
+
+// ---------- Name collection helpers (auto-import scan) ----------
+
+fn collect_referenced_names(items: &[Item], out: &mut HashSet<String>) {
+    for item in items {
+        if let Item::Fn(f) = item {
+            collect_in_block(&f.body, out);
+        }
+    }
+}
+
+fn collect_in_block(block: &Block, out: &mut HashSet<String>) {
+    for stmt in &block.stmts {
+        collect_in_stmt(stmt, out);
+    }
+    if let Some(tail) = &block.tail_expr {
+        collect_in_expr(tail, out);
+    }
+}
+
+fn collect_in_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Decl { value, .. } => collect_in_expr(value, out),
+        Stmt::Assign { target, value, .. } => {
+            collect_in_expr(target, out);
+            collect_in_expr(value, out);
+        }
+        Stmt::Expr(e) => collect_in_expr(e, out),
+        Stmt::Return { value: Some(e), .. } => collect_in_expr(e, out),
+        Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::If(i) => {
+            collect_in_expr(&i.cond, out);
+            collect_in_block(&i.then_branch, out);
+            collect_in_else(i.else_branch.as_ref(), out);
+        }
+        Stmt::Loop(lp) => {
+            if let Some(head) = &lp.head {
+                match head {
+                    LoopHead::ForIn { iter, .. } => collect_in_expr(iter, out),
+                    LoopHead::While(c) => collect_in_expr(c, out),
+                }
+            }
+            collect_in_block(&lp.body, out);
+        }
+        Stmt::Match(m) => {
+            collect_in_expr(&m.scrutinee, out);
+            for arm in &m.arms { collect_in_expr(&arm.body, out); }
+        }
+    }
+}
+
+fn collect_in_else(else_branch: Option<&ElseBranch>, out: &mut HashSet<String>) {
+    match else_branch {
+        Some(ElseBranch::Block(b)) => collect_in_block(b, out),
+        Some(ElseBranch::If(i)) => {
+            collect_in_expr(&i.cond, out);
+            collect_in_block(&i.then_branch, out);
+            collect_in_else(i.else_branch.as_ref(), out);
+        }
+        None => {}
+    }
+}
+
+fn collect_in_expr(e: &Expr, out: &mut HashSet<String>) {
+    match &e.kind {
+        ExprKind::Ident(n) => { out.insert(n.clone()); }
+        ExprKind::Call { callee, args } => {
+            collect_in_expr(callee, out);
+            for a in args { collect_in_expr(a, out); }
+        }
+        ExprKind::Index { container, index } => {
+            collect_in_expr(container, out);
+            collect_in_expr(index, out);
+        }
+        ExprKind::Field { container, .. } => collect_in_expr(container, out),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_in_expr(lhs, out);
+            collect_in_expr(rhs, out);
+        }
+        ExprKind::Unary { operand, .. } => collect_in_expr(operand, out),
+        ExprKind::Ternary { cond, then_, else_ } => {
+            collect_in_expr(cond, out);
+            collect_in_expr(then_, out);
+            collect_in_expr(else_, out);
+        }
+        ExprKind::Pipe { lhs, rhs } => {
+            collect_in_expr(lhs, out);
+            collect_in_expr(rhs, out);
+        }
+        ExprKind::Lambda { body, .. } => match body {
+            LambdaBody::Expr(inner) => collect_in_expr(inner, out),
+            LambdaBody::Block(b) => collect_in_block(b, out),
+        },
+        ExprKind::Array(items) => for it in items { collect_in_expr(it, out); },
+        ExprKind::Map(entries) => for (k, v) in entries {
+            collect_in_expr(k, out);
+            collect_in_expr(v, out);
+        },
+        ExprKind::Tuple(items) => for it in items { collect_in_expr(it, out); },
+        ExprKind::StructLit { fields, .. } => for (_, v) in fields { collect_in_expr(v, out); },
+        ExprKind::Block(b) => collect_in_block(b, out),
+        ExprKind::If(i) => {
+            collect_in_expr(&i.cond, out);
+            collect_in_block(&i.then_branch, out);
+            collect_in_else(i.else_branch.as_ref(), out);
+        }
+        ExprKind::Match(m) => {
+            collect_in_expr(&m.scrutinee, out);
+            for arm in &m.arms { collect_in_expr(&arm.body, out); }
+        }
+        ExprKind::Try(inner) => collect_in_expr(inner, out),
+        ExprKind::Lit(_) | ExprKind::Underscore => {}
+    }
+}
+

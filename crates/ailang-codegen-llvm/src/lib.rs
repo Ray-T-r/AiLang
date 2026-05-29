@@ -1566,6 +1566,48 @@ fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
                     out.push(')');
                     return;
                 }
+                // Polymorphic `abs(x)` — pick abs_i64 / abs_f64 by the arg's
+                // sema-recorded type. Skip when the user shadowed the name
+                // with an `ex fn abs(...)` extern (then call libc abs directly).
+                if n == "abs" && args.len() == 1 {
+                    let user_extern = ctx.fns.fn_table.get("abs")
+                        .map(|s| s.is_extern)
+                        .unwrap_or(false);
+                    if !user_extern {
+                        let arg_ty = ctx.fns.expr_types.get(&args[0].span).cloned();
+                        let helper = match arg_ty {
+                            Some(Ty::F64) => "abs_f64",
+                            _ => "abs_i64",
+                        };
+                        let _ = write!(out, "{helper}(");
+                        emit_expr(out, &args[0], ctx);
+                        out.push(')');
+                        return;
+                    }
+                }
+                // Polymorphic `err(msg)` — dispatch to err_i64/err_str/
+                // err_bool/err_f64 based on the enclosing fn's C return type
+                // (set by emit_fn before walking the body). Sema already
+                // diagnosed the "not inside !T" case; we still default to
+                // err_i64 so the error chain doesn't cascade.
+                if n == "err" && args.len() == 1 {
+                    let user_extern = ctx.fns.fn_table.get("err")
+                        .map(|s| s.is_extern)
+                        .unwrap_or(false);
+                    if !user_extern {
+                        let ret_c = ctx.current_ret_ty.borrow().clone();
+                        let helper = match ret_c.as_str() {
+                            "ailang_result_str"  => "err_str",
+                            "ailang_result_bool" => "err_bool",
+                            "ailang_result_f64"  => "err_f64",
+                            _                    => "err_i64",
+                        };
+                        let _ = write!(out, "{helper}(");
+                        emit_expr(out, &args[0], ctx);
+                        out.push(')');
+                        return;
+                    }
+                }
             }
             // Direct call when callee is an ident in the fn_table — emit
             // `name(args)` as before. Otherwise it's an indirect call
@@ -1754,19 +1796,33 @@ fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
         }
         ExprKind::Map(entries) => {
             // {k1:v1, ...} → statement-expression building a fresh map and
-            // setting each entry. Pick (K,V)-specific helpers by inspecting
-            // the first key+value pair's static shape.
-            let (ty, make_fn, set_fn) = match entries.first().map(|(k, v)| (&k.kind, &v.kind)) {
-                Some((ExprKind::Lit(lk), ExprKind::Lit(lv)))
-                    if matches!(lk.kind, Lit::Str(_)) && matches!(lv.kind, Lit::Str(_)) =>
-                {
-                    ("ailang_map_ss", "ailang_map_ss_make", "ailang_map_ss_set")
+            // setting each entry. Pick (K,V)-specific helpers from sema's
+            // refined type when available (so empty `{}` whose K/V was
+            // pinned by later usage picks the right helpers), else fall
+            // back to inspecting the first key+value pair's static shape.
+            let from_sema = ctx.fns.expr_types.get(&e.span).and_then(|t| match t {
+                Ty::Map(k, v) if !matches!(**k, Ty::Unknown) || !matches!(**v, Ty::Unknown) => {
+                    Some(match (&**k, &**v) {
+                        (Ty::Str, Ty::Str) => ("ailang_map_ss", "ailang_map_ss_make", "ailang_map_ss_set"),
+                        (Ty::Str, _)       => ("ailang_map_si", "ailang_map_si_make", "ailang_map_si_set"),
+                        _                  => ("ailang_map_ii", "ailang_map_ii_make", "ailang_map_ii_set"),
+                    })
                 }
-                Some((ExprKind::Lit(lk), _)) if matches!(lk.kind, Lit::Str(_)) => {
-                    ("ailang_map_si", "ailang_map_si_make", "ailang_map_si_set")
+                _ => None,
+            });
+            let (ty, make_fn, set_fn) = from_sema.unwrap_or_else(|| {
+                match entries.first().map(|(k, v)| (&k.kind, &v.kind)) {
+                    Some((ExprKind::Lit(lk), ExprKind::Lit(lv)))
+                        if matches!(lk.kind, Lit::Str(_)) && matches!(lv.kind, Lit::Str(_)) =>
+                    {
+                        ("ailang_map_ss", "ailang_map_ss_make", "ailang_map_ss_set")
+                    }
+                    Some((ExprKind::Lit(lk), _)) if matches!(lk.kind, Lit::Str(_)) => {
+                        ("ailang_map_si", "ailang_map_si_make", "ailang_map_si_set")
+                    }
+                    _ => ("ailang_map_ii", "ailang_map_ii_make", "ailang_map_ii_set"),
                 }
-                _ => ("ailang_map_ii", "ailang_map_ii_make", "ailang_map_ii_set"),
-            };
+            });
             let cap = (entries.len() * 2).max(8);
             let _ = write!(out, "({{ {ty} __m = {make_fn}({cap}); ");
             for (k, v) in entries {
@@ -2022,20 +2078,38 @@ fn c_ty_for_decl(ty: Option<&Type>, init: &Expr, ctx: &EmitCtx) -> String {
             Lit::Int { .. } | Lit::Char(_) => "int64_t".to_string(),
             Lit::Nil => "void*".to_string(),
         },
-        ExprKind::Array(xs) => match xs.first().map(|x| &x.kind) {
-            Some(ExprKind::Lit(l)) if matches!(l.kind, Lit::Str(_)) => "ailang_arr_str".to_string(),
-            _ => "ailang_arr_i64".to_string(),
-        },
-        ExprKind::Map(entries) => match entries.first().map(|(k, v)| (&k.kind, &v.kind)) {
-            Some((ExprKind::Lit(lk), ExprKind::Lit(lv)))
-                if matches!(lk.kind, Lit::Str(_)) && matches!(lv.kind, Lit::Str(_)) => {
-                    "ailang_map_ss".to_string()
+        ExprKind::Array(xs) => {
+            // Sema's refined type wins (catches empty `[]` whose element
+            // type was pinned by later usage).
+            if let Some(Ty::Array(elem)) = ctx.fns.expr_types.get(&init.span) {
+                if !matches!(**elem, Ty::Unknown) {
+                    return c_ty_for(&Ty::Array(elem.clone()));
+                }
             }
-            Some((ExprKind::Lit(lk), _)) if matches!(lk.kind, Lit::Str(_)) => {
-                "ailang_map_si".to_string()
+            match xs.first().map(|x| &x.kind) {
+                Some(ExprKind::Lit(l)) if matches!(l.kind, Lit::Str(_)) => "ailang_arr_str".to_string(),
+                _ => "ailang_arr_i64".to_string(),
             }
-            _ => "ailang_map_ii".to_string(),
-        },
+        }
+        ExprKind::Map(entries) => {
+            // Sema's refined type wins (catches empty `{}` whose K/V was
+            // pinned by later `m[k] = v`).
+            if let Some(Ty::Map(k, v)) = ctx.fns.expr_types.get(&init.span) {
+                if !matches!(**k, Ty::Unknown) || !matches!(**v, Ty::Unknown) {
+                    return c_ty_for(&Ty::Map(k.clone(), v.clone()));
+                }
+            }
+            match entries.first().map(|(k, v)| (&k.kind, &v.kind)) {
+                Some((ExprKind::Lit(lk), ExprKind::Lit(lv)))
+                    if matches!(lk.kind, Lit::Str(_)) && matches!(lv.kind, Lit::Str(_)) => {
+                        "ailang_map_ss".to_string()
+                }
+                Some((ExprKind::Lit(lk), _)) if matches!(lk.kind, Lit::Str(_)) => {
+                    "ailang_map_si".to_string()
+                }
+                _ => "ailang_map_ii".to_string(),
+            }
+        }
         ExprKind::StructLit { name, .. } => c_safe_name(&name.name),
         ExprKind::Lambda { .. } => {
             // A lambda value is always an `ailang_closure_t` (fat pointer).
@@ -2535,6 +2609,29 @@ static const char* float_to_str(double x) {
 static double str_to_float(const char* s) {
     return s ? strtod(s, NULL) : 0.0;
 }
+
+/* `bool_to_str(b)` — "true" / "false". Targets of to_str's _Generic dispatch. */
+static const char* bool_to_str(bool b) { return b ? "true" : "false"; }
+
+/* Identity case so `to_str` works on values that are already strings. */
+static const char* str_to_str(const char* s) { return s ? s : ""; }
+
+/* `to_str(x)` — polymorphic stringify used by string interpolation
+ * (`"hi ${name}"` desugars to `"hi " + to_str(name)`). The compile-time
+ * _Generic picks the right helper; sema's expr_types isn't consulted, so
+ * any value whose C type isn't listed here will fail to compile. */
+#define to_str(__x) _Generic((__x), \
+    int64_t: int_to_str, \
+    int32_t: int_to_str, \
+    int16_t: int_to_str, \
+    int8_t:  int_to_str, \
+    double:  float_to_str, \
+    float:   float_to_str, \
+    bool:    bool_to_str, \
+    ailang_bytes: bytes_to_str, \
+    char*:       str_to_str, \
+    const char*: str_to_str \
+)(__x)
 
 /* `format(fmt, ...)` — printf-style formatting → GC-allocated string.
  * Caller is responsible for matching `%d`/`%lld`/`%s`/`%g` against the
@@ -3618,6 +3715,9 @@ static bool str_to_bool(const char* s) {
 
 /* Misc numeric helpers. */
 static double abs_f64(double x) { return x < 0 ? -x : x; }
+/* `abs(x)` is now polymorphic — dispatch happens in codegen by looking at
+ * the arg type (i64 → abs_i64, f64 → abs_f64). No C macro because that
+ * would shadow user `ex fn abs(...)` declarations against libc. */
 static int64_t sign(int64_t n) { return (n > 0) - (n < 0); }
 static int64_t clamp(int64_t n, int64_t lo, int64_t hi) {
     if (n < lo) return lo;

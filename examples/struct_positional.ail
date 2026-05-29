@@ -1,0 +1,19 @@
+// struct_positional.ail — positional struct construction sugar.
+// `Point(3, 4)` lowers to `Point { x: 3, y: 4 }`, splicing args into the
+// declared field order. Same machinery as enum variants — saves ~3 tokens
+// per construction and removes the field-name boilerplate when the order
+// is obvious.
+
+st Point { x:i64; y:i64 }
+
+a := Point(3, 4)
+println(a.x)
+println(a.y)
+println(a)
+
+// Mixed with named form — both still legal.
+b := Point { x: 10, y: 20 }
+println(b)
+
+// In an expression context.
+println(Point(7, 8).x + Point(1, 1).y)

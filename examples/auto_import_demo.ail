@@ -1,0 +1,12 @@
+// auto_import_demo.ail — no `im` statements; the driver injects them
+// based on referenced names. `sqrt`/`max`/`gcd` pull in std/math.ail,
+// `env_int` pulls in std/sock.ail, and `must_listen` would too if used.
+// Modules that aren't referenced (redis, pg, tls, ws) are never parsed,
+// and their C-side dep libs (libhiredis / libpq / libssl) stay unlinked.
+
+println(sqrt(144.0))           // 12
+println(max(7, 3))             // 7
+println(min(7, 3))             // 3
+println(gcd(36, 24))           // 12
+println(ipow(2, 10))           // 1024
+println(env_int("ZZ_X", 99))   // 99 (env var unset)

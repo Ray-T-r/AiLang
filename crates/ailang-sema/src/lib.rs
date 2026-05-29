@@ -78,7 +78,7 @@ pub struct ResolvedModule {
     pub variant_to_enum: HashMap<String, String>,
 }
 
-pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
+pub fn analyze(mut module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut fn_table: HashMap<String, FnSigResolved> = HashMap::new();
     let mut struct_table: HashMap<String, StructDecl> = HashMap::new();
@@ -172,10 +172,29 @@ pub fn analyze(module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
         }
     }
 
+    // Pre-pass: rewrite positional struct constructors. `Point(3, 4)` parses
+    // as `Call(Ident("Point"), [3, 4])`; if `Point` is a struct (and not
+    // shadowed by an enum variant of the same name), we splice the args into
+    // the struct's declared field order and replace with `StructLit`. This
+    // lets `Point(3,4)` save ~3 tokens vs `Point{x:3, y:4}` while reusing
+    // every downstream code path that already handles named struct literals.
+    if !struct_table.is_empty() {
+        let struct_field_names: HashMap<String, Vec<Ident>> = struct_table
+            .iter()
+            .map(|(n, s)| (n.clone(), s.fields.iter().map(|f| f.name.clone()).collect()))
+            .collect();
+        for item in &mut module.items {
+            if let Item::Fn(f) = item {
+                rewrite_struct_ctors_block(&mut f.body, &struct_field_names, &variant_lookup);
+            }
+        }
+    }
+
     let mut expr_types: HashMap<Span, Ty> = HashMap::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
-            let mut env = LocalEnv::new(&struct_table, &variant_lookup);
+            let ret = fn_table.get(&f.name.name).map(|s| s.return_ty.clone());
+            let mut env = LocalEnv::new(&struct_table, &variant_lookup, ret);
             for p in &f.params {
                 env.insert(p.name.name.clone(), ast_ty_to_ty(p.ty.as_ref()));
             }
@@ -259,6 +278,11 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
         ("read_line",  &[],                                    Ty::Str),
         ("int_to_str", &[("n", Ty::I64)],                      Ty::Str),
         ("str_to_int", &[("s", Ty::Str)],                      Ty::I64),
+        // Polymorphic stringify used by string interpolation. C11 `_Generic`
+        // in PRELUDE picks int_to_str / float_to_str / bool_to_str / identity
+        // based on the argument's C type, so sema takes Unknown and trusts
+        // codegen.
+        ("to_str",     &[("v", Ty::Unknown)],                  Ty::Str),
         ("args",       &[],                                    Ty::Array(Box::new(Ty::Str))),
         ("exit",       &[("code", Ty::I64)],                   Ty::Unit),
         // push/pop are polymorphic over array element type. Sema records
@@ -300,6 +324,11 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
         ("reverse",      &[("arr", Ty::Unknown)], Ty::Unknown),
         // i64-only abs to complement libc abs (which is i32).
         ("abs_i64",      &[("n", Ty::I64)], Ty::I64),
+        // Polymorphic `abs(x)` — codegen prelude routes to abs_i64 or abs_f64
+        // via _Generic depending on the C type of the argument. Replaces the
+        // older `ex fn abs(n:i32) -> i32` extern that std/math.ail used to
+        // declare. Sema returns Unknown so int + float arg types both pass.
+        ("abs",          &[("x", Ty::Unknown)], Ty::Unknown),
         // Time: wall-clock for timestamps; monotonic for durations.
         ("now_ms",       &[],                 Ty::I64),
         ("now_us",       &[],                 Ty::I64),
@@ -357,6 +386,10 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
         ("err_str",  &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::Str))),
         ("err_bool", &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::Bool))),
         ("err_f64",  &[("msg", Ty::Str)],   Ty::Result(Box::new(Ty::F64))),
+        // Polymorphic `err(msg)` — sema resolves T from the enclosing fn's
+        // `-> !T` return type; codegen routes to err_i64/err_str/err_bool/
+        // err_f64 accordingly. Outside a `-> !T` fn this is a sema error.
+        ("err",      &[("msg", Ty::Str)],   Ty::Unknown),
         ("unwrap",   &[("r", Ty::Unknown)], Ty::Unknown),
         ("is_ok",    &[("r", Ty::Unknown)], Ty::Bool),
         ("is_err",   &[("r", Ty::Unknown)], Ty::Bool),
@@ -411,15 +444,37 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
 struct LocalEnv<'a> {
     scopes: Vec<HashMap<String, Ty>>,
     expr_types: HashMap<Span, Ty>,
+    /// Every Ident occurrence's span, grouped by name. Used to retroactively
+    /// fix up expr_types when a binding's type is refined after-the-fact
+    /// (e.g. `mu m := {}` discovers its real `(K,V)` from a later `m[k] = v`).
+    ident_refs: HashMap<String, Vec<Span>>,
+    /// Per-name span of the binding's initializer expression. Same purpose.
+    init_spans: HashMap<String, Span>,
     structs: &'a HashMap<String, StructDecl>,
     /// Variant name → enum name (so sema lets `Some(42)` and `None`
     /// through without "undefined name" errors).
     variants: &'a HashMap<String, String>,
+    /// Return type of the function currently being checked. Used so
+    /// polymorphic `err(msg)` can resolve to the right `Result(T)` and so
+    /// we can diagnose `err(...)` calls outside a `-> !T` fn.
+    fn_ret_ty: Option<Ty>,
 }
 
 impl<'a> LocalEnv<'a> {
-    fn new(structs: &'a HashMap<String, StructDecl>, variants: &'a HashMap<String, String>) -> Self {
-        Self { scopes: vec![HashMap::new()], expr_types: HashMap::new(), structs, variants }
+    fn new(
+        structs: &'a HashMap<String, StructDecl>,
+        variants: &'a HashMap<String, String>,
+        fn_ret_ty: Option<Ty>,
+    ) -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+            expr_types: HashMap::new(),
+            ident_refs: HashMap::new(),
+            init_spans: HashMap::new(),
+            structs,
+            variants,
+            fn_ret_ty,
+        }
     }
     fn push(&mut self) {
         self.scopes.push(HashMap::new());
@@ -436,22 +491,59 @@ impl<'a> LocalEnv<'a> {
     fn record(&mut self, span: Span, ty: Ty) {
         self.expr_types.insert(span, ty);
     }
+    fn record_ident_ref(&mut self, name: &str, span: Span) {
+        self.ident_refs.entry(name.to_string()).or_default().push(span);
+    }
+    /// Update a binding's type and back-propagate to every prior Ident
+    /// occurrence + its initializer expression. Used for empty-container
+    /// inference (`{}` / `[]`) once usage reveals (K,V) or element type.
+    fn refine_binding(&mut self, name: &str, new_ty: Ty) {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), new_ty.clone());
+                break;
+            }
+        }
+        if let Some(init_span) = self.init_spans.get(name).copied() {
+            self.expr_types.insert(init_span, new_ty.clone());
+        }
+        if let Some(spans) = self.ident_refs.get(name).cloned() {
+            for span in spans {
+                self.expr_types.insert(span, new_ty.clone());
+            }
+        }
+    }
 }
 
+// Returns the value type of the block (tail expression, or last explicit
+// `rt expr`, or Unit). The tail is type-checked *before* the block's scope
+// is popped so that block-local bindings remain visible to it; this matters
+// for closures and any other context where a Block is used as an expression.
 fn check_block(
     block: &Block,
     fns: &HashMap<String, FnSigResolved>,
     env: &mut LocalEnv,
     diags: &mut Vec<Diagnostic>,
-) {
+) -> Ty {
     env.push();
     for stmt in &block.stmts {
         check_stmt(stmt, fns, env, diags);
     }
-    if let Some(e) = &block.tail_expr {
-        check_expr(e, fns, env, diags);
-    }
+    let ret_ty = if let Some(e) = &block.tail_expr {
+        check_expr(e, fns, env, diags)
+    } else {
+        // No tail expression — if the block ends with `rt e`, e was already
+        // type-checked inside check_stmt above; recover its type from the
+        // side table so callers (ExprKind::Block, lambda bodies) can use it.
+        match block.stmts.last() {
+            Some(Stmt::Return { value: Some(e), .. }) => {
+                env.expr_types.get(&e.span).cloned().unwrap_or(Ty::Unit)
+            }
+            _ => Ty::Unit,
+        }
+    };
     env.pop();
+    ret_ty
 }
 
 fn check_stmt(
@@ -464,11 +556,49 @@ fn check_stmt(
         Stmt::Decl { name, ty, value, .. } => {
             let inferred = check_expr(value, fns, env, diags);
             let final_ty = ty.as_ref().map(ast_ty_kind_to_ty).unwrap_or(inferred);
+            // Remember the initializer's span so later usage can back-propagate
+            // a refined type (relevant for empty `{}` / `[]` whose K/V/elem
+            // can only be pinned by subsequent index assignments).
+            if matches!(&final_ty, Ty::Map(k, v) if **k == Ty::Unknown || **v == Ty::Unknown)
+                || matches!(&final_ty, Ty::Array(e) if **e == Ty::Unknown)
+            {
+                env.init_spans.insert(name.name.clone(), value.span);
+            }
             env.insert(name.name.clone(), final_ty);
         }
         Stmt::Assign { target, value, .. } => {
             check_expr(target, fns, env, diags);
-            check_expr(value, fns, env, diags);
+            let value_ty = check_expr(value, fns, env, diags);
+            // Refine empty-container bindings from index writes:
+            //   `m[k] = v` where `m` was declared as `{}` pins `(K,V)`.
+            //   `a[i] = v` where `a` was declared as `[]` pins the element.
+            if let ExprKind::Index { container, index } = &target.kind {
+                if let ExprKind::Ident(name) = &container.kind {
+                    if let Some(existing) = env.lookup(name).cloned() {
+                        let index_ty = env
+                            .expr_types
+                            .get(&index.span)
+                            .cloned()
+                            .unwrap_or(Ty::Unknown);
+                        let refined = match &existing {
+                            Ty::Map(k, v) => {
+                                let new_k = if **k == Ty::Unknown { index_ty } else { (**k).clone() };
+                                let new_v = if **v == Ty::Unknown { value_ty.clone() } else { (**v).clone() };
+                                Some(Ty::Map(Box::new(new_k), Box::new(new_v)))
+                            }
+                            Ty::Array(elem) if **elem == Ty::Unknown => {
+                                Some(Ty::Array(Box::new(value_ty.clone())))
+                            }
+                            _ => None,
+                        };
+                        if let Some(new_ty) = refined {
+                            if new_ty != existing {
+                                env.refine_binding(name, new_ty);
+                            }
+                        }
+                    }
+                }
+            }
         }
         Stmt::Expr(e) => {
             check_expr(e, fns, env, diags);
@@ -494,7 +624,9 @@ fn check_if(
     check_expr(&if_.cond, fns, env, diags);
     check_block(&if_.then_branch, fns, env, diags);
     match &if_.else_branch {
-        Some(ElseBranch::Block(b)) => check_block(b, fns, env, diags),
+        Some(ElseBranch::Block(b)) => {
+            check_block(b, fns, env, diags);
+        }
         Some(ElseBranch::If(inner)) => check_if(inner, fns, env, diags),
         None => {}
     }
@@ -596,6 +728,8 @@ fn check_expr_inner(
             Lit::Nil => Ty::Unknown,
         },
         ExprKind::Ident(name) => {
+            // Record this Ident's span so later type refinements can fix it up.
+            env.record_ident_ref(name, e.span);
             if let Some(t) = env.lookup(name) {
                 t.clone()
             } else if fns.contains_key(name) {
@@ -628,16 +762,53 @@ fn check_expr_inner(
                     return Ty::Struct(en_name.clone());
                 }
             }
+            // Polymorphic `err(msg)` — the T in the resulting `!T` is
+            // dictated by the enclosing fn's return type. If we're not in
+            // a `-> !T` fn, that's a real error: nothing else can decide T.
+            if matches!(fname, Some("err")) {
+                for a in args { check_expr(a, fns, env, diags); }
+                match &env.fn_ret_ty {
+                    Some(Ty::Result(_)) => return env.fn_ret_ty.clone().unwrap(),
+                    _ => {
+                        diags.push(Diagnostic::error(
+                            "`err(msg)` is only valid inside a function whose return type is `!T`",
+                            callee.span,
+                        ).with_help(
+                            "either annotate the fn with `-> !T` (e.g. `-> !i64`) or call the type-specific form `err_i64`/`err_str`/`err_bool`/`err_f64`"
+                        ));
+                        return Ty::Result(Box::new(Ty::I64));
+                    }
+                }
+            }
             let sig = match fname.and_then(|n| fns.get(n)) {
                 Some(s) => s.clone(),
                 None => {
                     let callee_ty = check_expr(callee, fns, env, diags);
                     if let Some(n) = fname {
                         if env.lookup(n).is_none() && callee_ty == Ty::Unknown {
-                            diags.push(Diagnostic::error(
-                                format!("call to undefined function `{n}`"),
-                                callee.span,
-                            ));
+                            // Struct names show up here when arity didn't match
+                            // (matching arity is rewritten to StructLit pre-sema).
+                            // Give the user a hint instead of a generic "undefined"
+                            // so the miscounted-fields case isn't cryptic.
+                            if let Some(sd) = env.structs.get(n) {
+                                diags.push(Diagnostic::error(
+                                    format!(
+                                        "struct `{n}` has {} field(s) but {} argument(s) were given",
+                                        sd.fields.len(),
+                                        args.len(),
+                                    ),
+                                    callee.span,
+                                ).with_help(format!(
+                                    "use `{n}({})` or `{n} {{ {} }}`",
+                                    sd.fields.iter().map(|f| f.name.name.as_str()).collect::<Vec<_>>().join(", "),
+                                    sd.fields.iter().map(|f| format!("{}: ..", f.name.name)).collect::<Vec<_>>().join(", "),
+                                )));
+                            } else {
+                                diags.push(Diagnostic::error(
+                                    format!("call to undefined function `{n}`"),
+                                    callee.span,
+                                ));
+                            }
                         }
                     }
                     for a in args { check_expr(a, fns, env, diags); }
@@ -832,13 +1003,7 @@ fn check_expr_inner(
             check_match(mt, fns, env, diags);
             Ty::Unknown
         }
-        ExprKind::Block(b) => {
-            check_block(b, fns, env, diags);
-            b.tail_expr
-                .as_ref()
-                .map(|t| check_expr(t, fns, env, diags))
-                .unwrap_or(Ty::Unit)
-        }
+        ExprKind::Block(b) => check_block(b, fns, env, diags),
         ExprKind::Array(xs) => {
             // Take the first element's type as the array's element type. For
             // M4+ we assume homogeneous arrays; mixed-type arrays just fall
@@ -855,7 +1020,10 @@ fn check_expr_inner(
         ExprKind::Map(entries) => {
             let (kt, vt) = match entries.first() {
                 Some((k, v)) => (check_expr(k, fns, env, diags), check_expr(v, fns, env, diags)),
-                None => (Ty::I64, Ty::I64), // empty `{}` defaults to {i64:i64}
+                // Empty `{}` — `(K,V)` left for back-propagation from
+                // later usage (e.g. `m[k] = v`). If nothing refines it,
+                // codegen falls back to {i64:i64}.
+                None => (Ty::Unknown, Ty::Unknown),
             };
             for (k, v) in entries.iter().skip(1) {
                 check_expr(k, fns, env, diags);
@@ -881,16 +1049,11 @@ fn check_expr_inner(
             let ret_ty = match body {
                 LambdaBody::Expr(e) => check_expr(e, fns, env, diags),
                 LambdaBody::Block(b) => {
-                    check_block(b, fns, env, diags);
-                    if let Some(t) = &b.tail_expr {
-                        check_expr(t, fns, env, diags)
-                    } else {
-                        // Fallback: look at the last yielding stmt.
-                        match b.stmts.last() {
-                            Some(Stmt::Return { value: Some(e), .. }) => check_expr(e, fns, env, diags),
-                            _ => Ty::I64,
-                        }
-                    }
+                    let ty = check_block(b, fns, env, diags);
+                    // Preserve the prior "value-returning closure defaults to
+                    // i64 when sema can't see a value" behaviour, which the
+                    // codegen relies on for closure_t.fn cast selection.
+                    if matches!(ty, Ty::Unit) { Ty::I64 } else { ty }
                 }
             };
             env.pop();
@@ -934,7 +1097,12 @@ fn binary_result_ty(op: BinOp, lt: &Ty, rt: &Ty) -> Ty {
         // Unified `+`: string concat if either operand is a string, else numeric.
         Add if *lt == Ty::Str || *rt == Ty::Str => Ty::Str,
         Add | Sub | Mul | Div | Mod | BitAnd | BitOr | BitXor | Shl | Shr => {
-            if *lt == Ty::F64 { Ty::F64 } else if *lt == Ty::I64 { Ty::I64 } else { Ty::Unknown }
+            // Either side concrete pins the result type. Letting `Unknown +
+            // 1` resolve to `i64` is what enables `m[k] += 1` to feed an
+            // i64-shaped value back into empty-map (K,V) inference.
+            if *lt == Ty::F64 || *rt == Ty::F64 { Ty::F64 }
+            else if *lt == Ty::I64 || *rt == Ty::I64 { Ty::I64 }
+            else { Ty::Unknown }
         }
         Concat => Ty::Str,
         Eq | Ne | Lt | Le | Gt | Ge | And | Or => Ty::Bool,
@@ -996,7 +1164,7 @@ fn infer_fn_ret(f: &FnDecl, fn_table: &HashMap<String, FnSigResolved>) -> Ty {
     // structs are needed for inference, so an empty table is safe here.
     let empty_structs: HashMap<String, StructDecl> = HashMap::new();
     let empty_variants: HashMap<String, String> = HashMap::new();
-    let mut env = LocalEnv::new(&empty_structs, &empty_variants);
+    let mut env = LocalEnv::new(&empty_structs, &empty_variants, None);
     for p in &f.params {
         env.insert(p.name.name.clone(), ast_ty_to_ty(p.ty.as_ref()));
     }
@@ -1079,6 +1247,165 @@ fn expr_yields_value(e: &Expr, fn_table: &HashMap<String, FnSigResolved>) -> boo
             true
         }
         _ => true,
+    }
+}
+
+// ============================================================================
+// Positional struct constructor rewrite (pre-sema pass)
+// ============================================================================
+//
+// `Point(3, 4)` parses as a generic Call node. If the callee matches a struct
+// declaration (and isn't an enum variant of the same name), splice the args
+// into the struct's declared field order and rewrite the node as a StructLit.
+// The walker recurses into every Expr / Stmt / Block reachable from a fn body
+// so nested ctors (`wrap(Point(3,4))`) are also rewritten.
+
+fn rewrite_struct_ctors_block(
+    block: &mut Block,
+    structs: &HashMap<String, Vec<Ident>>,
+    variants: &HashMap<String, String>,
+) {
+    for stmt in &mut block.stmts {
+        rewrite_struct_ctors_stmt(stmt, structs, variants);
+    }
+    if let Some(tail) = block.tail_expr.as_mut() {
+        rewrite_struct_ctors_expr(tail, structs, variants);
+    }
+}
+
+fn rewrite_struct_ctors_stmt(
+    stmt: &mut Stmt,
+    structs: &HashMap<String, Vec<Ident>>,
+    variants: &HashMap<String, String>,
+) {
+    match stmt {
+        Stmt::Decl { value, .. } => rewrite_struct_ctors_expr(value, structs, variants),
+        Stmt::Assign { target, value, .. } => {
+            rewrite_struct_ctors_expr(target, structs, variants);
+            rewrite_struct_ctors_expr(value, structs, variants);
+        }
+        Stmt::Expr(e) => rewrite_struct_ctors_expr(e, structs, variants),
+        Stmt::Return { value: Some(e), .. } => rewrite_struct_ctors_expr(e, structs, variants),
+        Stmt::Return { value: None, .. } | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::If(i) => rewrite_struct_ctors_if(i, structs, variants),
+        Stmt::Loop(lp) => {
+            if let Some(head) = lp.head.as_mut() {
+                match head {
+                    LoopHead::ForIn { iter, .. } => rewrite_struct_ctors_expr(iter, structs, variants),
+                    LoopHead::While(c) => rewrite_struct_ctors_expr(c, structs, variants),
+                }
+            }
+            rewrite_struct_ctors_block(&mut lp.body, structs, variants);
+        }
+        Stmt::Match(m) => {
+            rewrite_struct_ctors_expr(&mut m.scrutinee, structs, variants);
+            for arm in &mut m.arms {
+                rewrite_struct_ctors_expr(&mut arm.body, structs, variants);
+            }
+        }
+    }
+}
+
+fn rewrite_struct_ctors_if(
+    i: &mut IfStmt,
+    structs: &HashMap<String, Vec<Ident>>,
+    variants: &HashMap<String, String>,
+) {
+    rewrite_struct_ctors_expr(&mut i.cond, structs, variants);
+    rewrite_struct_ctors_block(&mut i.then_branch, structs, variants);
+    match i.else_branch.as_mut() {
+        Some(ElseBranch::Block(b)) => rewrite_struct_ctors_block(b, structs, variants),
+        Some(ElseBranch::If(inner)) => rewrite_struct_ctors_if(inner, structs, variants),
+        None => {}
+    }
+}
+
+fn rewrite_struct_ctors_expr(
+    e: &mut Expr,
+    structs: &HashMap<String, Vec<Ident>>,
+    variants: &HashMap<String, String>,
+) {
+    // Walk children first so nested ctors get rewritten regardless of whether
+    // the outer node is itself a Call.
+    match &mut e.kind {
+        ExprKind::Call { callee, args } => {
+            rewrite_struct_ctors_expr(callee, structs, variants);
+            for a in args.iter_mut() {
+                rewrite_struct_ctors_expr(a, structs, variants);
+            }
+        }
+        ExprKind::Index { container, index } => {
+            rewrite_struct_ctors_expr(container, structs, variants);
+            rewrite_struct_ctors_expr(index, structs, variants);
+        }
+        ExprKind::Field { container, .. } => {
+            rewrite_struct_ctors_expr(container, structs, variants);
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            rewrite_struct_ctors_expr(lhs, structs, variants);
+            rewrite_struct_ctors_expr(rhs, structs, variants);
+        }
+        ExprKind::Unary { operand, .. } => rewrite_struct_ctors_expr(operand, structs, variants),
+        ExprKind::Ternary { cond, then_, else_ } => {
+            rewrite_struct_ctors_expr(cond, structs, variants);
+            rewrite_struct_ctors_expr(then_, structs, variants);
+            rewrite_struct_ctors_expr(else_, structs, variants);
+        }
+        ExprKind::Pipe { lhs, rhs } => {
+            rewrite_struct_ctors_expr(lhs, structs, variants);
+            rewrite_struct_ctors_expr(rhs, structs, variants);
+        }
+        ExprKind::Lambda { body, .. } => match body {
+            LambdaBody::Expr(inner) => rewrite_struct_ctors_expr(inner, structs, variants),
+            LambdaBody::Block(b) => rewrite_struct_ctors_block(b, structs, variants),
+        },
+        ExprKind::Array(items) => {
+            for it in items { rewrite_struct_ctors_expr(it, structs, variants); }
+        }
+        ExprKind::Map(entries) => {
+            for (k, v) in entries {
+                rewrite_struct_ctors_expr(k, structs, variants);
+                rewrite_struct_ctors_expr(v, structs, variants);
+            }
+        }
+        ExprKind::Tuple(items) => {
+            for it in items { rewrite_struct_ctors_expr(it, structs, variants); }
+        }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, v) in fields { rewrite_struct_ctors_expr(v, structs, variants); }
+        }
+        ExprKind::Block(b) => rewrite_struct_ctors_block(b, structs, variants),
+        ExprKind::If(i) => rewrite_struct_ctors_if(i, structs, variants),
+        ExprKind::Match(m) => {
+            rewrite_struct_ctors_expr(&mut m.scrutinee, structs, variants);
+            for arm in &mut m.arms {
+                rewrite_struct_ctors_expr(&mut arm.body, structs, variants);
+            }
+        }
+        ExprKind::Try(inner) => rewrite_struct_ctors_expr(inner, structs, variants),
+        ExprKind::Lit(_) | ExprKind::Ident(_) | ExprKind::Underscore => {}
+    }
+
+    // Now, if THIS node is a Call to a known struct name with matching arity,
+    // replace it in-place with a StructLit. Variants win when the name is in
+    // both tables (preserves the existing `Some(42)` behavior).
+    if let ExprKind::Call { callee, args } = &mut e.kind {
+        if let ExprKind::Ident(name) = &callee.kind {
+            if !variants.contains_key(name) {
+                if let Some(field_names) = structs.get(name) {
+                    if field_names.len() == args.len() {
+                        let ident = Ident { name: name.clone(), span: callee.span };
+                        let taken_args = std::mem::take(args);
+                        let fields: Vec<(Ident, Expr)> = field_names
+                            .iter()
+                            .cloned()
+                            .zip(taken_args.into_iter())
+                            .collect();
+                        e.kind = ExprKind::StructLit { name: ident, fields };
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -87,6 +87,18 @@ fn e2e_fizzbuzz_with_match() {
 }
 
 #[test]
+fn e2e_closure_block() {
+    if !project_has("examples/closure_block.ail") { return; }
+    run_case("closure_block");
+}
+
+#[test]
+fn e2e_string_interp() {
+    if !project_has("examples/string_interp.ail") { return; }
+    run_case("string_interp");
+}
+
+#[test]
 fn e2e_pipe() {
     if !project_has("examples/pipe.ail") { return; }
     run_case("pipe");
@@ -147,9 +159,27 @@ fn e2e_word_count() {
 }
 
 #[test]
+fn e2e_map_inference() {
+    if !project_has("examples/map_inference.ail") { return; }
+    run_case("map_inference");
+}
+
+#[test]
 fn e2e_structs_demo() {
     if !project_has("examples/structs_demo.ail") { return; }
     run_case("structs_demo");
+}
+
+#[test]
+fn e2e_struct_positional() {
+    if !project_has("examples/struct_positional.ail") { return; }
+    run_case("struct_positional");
+}
+
+#[test]
+fn e2e_auto_import_demo() {
+    if !project_has("examples/auto_import_demo.ail") { return; }
+    run_case("auto_import_demo");
 }
 
 #[test]
