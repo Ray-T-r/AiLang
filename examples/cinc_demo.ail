@@ -1,0 +1,11 @@
+// `cinc "h"` pulls a C header into the generated C so its declarations,
+// macros and typedefs are visible; `ex fn` declares the symbols you call.
+// `ex "lib" fn` additionally links `-llib` (see https-server examples for
+// the special-cased libpq/openssl; cinc + ex "lib" generalizes it).
+cinc "ctype.h"
+
+ex fn toupper(c:i32) -> i32
+ex fn tolower(c:i32) -> i32
+
+println(toupper(97))   // 65  ('a' -> 'A')
+println(tolower(90))   // 122 ('Z' -> 'z')

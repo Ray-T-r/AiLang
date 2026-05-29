@@ -143,7 +143,7 @@ impl Parser<'_> {
             // 1) Item keyword? Parse it as an item.
             if matches!(
                 self.peek_kind(),
-                TokenKind::KwFn | TokenKind::KwSt | TokenKind::KwEn | TokenKind::KwIm | TokenKind::KwEx
+                TokenKind::KwFn | TokenKind::KwSt | TokenKind::KwEn | TokenKind::KwIm | TokenKind::KwEx | TokenKind::KwCinc
             ) {
                 if let Some(item) = self.parse_item() {
                     items.push(item);
@@ -243,6 +243,7 @@ impl Parser<'_> {
             TokenKind::KwEn => self.parse_enum_item().map(Item::Enum),
             TokenKind::KwIm => self.parse_import_item().map(Item::Import),
             TokenKind::KwEx => self.parse_extern_item().map(Item::Extern),
+            TokenKind::KwCinc => self.parse_cinclude_item().map(Item::CInclude),
             _ => None,
         }
     }
@@ -373,6 +374,18 @@ impl Parser<'_> {
             path,
             alias,
             span: start.join(end),
+        })
+    }
+
+    /// `cinc "header.h"` — a C `#include`. Mirrors `parse_import_item`, but the
+    /// payload names a C header (its decls/macros/typedefs), not an AiLang module.
+    fn parse_cinclude_item(&mut self) -> Option<CIncludeDecl> {
+        let start = self.peek().span;
+        self.expect(TokenKind::KwCinc)?;
+        let header = self.parse_str_literal()?;
+        Some(CIncludeDecl {
+            span: start.join(header.span),
+            header,
         })
     }
 

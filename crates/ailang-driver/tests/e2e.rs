@@ -99,6 +99,12 @@ fn e2e_string_interp() {
 }
 
 #[test]
+fn e2e_cinc_demo() {
+    if !project_has("examples/cinc_demo.ail") { return; }
+    run_case("cinc_demo");
+}
+
+#[test]
 fn e2e_pipe() {
     if !project_has("examples/pipe.ail") { return; }
     run_case("pipe");

@@ -84,6 +84,7 @@ pub enum TokenKind {
     KwAs,
     KwIn,
     KwEn,  // `en` — enum / ADT declaration
+    KwCinc, // `cinc` — C `#include` directive
 
     // ----- Keywords (literals) -----
     KwTrue,
@@ -198,6 +199,7 @@ impl TokenKind {
             KwLp => "lp",        KwRt => "rt",        KwMt => "mt",
             KwSt => "st",        KwTr => "tr",        KwIm => "im",
             KwEn => "en",
+            KwCinc => "cinc",
             KwEx => "ex",        KwMu => "mu",        KwBr => "br",
             KwCt => "ct",        KwAs => "as",        KwIn => "in",
             KwTrue => "true",    KwFalse => "false",  KwNil => "nil",

@@ -138,6 +138,10 @@ pub fn analyze(mut module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
             Item::Import(_) => {
                 // Imports are resolved by the driver pre-sema; ignore here.
             }
+            Item::CInclude(_) => {
+                // C headers only affect codegen (#include) and linking; they
+                // introduce no AiLang-visible names, so there's nothing to do.
+            }
         }
     }
 

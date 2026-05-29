@@ -25,9 +25,12 @@ use ailang_syntax::ast::*;
 use std::fmt::Write;
 
 pub fn emit_c(resolved: &ResolvedModule) -> String {
+    // Everything below is generated into `out`, which is really the *body*:
+    // typedefs, declarations, and function bodies. The runtime prelude is
+    // prepended at the very end — that ordering lets us scan the finished
+    // body and pull in the optional TLS / Postgres sections only when the
+    // program actually reaches them (see the assembly step at the bottom).
     let mut out = String::new();
-    out.push_str(PRELUDE);
-    out.push('\n');
 
     let module = &resolved.module;
 
@@ -168,7 +171,68 @@ pub fn emit_c(resolved: &ResolvedModule) -> String {
         }
     }
 
-    out
+    // ----- Assemble: core prelude + only the optional sections the body
+    // reaches + the body. Skipping the TLS section keeps the heavy
+    // `<openssl/...>` headers (~24 ms of clang time) and the `-lssl`/`-lcrypto`
+    // link deps out of programs that don't do TLS; likewise `<libpq-fe.h>`
+    // and `-lpq` for the Postgres section. The driver's own symbol scan then
+    // sees no `SSL_new` / `PQexec` and correctly omits the link flags.
+    let mut full = String::with_capacity(PRELUDE.len() + out.len() + 128);
+
+    // `ex "lib" fn …` → a directive line the driver scans to add `-l<lib>`
+    // (mirrors its `SSL_new`/`PQexec` symbol scan). `"c"` and the unnamed
+    // default mean libc, always linked, so they're skipped.
+    let mut link_libs: Vec<&str> = Vec::new();
+    for item in &module.items {
+        if let Item::Extern(e) = item {
+            if let Some(lib) = &e.lib {
+                let l = lib.value.as_str();
+                if !l.is_empty() && l != "c" && !link_libs.contains(&l) {
+                    link_libs.push(l);
+                }
+            }
+        }
+    }
+    if !link_libs.is_empty() {
+        full.push_str("// ailang-link:");
+        for l in &link_libs {
+            full.push(' ');
+            full.push_str(l);
+        }
+        full.push('\n');
+    }
+
+    full.push_str(PRELUDE);
+    full.push('\n');
+
+    // `cinc "header.h"` → C `#include`, right after the runtime prelude so the
+    // externs and user code below can see the header's decls/macros/typedefs.
+    for item in &module.items {
+        if let Item::CInclude(c) = item {
+            let _ = writeln!(full, "#include <{}>", c.header.value);
+        }
+    }
+
+    if body_uses(&out, TLS_SIGS) {
+        full.push_str(PRELUDE_TLS);
+        full.push('\n');
+    }
+    if body_uses(&out, PG_SIGS) {
+        full.push_str(PRELUDE_PG);
+        full.push('\n');
+    }
+    full.push_str(&out);
+    full
+}
+
+/// True if any of `sigs` (builtin call signatures like `"tls_accept("`) occurs
+/// in the generated body. Matching `name(` rather than a bare prefix avoids
+/// tripping on unrelated identifiers or string literals — the same coarse but
+/// effective text scan the driver uses to decide `-lssl` / `-lpq`. A false
+/// positive only costs a little compile time; there are no false negatives for
+/// real calls, so a gated section is never missing when it's needed.
+fn body_uses(body: &str, sigs: &[&str]) -> bool {
+    sigs.iter().any(|s| body.contains(s))
 }
 
 // ---------------------------------------------------------------------------
@@ -176,3 +240,42 @@ pub fn emit_c(resolved: &ResolvedModule) -> String {
 // ---------------------------------------------------------------------------
 
 const PRELUDE: &str = include_str!("prelude.c");
+/// Optional runtime sections, emitted only when the program uses their
+/// builtins (see [`body_uses`]). This keeps `<openssl/...>` and `<libpq-fe.h>`
+/// — and the corresponding native link dependencies — out of the common case
+/// that touches neither TLS nor Postgres.
+const PRELUDE_TLS: &str = include_str!("prelude_tls.c");
+const PRELUDE_PG: &str = include_str!("prelude_pg.c");
+
+/// Call signatures that pull in [`PRELUDE_TLS`] (libssl + SHA-1).
+const TLS_SIGS: &[&str] = &[
+    "tls_server_ctx(",
+    "tls_client_ctx(",
+    "tls_free_ctx(",
+    "tls_accept(",
+    "tls_connect_fd(",
+    "tls_send(",
+    "tls_send_str(",
+    "tls_recv(",
+    "tls_close(",
+    "tls_error(",
+    "sha1(",
+];
+/// Call signatures that pull in [`PRELUDE_PG`] (libpq).
+const PG_SIGS: &[&str] = &[
+    "pg_connect(",
+    "pg_status(",
+    "pg_error(",
+    "pg_close(",
+    "pg_exec(",
+    "pg_ok(",
+    "pg_result_error(",
+    "pg_clear(",
+    "pg_nrows(",
+    "pg_ncols(",
+    "pg_value(",
+    "pg_isnull(",
+    "pg_col_name(",
+    "pg_affected(",
+    "pg_escape(",
+];

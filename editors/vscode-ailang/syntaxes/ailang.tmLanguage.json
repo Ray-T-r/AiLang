@@ -11,11 +11,14 @@
     { "include": "#fn-declaration" },
     { "include": "#extern-declaration" },
     { "include": "#struct-declaration" },
+    { "include": "#enum-declaration" },
     { "include": "#import" },
+    { "include": "#cinclude" },
     { "include": "#keywords" },
     { "include": "#constants" },
     { "include": "#types" },
     { "include": "#builtins" },
+    { "include": "#type-name" },
     { "include": "#wildcard" },
     { "include": "#function-call" },
     { "include": "#operators" },
@@ -41,6 +44,14 @@
       "begin": "\"",
       "end": "\"",
       "patterns": [
+        {
+          "name": "meta.interpolation.ailang",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.ailang" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.ailang" } },
+          "patterns": [ { "include": "$self" } ]
+        },
         {
           "name": "constant.character.escape.ailang",
           "match": "\\\\."
@@ -99,6 +110,14 @@
       }
     },
 
+    "enum-declaration": {
+      "match": "\\b(en)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.enum.ailang storage.type.enum.ailang" },
+        "2": { "name": "entity.name.type.enum.ailang" }
+      }
+    },
+
     "import": {
       "match": "\\b(im)\\b(?:\\s+(\"[^\"]*\"))?(?:\\s+(as)\\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
       "captures": {
@@ -106,6 +125,14 @@
         "2": { "name": "string.quoted.double.ailang" },
         "3": { "name": "keyword.control.import.as.ailang" },
         "4": { "name": "entity.name.namespace.ailang" }
+      }
+    },
+
+    "cinclude": {
+      "match": "\\b(cinc)\\b(?:\\s+(\"[^\"]*\"))?",
+      "captures": {
+        "1": { "name": "keyword.control.import.ailang" },
+        "2": { "name": "string.quoted.double.ailang" }
       }
     },
 
@@ -117,7 +144,7 @@
         },
         {
           "name": "keyword.other.ailang",
-          "match": "\\b(fn|st|tr|im|ex|mu|as)\\b"
+          "match": "\\b(fn|st|en|tr|im|ex|mu|as|cinc)\\b"
         }
       ]
     },
@@ -129,12 +156,17 @@
 
     "types": {
       "name": "storage.type.primitive.ailang",
-      "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|str)\\b"
+      "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|str|bytes)\\b"
     },
 
     "builtins": {
       "name": "support.function.builtin.ailang",
-      "match": "\\b(print|println|len|has|push|pop|read_file|write_file|read_line|args|exit|get_env|int_to_str|str_to_int|float_to_str|str_to_float|format|contains|starts_with|ends_with|index_of|to_upper|to_lower|trim|substring|replace|split|regex_match|regex_find|sqrt|pow|sin|cos|tan|log|log2|log10|exp|floor|ceil|min|max|ipow|gcd|abs|rand|srand|parse_int|eq|strcmp|atoi)\\b(?=\\s*\\()"
+      "match": "\\b(print|println|read_file|write_file|read_line|args|exit|get_env|int_to_str|str_to_int|float_to_str|str_to_float|str_to_bool|to_str|format|contains|starts_with|ends_with|index_of|to_upper|to_lower|trim|substring|replace|split|repeat|pad_left|pad_right|chr|ord|len|has|push|pop|sort|reverse|slice|join|keys|values|map|filter|reduce|regex_match|regex_find|abs_i64|abs_f64|sign|clamp|ok|err_i64|err_str|err_bool|err_f64|unwrap|is_ok|is_err|err_msg|str_to_bytes|bytes_to_str|bytes_at|bytes_slice|tcp_listen|tcp_accept|tcp_connect|sock_send|sock_send_str|sock_recv|sock_close|now_ms|now_us|mono_ms|time_iso|sleep_ms|sqrt|pow|sin|cos|tan|log|log2|log10|exp|floor|ceil|min|max|ipow|gcd|abs|rand|srand|parse_int|eq|strcmp|atoi)\\b(?=\\s*\\()"
+    },
+
+    "type-name": {
+      "name": "entity.name.type.ailang",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
     },
 
     "wildcard": {

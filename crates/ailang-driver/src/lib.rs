@@ -388,6 +388,21 @@ fn invoke_c_compiler(
         // `std/math.ail` declares sqrt/sin/cos/log/exp/... as externs.
         cmd.arg("-lm");
 
+        // User libraries from `ex "lib" fn …`: codegen emits a top-of-file
+        // `// ailang-link: <libs>` directive; add `-l<lib>` for each. Lets a
+        // program link any C library without the driver hard-coding its
+        // symbols (the way libpq/openssl below are special-cased).
+        if let Ok(src) = std::fs::read_to_string(&tmp_path) {
+            for line in src.lines() {
+                if let Some(rest) = line.strip_prefix("// ailang-link:") {
+                    for lib in rest.split_whitespace() {
+                        cmd.arg(format!("-l{lib}"));
+                    }
+                    break;
+                }
+            }
+        }
+
         // libpq: only link if the generated C actually references the
         // Postgres builtins. Probe order mirrors bdw-gc: $PG_PREFIX →
         // pkg-config → brew. If detected, add -I/-L; -lpq is always
@@ -607,6 +622,7 @@ fn auto_import_stdlib(
                     for v in &e.variants { defined.insert(v.name.name.clone()); }
                 }
                 Item::Import(_) => {}
+                Item::CInclude(_) => {}
             }
         }
         let mut referenced: HashSet<String> = HashSet::new();

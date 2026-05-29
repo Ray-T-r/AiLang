@@ -6,6 +6,72 @@ All notable changes are documented here. Loosely follows
 
 ## [Unreleased]
 
+### Language
+
+- **`${...}` interpolation now takes any expression, not just bare idents.**
+  Field access (`${p.x}`), calls (`${to_upper(s)}`), indexing (`${nums[0]}`)
+  and arithmetic (`${age + 1}`) are re-parsed inline and wrapped in `to_str`,
+  so they no longer have to be hoisted into a local first. A non-expression
+  like `${not an ident here}` still stays verbatim, as does any `"`-containing
+  expression (the outer quote closes early — hoist `${m["k"]}` into a local).
+  Interpolation is now a full replacement for `format(...)` on plain
+  string-building, and shorter (no `%lld`/`%s` placeholders, no trailing args).
+
+- **C FFI now consumes headers and links libraries.** `cinc "zlib.h"` emits
+  `#include <zlib.h>` into the generated C (making the header's
+  macros/typedefs/structs visible), and `ex "lib" fn …` both declares the
+  extern and links `-llib` — e.g. `ex "z" fn zlibVersion() -> str` prints the
+  zlib version with no driver changes. Unknown type names pass through to C
+  verbatim, so a header typedef can be named directly in a signature. Still
+  hand-written signatures (no bindgen); `#define` macros aren't visible as
+  AiLang names.
+
+- **Empty `{}` / `[]` infer `(K,V)` / element type from later usage.** A
+  binding like `counts := {}` followed by `counts[w] += 1` inside a `lp`
+  body now correctly picks up `{str:i64}` from the loop variable's and
+  value's static types. Previously this fell back to `{i64:i64}` and
+  silently treated string keys as pointers; the workaround was
+  `{"_seed_": 0}` type-pin literals or explicit `:{str:i64}` annotations.
+  Both are no longer needed for the common case.
+
+### Benchmarks
+
+- **wordcount: 67 → 57 tokens** (-15%), driven by the inference change
+  above plus switching `counts[w] = counts[w] + 1` to `counts[w] += 1`.
+
+- **jsonapi: 100 → 96 tokens** (-4%), from replacing the
+  `format("...%lld...", i, i, age)` line with string interpolation
+  `"{\"id\":${i},...,\"age\":${age}}"`. AiLang's three-program total is now
+  **257 — the lowest of any language measured**, edging out Python's 258
+  (it was neck-and-neck at 261 before).
+
+### Performance
+
+- **GC no longer scans pointer-free numeric heap.** The `[i64]` array
+  backing stores and the `{i64:i64}` / `{str:i64}` map key/value/occupied
+  arrays now allocate via `GC_malloc_atomic` instead of `GC_MALLOC`, so
+  the Boehm collector marks them live without scanning their contents for
+  pointers. A `[i64]` value or `{i64:i64}` map is now entirely scan-free.
+  On a GC-stress benchmark (256 MB live numeric heap) this cut total
+  world-stopped marking from **37 ms to 1 ms** and moved the whole live
+  set out of the "pointers" class (`262 MB pointers → 262 MB other`). It
+  also removes a latent false-retention hazard where an integer payload
+  that happened to look like a heap address could keep garbage alive.
+  `[str]` / `{str:str}` stores still hold real pointers and stay scanned.
+
+- **The TLS and Postgres runtime is now emitted on demand.** The C prelude
+  previously baked `<openssl/ssl.h>` + the `tls_*` / `sha1` helpers and
+  `<libpq-fe.h>` + the `pg_*` helpers into *every* program, so even
+  `println("hi")` parsed the (heavy) OpenSSL headers and link-depended on
+  libssl/libcrypto. Codegen now scans the generated body and prepends the
+  TLS / Postgres sections only when the program calls into them. For the
+  common case that uses neither, **clang time drops ~31%** (66 → 45 ms on a
+  trivial program; OpenSSL's headers alone were ~24 ms) and the binary no
+  longer links openssl or libpq at all — they revert to truly optional
+  native deps. TLS/Postgres programs are unaffected (sections + link flags
+  appear exactly as before). Detection is a coarse text scan of the emitted
+  C, mirroring how the driver already decides `-lssl` / `-lpq`.
+
 ## [0.2.0] — 2026-05-27
 
 Major language + stdlib expansion. **55 automated tests pass; 25 end-to-end

@@ -305,35 +305,54 @@ println(len(msg))                        // 14
 
 ## String interpolation
 
-Use `${ident}` inside a regular `"..."` string. Mixed-type values are stringified automatically (`i64` / `f64` / `bool` / `str` all work):
+Use `${expr}` inside a regular `"..."` string. **Any expression** works — bare idents, field access, calls, indexing, arithmetic — and the value is stringified automatically (`i64` / `f64` / `bool` / `str` all work):
 
 ```
 name := "alice"
 age  := 30
-pi   := 3.14
-ok   := true
+nums := [10, 20, 30]
 
-println("hello, ${name}")                          // hello, alice
-println("${name} is ${age}, pi=${pi}, ok=${ok}")   // alice is 30, pi=3.14, ok=true
+println("hello, ${name}")                        // hello, alice
+println("${name} is ${age}")                     // alice is 30
+println("next ${age + 1}, up ${to_upper(name)}") // next 31, up ALICE
+println("nums[0]=${nums[0]}, n=${len(nums)}")    // nums[0]=10, n=3
 ```
+
+**Prefer interpolation over `format(...)`** for building strings — fewer tokens (no `%lld`/`%s` placeholders, no trailing arg list) and easier to read. Reach for `format` only when you need real printf control (width, precision, zero-padding).
 
 **Rules:**
 - Prefix is `${` (dollar **and** brace). A `$` followed by anything else is literal: `"cost $5"` and `"$dollar"` are not interpolations.
 - JSON-shaped strings are unaffected: `"{\"name\":\"bob\"}"` has no `${` so it stays verbatim.
-- **Only a bare identifier** is supported inside `${}`. `${user.name}`, `${proc_getpid()}`, `${x + 1}` are NOT recognised and stay as literal text — first store the value in a local: `pid := proc_getpid(); println("(pid ${pid})")`.
-- Desugars to `"prefix" + to_str(x) + "suffix"`, so it's interchangeable with `+` concat — pick whichever reads better.
+- The text inside `${...}` is re-parsed as a full expression. Anything that isn't one valid expression (e.g. `${not an ident here}`) stays as literal text.
+- Brace matching is naive — the first `}` closes the `${`. An expression that itself contains `}` (a map/block literal) would truncate; store it in a local first. `${p.x}`, `${f(a)}`, `${m[k]}` are all fine.
+- The expression **can't contain a `"`** — the outer string's quote closes early. A string-literal map key like `${m["the"]}` won't parse; hoist it: `t := m["the"]; "...${t}..."`. A variable key `${m[k]}` is fine.
+- Desugars to `"prefix" + to_str(expr) + "suffix"`, interchangeable with `+` concat.
 
-## FFI to libc
+## FFI: C functions, headers, libraries
 
 ```
-ex fn puts(s:str) -> i32
+ex fn puts(s:str) -> i32                 // libc — declared, linked directly
 ex fn abs(n:i32) -> i32
 
 puts("hello via libc puts!")
 println(abs(-7))                         // 7
 ```
 
-`ex fn` declares an extern with C ABI — no body, linked directly. The driver always links `-lm` and `-lgc`; for other libs the linker discovers them by name.
+`ex fn` declares an extern with the C ABI — no body. libc and libm are always linked.
+
+**Pull in a C header with `cinc`, link a library with `ex "lib"`:**
+
+```
+cinc "zlib.h"                            // → #include <zlib.h> in the generated C
+ex "z" fn zlibVersion() -> str           // declares the fn AND links -lz
+println(zlibVersion())                   // 1.2.12
+```
+
+- `cinc "h.h"` emits `#include <h.h>`, so the header's macros, typedefs and struct definitions are visible to the generated C.
+- `ex "lib" fn …` both declares the symbol (so sema accepts the call) and tells the driver to link `-llib`. Bare `ex fn` (or `ex "c" fn`) = libc, no extra link.
+- A header typedef can be named directly in a signature: `ex "sqlite3" fn sqlite3_open(path:str, db:*sqlite3) -> i32` — unknown type names are emitted to C verbatim, and `cinc "sqlite3.h"` supplies the real definition. Use `*T` for pointers, `&x` to take an address.
+
+**Limits (current FFI):** you still hand-write each `ex fn` signature — no header auto-binding/bindgen. `#define` macros and constants aren't visible as AiLang names (sema would see them undefined); wrap one in a tiny C function if you need it. Only system include/lib search paths are wired.
 
 ## Modules and stdlib
 
@@ -491,7 +510,7 @@ Output binary and generated `.c` land next to the source.
 - `?` postfix at top level (implicit-main scope) — wrap in `fn run() -> !T { … }`
 - `match` guards (`if cond` on a pattern arm), rest patterns (`..`), or `@` bindings
 - Closures that mutate captured variables (capture is by-value snapshot)
-- Interpolation with anything other than a bare identifier — `${user.name}`, `${func(x)}`, `${a + b}` stay as literal text. Store the value in a local first.
+- Interpolation where the expression itself contains a literal `}` (e.g. a `${ {1:2} }` map/block literal) — the first `}` closes the `${`. `${p.x}`, `${f(a)}`, `${m[k]}`, `${a+b}` are all fine; only hoist the rare `}`-containing case into a local.
 - Python-style `f"..."` or `{x}` (no `$`) interpolation — AiLang only recognises `${x}`
 - `tr` trait method dispatch (the keyword parses but resolution is minimal)
 - Long WebSocket frames (≥126 bytes) in `std/ws.ail` — current impl is short-text only
@@ -507,6 +526,7 @@ Prefer:
 - Trailing `if` / `mt` as return value
 - Braceless single-statement bodies
 - `+` for string concat (not `++`)
+- **`"...${expr}..."` interpolation** over `format(...)` for plain string building
 - `lp x in coll` over manual index counters
 - `mt` over chained `if`/`el if` for value matching
 - Bare variant names: `Some(42)`, NOT `Maybe::Some(42)`
@@ -520,6 +540,7 @@ Avoid:
 - `Err("msg")` / `Result::Ok` — it's `ok(v)` and `err("msg")`
 - `Maybe.Some(v)` — variants are global, bare
 - Type-suffix conversion clutter (`int_to_str`, `bytes_to_str`, `err_i64`, `abs_i64`) when the polymorphic form works
+- `format("...%lld...", x)` when plain interpolation `"...${x}..."` would do
 
 ## Worked examples
 
@@ -707,6 +728,6 @@ println(gcd(36, 24))                             // 12
 4. **`mt` arm separator is `;`** (not `,`). Variant patterns bind positionally — `Circle(r)` doesn't have to match the field name in the decl.
 5. **Variant constructors are bare**, not namespaced: `Some(42)` / `None`, not `Maybe::Some(42)` or `Maybe.Some(42)`. Two enums in the same module can't share a variant name.
 6. **Real types in keywords**: it's `en`, not `enum`; `st`, not `struct`; `fn`, not `function`; `mt`, not `match`; `rt`, not `return`.
-7. **String interpolation needs `$`**: `"hi ${name}"` works, `"hi {name}"` does NOT — the bare-brace form (Python f-string style) stays as literal text. Only a bare identifier is allowed inside `${}`; for `${obj.field}` or `${f()}`, store the value in a local first.
+7. **String interpolation needs `$`**: `"hi ${name}"` works, `"hi {name}"` does NOT — the bare-brace form (Python f-string style) stays as literal text. Inside `${...}` any expression works (`${obj.field}`, `${f(x)}`, `${a+b}`); only a literal `}` within the expression truncates it.
 
 When in doubt, mimic the shape of programs in `examples/*.ail` rather than translating from another language.

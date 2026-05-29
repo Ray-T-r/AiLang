@@ -24,6 +24,9 @@ pub enum Item {
     Enum(EnumDecl),
     Import(ImportDecl),
     Extern(ExternDecl),
+    /// `cinc "header.h"` — emit a C `#include <header.h>` so generated code
+    /// can see a C library's declarations, macros and typedefs.
+    CInclude(CIncludeDecl),
 }
 
 /// `en Name { Variant, Variant(field:T), … }` — sum type (tagged union).
@@ -75,6 +78,16 @@ pub struct Field {
 pub struct ImportDecl {
     pub path: StrLit,
     pub alias: Option<Ident>,
+    pub span: Span,
+}
+
+/// `cinc "header.h"` — a request to `#include <header.h>` in the generated C.
+/// Unlike `im`, this pulls in a C header (its declarations / macros / typedefs),
+/// not an AiLang module. Pair with `ex "lib" fn …` to declare the functions and
+/// link the library.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CIncludeDecl {
+    pub header: StrLit,
     pub span: Span,
 }
 

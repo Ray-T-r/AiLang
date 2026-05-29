@@ -97,6 +97,7 @@ both 1 BPE token.
 | Implicit return of trailing expression       | no explicit `return` in the common case |
 | Single-statement bodies skip `{...}`         | `if x>0 print(x)` is legal |
 | Expression-bodied fns: `fn add(a, b) a + b`  | no `{ return … }` boilerplate, no type stutter |
+| `"…${expr}…"` interpolation                  | `format()`'s `%lld`/`%s` + the trailing arg list |
 
 ---
 
@@ -128,17 +129,19 @@ for jsonapi, `41538` for primes.
 
 | program   | AiLang | Python | JS  | Rust | Go  | Java | C   |
 |-----------|-------:|-------:|----:|-----:|----:|-----:|----:|
-| wordcount |     67 |     62 |  74 |  107 |  86 |  107 | 421 |
-| jsonapi   |    100 |     92 | 110 |  128 | 139 |  141 | 148 |
+| wordcount |     57 |     62 |  74 |  107 |  86 |  107 | 421 |
+| jsonapi   |     96 |     92 | 110 |  128 | 139 |  141 | 148 |
 | primes    |    104 |    104 | 121 |  139 | 144 |  152 | 148 |
-| **TOTAL** |**271** |    258 | 305 |  374 | 369 |  400 | 717 |
-| vs AiLang |  1.00× |  0.95× |1.13×|1.38× |1.36×|1.48× |2.65× |
+| **TOTAL** |**257** |    258 | 305 |  374 | 369 |  400 | 717 |
+| vs AiLang |  1.00× |  1.00× |1.19×|1.46× |1.44×|1.56× |2.79× |
 
-AiLang is within **5%** of Python on tokens — Python is the
-generally-acknowledged king of script density, so being neck-and-neck
-with it is the goal of the syntax design. Against the other compiled
-languages AiLang wins by **30–50%**, and against hand-written C with
-its missing-batteries (no hash map, no `split`) it wins by **2.6×**.
+AiLang now has the **lowest total token count** of any language measured —
+edging out Python (257 vs 258), the generally-acknowledged king of script
+density, and beating it outright on the wordcount script. The jsonapi gap
+closed once string interpolation (`"...${expr}..."`) replaced the
+`format(...)` + `%lld` boilerplate. Against the other compiled languages
+AiLang wins by **40–55%**, and against hand-written C with its
+missing-batteries (no hash map, no `split`) it wins by **2.8×**.
 
 Reproduce: `python3 bench/count_three.py`.
 
@@ -167,7 +170,7 @@ The wordcount gap is the largest because AiLang's `{str:i64}` is a
 generic hash table with growing — the hand-written C version uses a
 9-entry linear scan, which is the right data structure for nine unique
 words but not what you'd reach for in production code. (Compare that
-421-token C wordcount to AiLang's 67 to see why.)
+421-token C wordcount to AiLang's 57 to see why.)
 
 Reproduce: `hyperfine` against the three programs under
 [`bench/perf/<lang>/`](bench/perf/) — see
@@ -194,7 +197,8 @@ Working: functions, recursion, mutual recursion, `if`/`el`, `lp` (for-in
 + while + map `(k,v)` destructure), `mt` match with tuple **and variant**
 patterns, `|>` pipe, arrays (`[i64]` and `[str]`), maps (`{i64:i64}`,
 `{str:i64}`, `{str:str}`), string `+` concat with Boehm GC, FFI to
-libc (`ex fn ...`), modules (`im "path"`), a seed stdlib in
+C (`ex fn`, `cinc` for headers, `ex "lib"` to link a library), modules
+(`im "path"`), a seed stdlib in
 [`std/`](std/), **real generic monomorphization** (one `fn id<T>(x:T)`,
 specialized per call-site type via `_Generic`), **user-defined structs**
 (`st Point { x:i64; y:i64 }` + struct literal + `.field` access + auto
@@ -275,21 +279,21 @@ The full source of each row in the benchmark table — note that none of
 the AiLang files have comments and none wrap their top-level code in
 `fn main()`:
 
-**`bench/perf/ailang/wordcount.ail`** — 67 tokens:
+**`bench/perf/ailang/wordcount.ail`** — 57 tokens:
 
 ```
 seed := "the quick brown fox jumps over the lazy dog "
 text := repeat(seed, 500000)
 words := split(text, " ")
-mu counts:{str:i64} := {}
+counts := {}
 lp w in words {
-  counts[w] = counts[w] + 1
+  counts[w] += 1
 }
 println(len(counts))
 println(counts["the"])
 ```
 
-**`bench/perf/ailang/jsonapi.ail`** — 100 tokens:
+**`bench/perf/ailang/jsonapi.ail`** — 96 tokens:
 
 ```
 mu count := 0
@@ -297,7 +301,7 @@ mu total := 2
 lp i in 0..50000 {
   age := 18 + (i % 52)
   if age >= 40 {
-    rec := format("{\"id\":%lld,\"name\":\"user_%lld\",\"age\":%lld}", i, i, age)
+    rec := "{\"id\":${i},\"name\":\"user_${i}\",\"age\":${age}}"
     if count > 0 { total += 1 }
     total += len(rec)
     count += 1
@@ -389,15 +393,28 @@ println(msg)            // → Hello, AiLang!
 println(len(msg))       // → 14
 ```
 
-### FFI to libc
+### FFI: C functions, headers, libraries
 
 ```
-ex fn puts(s:str) -> i32
+ex fn puts(s:str) -> i32                    // libc — declared, linked directly
 ex fn abs(n:i32) -> i32
 
 puts("hello via libc puts!")
 println(abs(-7))        // → 7
 ```
+
+`cinc "h.h"` pulls a C header into the generated C (its macros / typedefs /
+structs become visible); `ex "lib" fn` declares a symbol *and* links `-llib`:
+
+```
+cinc "zlib.h"
+ex "z" fn zlibVersion() -> str              // declares it + links -lz
+println(zlibVersion())                      // → 1.2.12
+```
+
+You still hand-write each signature (no header auto-binding yet); unknown type
+names pass through to C verbatim, so the typedefs `cinc` makes visible can be
+named directly in `ex fn` declarations.
 
 ### Arrays & maps
 
