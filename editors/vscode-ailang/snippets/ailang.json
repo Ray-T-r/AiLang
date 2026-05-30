@@ -1,0 +1,82 @@
+{
+  "function (block body)": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:args}) {", "\t$0", "}"],
+    "description": "Block-body function"
+  },
+  "function (expression body)": {
+    "prefix": "fne",
+    "body": ["fn ${1:name}(${2:args}) ${0:expr}"],
+    "description": "Expression-bodied function: fn add(a, b) a + b"
+  },
+  "lambda": {
+    "prefix": "lam",
+    "body": ["fn(${1:x}) ${0:expr}"],
+    "description": "Lambda / closure literal: fn(x) x * 2"
+  },
+  "loop (for-in)": {
+    "prefix": "lpf",
+    "body": ["lp ${1:i} in ${2:0}..${3:n} {", "\t$0", "}"],
+    "description": "for-in loop over a range (upper bound exclusive)"
+  },
+  "loop (while)": {
+    "prefix": "lpw",
+    "body": ["lp ${1:cond} {", "\t$0", "}"],
+    "description": "while-style loop"
+  },
+  "loop (map entries)": {
+    "prefix": "lpm",
+    "body": ["lp (${1:k}, ${2:v}) in ${3:m} {", "\t$0", "}"],
+    "description": "Iterate a map with tuple destructure"
+  },
+  "if": {
+    "prefix": "if",
+    "body": ["if ${1:cond} {", "\t$0", "}"],
+    "description": "if block"
+  },
+  "if / el": {
+    "prefix": "ifel",
+    "body": ["if ${1:cond} {", "\t$2", "} el {", "\t$0", "}"],
+    "description": "if / else"
+  },
+  "match": {
+    "prefix": "mt",
+    "body": ["mt ${1:expr} {", "\t${2:pattern} => ${3:result};", "\t_ => ${0:default};", "}"],
+    "description": "match expression"
+  },
+  "struct": {
+    "prefix": "st",
+    "body": ["st ${1:Name} {", "\t${2:field}: ${3:i64};", "}"],
+    "description": "struct declaration"
+  },
+  "enum": {
+    "prefix": "en",
+    "body": ["en ${1:Name} {", "\t${2:Variant},", "\t${3:Other}(${4:field}:${5:i64}),", "}"],
+    "description": "enum / algebraic data type"
+  },
+  "import": {
+    "prefix": "im",
+    "body": ["im \"${1:path.ail}\""],
+    "description": "import an AiLang module"
+  },
+  "extern fn": {
+    "prefix": "ex",
+    "body": ["ex fn ${1:name}(${2:args}) -> ${3:i32}"],
+    "description": "extern (C ABI) declaration"
+  },
+  "extern fn (linked library)": {
+    "prefix": "exlib",
+    "body": ["ex \"${1:lib}\" fn ${2:name}(${3:args}) -> ${4:i32}"],
+    "description": "extern with library linking (-l<lib>)"
+  },
+  "C include": {
+    "prefix": "cinc",
+    "body": ["cinc \"${1:header.h}\""],
+    "description": "Pull a C header into the generated code"
+  },
+  "result function": {
+    "prefix": "fnr",
+    "body": ["fn ${1:name}(${2:args}) -> !${3:i64} {", "\t$0", "\tok(${4:value})", "}"],
+    "description": "Fallible function returning !T"
+  }
+}

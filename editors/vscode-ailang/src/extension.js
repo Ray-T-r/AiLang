@@ -5,6 +5,7 @@
 const vscode = require('vscode');
 const cp = require('child_process');
 const path = require('path');
+const { KEYWORDS, CONSTANTS, TYPES, BUILTINS } = require('./vocabulary');
 
 let diagnosticCollection;
 let outputChannel;
@@ -13,6 +14,8 @@ function activate(context) {
   diagnosticCollection = vscode.languages.createDiagnosticCollection('ailang');
   outputChannel = vscode.window.createOutputChannel('AiLang');
   context.subscriptions.push(diagnosticCollection, outputChannel);
+
+  registerCompletion(context);
 
   const checkIfAil = (doc) => {
     if (doc && doc.languageId === 'ailang' && doc.uri.scheme === 'file') {
@@ -37,6 +40,78 @@ function activate(context) {
 function deactivate() {
   if (diagnosticCollection) diagnosticCollection.dispose();
   if (outputChannel) outputChannel.dispose();
+}
+
+// ---------------------------------------------------------------------------
+// Completion: keywords, primitive types, constants, and always-in-scope
+// builtins (with signatures). User-defined names still complete via VS Code's
+// built-in word-based suggestions, which run alongside this provider.
+// ---------------------------------------------------------------------------
+
+let cachedItems = null;
+
+function buildCompletionItems() {
+  if (cachedItems) return cachedItems;
+  const K = vscode.CompletionItemKind;
+  const items = [];
+
+  for (const [kw, desc] of KEYWORDS) {
+    const it = new vscode.CompletionItem(kw, K.Keyword);
+    it.detail = `keyword — ${desc}`;
+    items.push(it);
+  }
+
+  for (const c of CONSTANTS) {
+    const it = new vscode.CompletionItem(c, K.Constant);
+    it.detail = 'constant';
+    items.push(it);
+  }
+
+  for (const t of TYPES) {
+    const it = new vscode.CompletionItem(t, K.TypeParameter);
+    it.detail = 'primitive type';
+    items.push(it);
+  }
+
+  for (const b of BUILTINS) {
+    const it = new vscode.CompletionItem(b.name, K.Function);
+    it.detail = `${b.name}${b.sig}`;
+    const docParts = [];
+    if (b.doc) docParts.push(b.doc);
+    if (b.needsImport) docParts.push(`Requires \`im "${b.needsImport}"\`.`);
+    if (docParts.length) it.documentation = new vscode.MarkdownString(docParts.join('\n\n'));
+    // Insert `name(<cursor>)` so the call parens are pre-typed; zero-arg
+    // builtins get `name()` with the cursor after.
+    it.insertText = new vscode.SnippetString(b.noArgs ? `${b.name}()$0` : `${b.name}($0)`);
+    items.push(it);
+  }
+
+  cachedItems = items;
+  return items;
+}
+
+function registerCompletion(context) {
+  const provider = {
+    provideCompletionItems(document, position) {
+      // Don't offer the vocabulary inside comments or plain string bodies
+      // (but DO offer inside ${...} interpolation — handled by leaving the
+      // common case alone; suppressing only obvious comment/string lines keeps
+      // this cheap without a full token scan).
+      const line = document.lineAt(position.line).text;
+      const before = line.slice(0, position.character);
+      if (/\/\//.test(before)) {
+        // crude: if there's a // before the cursor and we're not past a string,
+        // assume comment. Good enough for a keyword list.
+        const lastSlash = before.lastIndexOf('//');
+        const inString = (before.slice(0, lastSlash).match(/"/g) || []).length % 2 === 1;
+        if (!inString) return undefined;
+      }
+      return buildCompletionItems();
+    },
+  };
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider('ailang', provider)
+  );
 }
 
 function getConfig() {
@@ -92,14 +167,25 @@ function stripAnsi(s) {
 const DIAG_RE = /(Error|Warning):\s*([^\n]+)\n\s*╭─\[([^\]]+):(\d+):(\d+)\]/g;
 // One-line summary fallback for lex errors etc. that don't get a positioned report.
 const SUMMARY_RE = /^ailangc:\s*([^\n]+error[^\n]*)$/m;
+// Library modules (e.g. files under std/) have no top-level code, so compiling
+// them standalone trips the compiler's "no main function" check. Filter that
+// specific diagnostic so opening a library file doesn't show a spurious error.
+// Real errors in the same file still surface — only this one message is dropped.
+const NO_MAIN_RE = /no\s+`?main`?\s+function/i;
 
 function parseDiagnostics(output, docPath, doc) {
   const diags = [];
   const docAbs = path.resolve(docPath);
   const docCwd = path.dirname(docAbs);
+  let suppressedNoMain = false;
   let m;
   while ((m = DIAG_RE.exec(output)) !== null) {
     const [, severity, message, file, lineStr, colStr] = m;
+    // Drop the "no main function" diagnostic — see NO_MAIN_RE comment.
+    if (NO_MAIN_RE.test(message)) {
+      suppressedNoMain = true;
+      continue;
+    }
     const reported = path.isAbsolute(file) ? file : path.resolve(docCwd, file);
     // Only attach diagnostics whose file resolves to THIS document.
     // Errors in imported files would otherwise land on the wrong file.
@@ -135,9 +221,12 @@ function parseDiagnostics(output, docPath, doc) {
 
   // If we got no per-position diagnostics but the compiler reported a summary
   // (e.g. "ailangc: lex error: ..."), pin it to line 0 so something shows up.
-  if (diags.length === 0) {
+  // Only fire the summary fallback if we genuinely have no diagnostics AND
+  // didn't suppress a no-main (which would have produced its own summary line
+  // we'd otherwise misreport as a line-0 error).
+  if (diags.length === 0 && !suppressedNoMain) {
     const sm = output.match(SUMMARY_RE);
-    if (sm) {
+    if (sm && !NO_MAIN_RE.test(sm[1])) {
       const range = new vscode.Range(0, 0, 0, 1);
       const diag = new vscode.Diagnostic(
         range,
