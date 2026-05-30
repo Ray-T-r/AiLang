@@ -1,0 +1,17 @@
+st Counter { value: i64; hits: i64 }
+
+fn bump(c:*Counter, by:i64) {
+  c.value = c.value + by
+  c.hits = c.hits + 1
+}
+
+mu ctr := Counter { value: 0, hits: 0 }
+bump(&ctr, 10)
+bump(&ctr, 5)
+println("value=${ctr.value} hits=${ctr.hits}")
+
+cinc "stdlib.h"
+ex fn div(num:i32, denom:i32) -> div_t
+
+r := div(17, 5)
+println("17/5 -> quot=${r.quot} rem=${r.rem}")

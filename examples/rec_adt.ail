@@ -1,0 +1,40 @@
+// Recursive ADTs — self-referential enum payloads, boxed on the GC heap.
+// An arithmetic-expression tree and a cons-list: the two canonical recursive
+// data structures, both impossible before variant payload boxing landed.
+
+en Expr {
+  Num(v:i64),
+  Add(l:Expr, r:Expr),
+  Mul(l:Expr, r:Expr),
+}
+
+fn eval(e:Expr) -> i64 {
+  mt e {
+    Num(v)    => v;
+    Add(l, r) => eval(l) + eval(r);
+    Mul(l, r) => eval(l) * eval(r);
+  }
+}
+
+en List { Nil, Cons(head:i64, tail:List) }
+
+fn sum(l:List) -> i64 {
+  mt l {
+    Nil        => 0;
+    Cons(h, t) => h + sum(t);
+  }
+}
+
+fn length(l:List) -> i64 {
+  mt l {
+    Nil        => 0;
+    Cons(h, t) => 1 + length(t);
+  }
+}
+
+e := Mul(Add(Num(3), Num(4)), Num(5))   // (3 + 4) * 5
+println(eval(e))                         // 35
+
+xs := Cons(10, Cons(20, Cons(30, Nil)))
+println(sum(xs))                         // 60
+println(length(xs))                      // 3

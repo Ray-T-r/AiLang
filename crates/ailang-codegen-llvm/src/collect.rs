@@ -75,9 +75,15 @@ fn collect_calls_block(
             .iter()
             .map(|tp| subst.get(&tp.name).cloned().unwrap_or(Ty::I64))
             .collect();
-        // Only register the instance if every type var resolved to a concrete
-        // primitive — otherwise we'd emit two instances mangled the same way.
-        if type_args.iter().all(|t| is_primitive_ty(t)) {
+        // Register the instance when every type var resolved to a concrete type
+        // we can monomorphize and mangle distinctly: a primitive or a user
+        // struct/enum (both carried as `Ty::Struct`). `[T]`/`{K:V}` of an
+        // aggregate is follow-up work; an unresolved var already defaulted to
+        // `i64` above.
+        if type_args
+            .iter()
+            .all(|t| is_primitive_ty(t) || matches!(t, Ty::Struct(_)))
+        {
             out.entry(name.clone()).or_default().insert(type_args);
         }
     });

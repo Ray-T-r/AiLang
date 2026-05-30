@@ -1,9 +1,9 @@
 seed := "the quick brown fox jumps over the lazy dog "
 text := repeat(seed, 500000)
 words := split(text, " ")
-mu counts:{str:i64} := {}
+counts := {}
 lp w in words {
-  counts[w] = counts[w] + 1
+  counts[w] += 1
 }
 println(len(counts))
 println(counts["the"])

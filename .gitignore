@@ -34,6 +34,14 @@ CLAUDE.md
 !/examples/*.ail
 !/examples/std/
 
+# std/ and examples/std/: only .ail sources (codegen artifacts from the
+# VS Code diagnostics provider — or from `ailangc compile` on a library
+# file — would otherwise pile up here).
+/std/*
+!/std/*.ail
+/examples/std/*
+!/examples/std/*.ail
+
 # bench/ailang_v2/ and bench/perf/ailang/: only .ail sources
 /bench/ailang_v2/*
 !/bench/ailang_v2/*.ail
@@ -49,3 +57,11 @@ CLAUDE.md
 !/bench/perf/rust/*.rs
 /bench/perf/java/*
 !/bench/perf/java/*.java
+
+# selfhost bootstrap build artifacts (binaries + generated C land next to source)
+/selfhost/lexer
+/selfhost/parser
+/selfhost/main
+/selfhost/*.c
+/examples-selfhost/*
+!/examples-selfhost/*.ail

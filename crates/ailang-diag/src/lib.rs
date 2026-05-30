@@ -11,7 +11,7 @@ pub struct Diagnostic {
     pub help: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Severity {
     Error,
     Warning,
@@ -22,6 +22,14 @@ impl Diagnostic {
     pub fn error(message: impl Into<String>, primary: Span) -> Self {
         Self {
             severity: Severity::Error,
+            message: message.into(),
+            primary,
+            help: None,
+        }
+    }
+    pub fn warning(message: impl Into<String>, primary: Span) -> Self {
+        Self {
+            severity: Severity::Warning,
             message: message.into(),
             primary,
             help: None,

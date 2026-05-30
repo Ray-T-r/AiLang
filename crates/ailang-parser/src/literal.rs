@@ -86,7 +86,10 @@ impl Parser<'_> {
     pub(crate) fn parse_str_literal(&mut self) -> Option<StrLit> {
         let tok = self.peek();
         if tok.kind != TokenKind::StrLit {
-            self.error(format!("expected string literal, got `{}`", tok.kind), tok.span);
+            self.error(
+                format!("expected string literal, got `{}`", tok.kind),
+                tok.span,
+            );
             return None;
         }
         self.bump();
@@ -136,13 +139,19 @@ fn parse_int(digits: &str) -> Result<i64, std::num::ParseIntError> {
 
 /// Strip surrounding `"`s and decode escapes.
 fn unescape_str(raw: &str, span: Span, errors: &mut Vec<crate::ParseError>) -> String {
-    let inner = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(raw);
+    let inner = raw
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw);
     decode_escapes(inner, span, errors)
 }
 
 /// Decode a `'x'` or `'\n'` literal into a single `char`.
 fn unescape_char(raw: &str, span: Span, errors: &mut Vec<crate::ParseError>) -> char {
-    let inner = raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')).unwrap_or(raw);
+    let inner = raw
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .unwrap_or(raw);
     let decoded = decode_escapes(inner, span, errors);
     let mut iter = decoded.chars();
     let ch = iter.next().unwrap_or('\0');
@@ -199,10 +208,22 @@ pub(crate) fn desugar_interp(s: &str, span: Span) -> Option<Expr> {
             };
             let inner = s[start..end].trim();
             match parse_embedded_expr(inner) {
-                Some(expr) => {
+                Some(mut expr) => {
                     if !buf.is_empty() {
                         parts.push(Part::Lit(std::mem::take(&mut buf)));
                     }
+                    // Re-parsing `inner` standalone gave its AST nodes spans
+                    // relative to `inner` (starting at 0), so the SAME embedded
+                    // text in two places would collide on identical spans — and
+                    // sema keys `expr_types` by span, so the second occurrence's
+                    // types would clobber the first's. Rebase every span into
+                    // this string literal's byte range so each interpolation
+                    // site is globally unique. `start` is the byte offset of
+                    // `inner` within `s`; `span.start` is `s`'s offset in the
+                    // source (plus 1 for the opening quote the literal span
+                    // includes).
+                    let base = span.start + 1 + start as u32;
+                    shift_spans(&mut expr, base);
                     parts.push(Part::Expr(expr));
                 }
                 // Doesn't parse as one expression — keep `${...}` verbatim
@@ -262,6 +283,55 @@ fn next_char_boundary(bytes: &[u8], i: usize) -> usize {
         j += 1;
     }
     j
+}
+
+/// Add `base` to every span in `e` (and its children). An embedded
+/// interpolation expression is parsed from a tiny standalone slice, so its
+/// spans start at 0; rebasing them into the enclosing string literal's byte
+/// range keeps every interpolation site's spans globally unique (sema keys
+/// side tables by span, so collisions cause cross-site type contamination).
+fn shift_spans(e: &mut Expr, base: u32) {
+    fn shift(sp: &mut Span, base: u32) {
+        sp.start = sp.start.saturating_add(base);
+        sp.end = sp.end.saturating_add(base);
+    }
+    shift(&mut e.span, base);
+    match &mut e.kind {
+        ExprKind::Lit(l) => shift(&mut l.span, base),
+        ExprKind::Ident(_) | ExprKind::Underscore => {}
+        ExprKind::Call { callee, args } => {
+            shift_spans(callee, base);
+            for a in args {
+                shift_spans(a, base);
+            }
+        }
+        ExprKind::Index { container, index } => {
+            shift_spans(container, base);
+            shift_spans(index, base);
+        }
+        ExprKind::Field { container, name } => {
+            shift_spans(container, base);
+            shift(&mut name.span, base);
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            shift_spans(lhs, base);
+            shift_spans(rhs, base);
+        }
+        ExprKind::Unary { operand, .. } => shift_spans(operand, base),
+        ExprKind::Ternary { cond, then_, else_ } => {
+            shift_spans(cond, base);
+            shift_spans(then_, base);
+            shift_spans(else_, base);
+        }
+        ExprKind::Pipe { lhs, rhs } => {
+            shift_spans(lhs, base);
+            shift_spans(rhs, base);
+        }
+        // Other expression forms can't appear inside a `${...}` (the embedded
+        // parser only accepts a single expression and rejects blocks, lambdas,
+        // etc. that would carry statements); nothing to rebase.
+        _ => {}
+    }
 }
 
 /// Re-parse the text inside a `${...}` as a standalone expression. Returns

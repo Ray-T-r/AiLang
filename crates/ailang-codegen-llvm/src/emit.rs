@@ -161,28 +161,69 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &Stmt, level: usize, ctx: &EmitC
         } => {
             indent(out, level);
             let cty = c_ty_for_decl(ty.as_ref(), value, ctx);
-            let _ = write!(out, "{} = ", c_decl(&c_safe_name(&name.name), &cty));
+            // Two cases fall back to `__auto_type` (let clang infer): (a) a
+            // generic fn's return type is a bare type variable (`T`) we can't
+            // spell — `p := id(Point(3,4))`; (b) the initializer is an
+            // `if`/`mt`/block used as an expression — it lowers to a GNU
+            // statement-expression whose value type we don't always reconstruct
+            // here (e.g. a struct-returning `mt`). Inferring sidesteps both.
+            let is_expr_form = matches!(
+                &value.kind,
+                ExprKind::If(_) | ExprKind::Match(_) | ExprKind::Block(_) | ExprKind::Try(_)
+            );
+            if ty.is_none() && (is_expr_form || !is_spellable_c_type(&cty, ctx)) {
+                let _ = write!(out, "__auto_type {} = ", c_safe_name(&name.name));
+            } else {
+                let _ = write!(out, "{} = ", c_decl(&c_safe_name(&name.name), &cty));
+            }
             emit_expr(out, value, ctx);
             out.push_str(";\n");
         }
         Stmt::Assign { target, value, .. } => {
             indent(out, level);
-            // Special case: `m[k] = v` where `m` is a map → setter call.
+            // Special case: indexed assignment `coll[k] = v`.
             if let ExprKind::Index { container, index } = &target.kind {
-                if let Some(Ty::Map(kt, vt)) = ctx.fns.expr_types.get(&container.span) {
-                    let setter = match (&**kt, &**vt) {
-                        (Ty::Str, Ty::Str) => "ailang_map_ss_set",
-                        (Ty::Str, _) => "ailang_map_si_set",
-                        _ => "ailang_map_ii_set",
-                    };
-                    let _ = write!(out, "{setter}(");
-                    emit_expr(out, container, ctx);
-                    out.push_str(", ");
-                    emit_expr(out, index, ctx);
-                    out.push_str(", ");
-                    emit_expr(out, value, ctx);
-                    out.push_str(");\n");
-                    return;
+                match ctx.fns.expr_types.get(&container.span) {
+                    // `m[k] = v` where `m` is a map → setter call.
+                    Some(Ty::Map(kt, vt)) => {
+                        let setter = match (&**kt, &**vt) {
+                            (Ty::Str, Ty::Str) => "ailang_map_ss_set".to_string(),
+                            // `{str:Sym}` symbol-table set.
+                            (Ty::Str, Ty::Struct(n))
+                                if ctx.fns.struct_table.contains_key(n)
+                                    || ctx.fns.enum_table.contains_key(n) =>
+                            {
+                                format!("ailang_smap_{}_set", c_safe_name(n))
+                            }
+                            (Ty::Str, _) => "ailang_map_si_set".to_string(),
+                            _ => "ailang_map_ii_set".to_string(),
+                        };
+                        let _ = write!(out, "{setter}(");
+                        emit_expr(out, container, ctx);
+                        out.push_str(", ");
+                        emit_expr(out, index, ctx);
+                        out.push_str(", ");
+                        emit_expr(out, value, ctx);
+                        out.push_str(");\n");
+                        return;
+                    }
+                    // `a[i] = v` where `a` is an array → write through the
+                    // shared data buffer as an lvalue. `ailang_at` (the read
+                    // path) expands to a by-value accessor and can't appear on
+                    // the LHS, so index-assignment must target `.data[i]`
+                    // directly. The buffer pointer is shared across the array
+                    // struct's value copies (incl. across fn-call boundaries),
+                    // so this persists to the caller.
+                    Some(Ty::Array(_)) => {
+                        emit_expr(out, container, ctx);
+                        out.push_str(".data[");
+                        emit_expr(out, index, ctx);
+                        out.push_str("] = ");
+                        emit_expr(out, value, ctx);
+                        out.push_str(";\n");
+                        return;
+                    }
+                    _ => {}
                 }
             }
             // Self-concat append: `name = name + rhs` (or `name ++ rhs`),
@@ -253,7 +294,31 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &Stmt, level: usize, ctx: &EmitC
 /// - Nested tuple patterns and non-trivial nested patterns are rejected with
 ///   a comment (M3 supports only one level of tuple destructuring).
 pub(crate) fn emit_match_stmt(out: &mut String, mt: &MatchStmt, level: usize, ctx: &EmitCtx) {
-    emit_match_stmt_inner(out, mt, level, ctx, /*returning=*/ false);
+    emit_match_stmt_inner(out, mt, level, ctx, Sink::Discard);
+}
+
+/// Where an arm/branch body's value goes.
+#[derive(Clone, Copy)]
+pub(crate) enum Sink<'a> {
+    /// Statement position — emit `body;` for its side effects.
+    Discard,
+    /// Tail of a value-returning fn — emit `return body;`.
+    Return,
+    /// Expression position — emit `<dst> = body;` (used by if/mt-as-expression).
+    Assign(&'a str),
+}
+
+impl Sink<'_> {
+    /// Emit the per-arm prefix before the body expression.
+    fn prefix(&self, out: &mut String) {
+        match self {
+            Sink::Discard => {}
+            Sink::Return => out.push_str("return "),
+            Sink::Assign(dst) => {
+                let _ = write!(out, "{dst} = ");
+            }
+        }
+    }
 }
 
 pub(crate) fn emit_match_stmt_inner(
@@ -261,7 +326,7 @@ pub(crate) fn emit_match_stmt_inner(
     mt: &MatchStmt,
     level: usize,
     ctx: &EmitCtx,
-    returning: bool,
+    sink: Sink,
 ) {
     // 1. Extract per-element scrutinees.
     let scruts: Vec<&Expr> = match &mt.scrutinee.kind {
@@ -281,13 +346,21 @@ pub(crate) fn emit_match_stmt_inner(
     // (the syntactic fallback `c_ty_for_decl` defaults to int64_t).
     for (var, expr) in tmps.iter().zip(&scruts) {
         indent(out, level + 1);
-        let cty = ctx
-            .fns
-            .expr_types
-            .get(&expr.span)
-            .map(|t| c_ty_for(t))
-            .unwrap_or_else(|| c_ty_for_decl(None, expr, ctx));
-        let _ = write!(out, "{} {} = ", cty, var);
+        // Prefer sema's recorded type, but fall back to the syntactic
+        // inference when it's `Unknown` — sema records the polymorphic builtins
+        // (e.g. `unwrap(r)`) as `Unknown`, and `c_ty_for(Unknown)` would wrongly
+        // pick `int64_t`; `c_ty_for_decl` recovers `unwrap`'s real inner type.
+        let cty = match ctx.fns.expr_types.get(&expr.span) {
+            Some(t) if !matches!(t, Ty::Unknown) => c_ty_for(t),
+            _ => c_ty_for_decl(None, expr, ctx),
+        };
+        // A scrutinee bound to a generic call (`c := id(Green); mt c {…}`) may
+        // carry an unspellable type-variable name; let clang infer it.
+        if is_spellable_c_type(&cty, ctx) {
+            let _ = write!(out, "{} {} = ", cty, var);
+        } else {
+            let _ = write!(out, "__auto_type {} = ", var);
+        }
         emit_expr(out, expr, ctx);
         out.push_str(";\n");
     }
@@ -347,14 +420,33 @@ pub(crate) fn emit_match_stmt_inner(
                                     if let Some(f) = v.fields.get(j) {
                                         let cty = c_ty_from_ast(&f.ty);
                                         indent(out, level + 2);
-                                        let _ = writeln!(
-                                            out,
-                                            "{} = {}.__data.{}.{};",
-                                            c_decl(&c_safe_name(&b.name), &cty),
-                                            tmps[i],
-                                            v_name,
-                                            c_safe_name(&f.name.name)
-                                        );
+                                        if is_boxed_enum_field(
+                                            f,
+                                            en_name,
+                                            &ctx.fns.enum_table,
+                                            &ctx.fns.struct_table,
+                                        ) {
+                                            // Field is boxed (`Name*`) in the
+                                            // union; deref so the binding is the
+                                            // by-value payload the arm expects.
+                                            let _ = writeln!(
+                                                out,
+                                                "{} = *({}.__data.{}.{});",
+                                                c_decl(&c_safe_name(&b.name), &cty),
+                                                tmps[i],
+                                                v_name,
+                                                c_safe_name(&f.name.name)
+                                            );
+                                        } else {
+                                            let _ = writeln!(
+                                                out,
+                                                "{} = {}.__data.{}.{};",
+                                                c_decl(&c_safe_name(&b.name), &cty),
+                                                tmps[i],
+                                                v_name,
+                                                c_safe_name(&f.name.name)
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -365,12 +457,11 @@ pub(crate) fn emit_match_stmt_inner(
             }
         }
 
-        // Emit the arm body — wrap with `return` if we're in tail
-        // position of a value-returning fn.
+        // Emit the arm body. The sink decides whether its value is
+        // discarded (statement position), returned (tail of a value fn), or
+        // assigned to a result temp (mt-as-expression).
         indent(out, level + 2);
-        if returning {
-            out.push_str("return ");
-        }
+        sink.prefix(out);
         emit_expr(out, &arm.body, ctx);
         out.push_str(";\n");
 
@@ -380,6 +471,66 @@ pub(crate) fn emit_match_stmt_inner(
 
     indent(out, level);
     out.push_str("}\n");
+}
+
+/// True when `cty` is a C type we can actually spell in a declaration, vs. a
+/// stray type-variable name (e.g. `T`) that leaked out of a generic fn's
+/// declared return type. When it's not spellable the caller falls back to
+/// `__auto_type` and lets clang infer the monomorphized type of the
+/// initializer (a dispatched generic call).
+fn is_spellable_c_type(cty: &str, ctx: &EmitCtx) -> bool {
+    cty.ends_with('*')
+        || cty.contains(' ')
+        || cty.starts_with("ailang_")
+        || matches!(
+            cty,
+            "int64_t"
+                | "int"
+                | "double"
+                | "bool"
+                | "void"
+                | "float"
+                | "int8_t"
+                | "int16_t"
+                | "int32_t"
+                | "uint8_t"
+                | "uint16_t"
+                | "uint32_t"
+                | "uint64_t"
+        )
+        || ctx.fns.struct_table.contains_key(cty)
+        || ctx.fns.enum_table.contains_key(cty)
+}
+
+/// If `e`'s sema type is `[T]` for a real user struct/enum `T`, return the C
+/// suffix of the monomorphic `ailang_arr_<T>_*` helpers (e.g. `"Point"`).
+/// `None` for primitive-element arrays, which the prelude `_Generic` macros
+/// already cover.
+fn aggregate_arr_suffix(e: &Expr, ctx: &EmitCtx) -> Option<String> {
+    if let Some(Ty::Array(elem)) = ctx.fns.expr_types.get(&e.span) {
+        if let Ty::Struct(n) = &**elem {
+            if ctx.fns.struct_table.contains_key(n) || ctx.fns.enum_table.contains_key(n) {
+                return Some(c_safe_name(n));
+            }
+        }
+    }
+    None
+}
+
+/// If `e`'s sema type is `{str:T}` for a real user struct/enum `T`, return the
+/// C suffix of the monomorphic `ailang_smap_<T>_*` helpers (e.g. `"Sym"`).
+/// `None` for primitive-value maps, which the prelude already covers.
+fn aggregate_smap_suffix(e: &Expr, ctx: &EmitCtx) -> Option<String> {
+    if let Some(Ty::Map(k, v)) = ctx.fns.expr_types.get(&e.span) {
+        if matches!(**k, Ty::Str) {
+            if let Ty::Struct(n) = &**v {
+                if ctx.fns.struct_table.contains_key(n) || ctx.fns.enum_table.contains_key(n) {
+                    return Some(c_safe_name(n));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Build a C boolean expression that's true when `pat` matches `var`.
@@ -464,11 +615,93 @@ pub(crate) fn emit_match_stmt_returning(
     level: usize,
     ctx: &EmitCtx,
 ) {
-    // Reuse the normal match emitter but make each arm body a return.
-    // The existing emitter takes arm bodies as expressions; if the body
-    // is a value expression we wrap it with `return ...;`. We synthesize
-    // that by post-processing — easier to just emit a parallel impl.
-    emit_match_stmt_inner(out, m, level, ctx, /*returning=*/ true);
+    // Reuse the normal match emitter with the Return sink so each arm body
+    // becomes `return <body>;`.
+    emit_match_stmt_inner(out, m, level, ctx, Sink::Return);
+}
+
+/// C type for the value of an `if`/`mt`/block used in expression position.
+/// Prefer sema's recorded type for the whole expression; else infer from a
+/// representative sub-value (then-branch tail / first arm body / block tail);
+/// else fall back to `int64_t`.
+fn expr_value_cty(e: &Expr, ctx: &EmitCtx) -> String {
+    if let Some(t) = ctx.fns.expr_types.get(&e.span) {
+        if !matches!(t, Ty::Unknown) {
+            return c_ty_for(t);
+        }
+    }
+    let probe: Option<&Expr> = match &e.kind {
+        ExprKind::If(if_) => if_.then_branch.tail_expr.as_deref(),
+        ExprKind::Match(m) => m.arms.first().map(|a| &a.body),
+        ExprKind::Block(b) => b.tail_expr.as_deref(),
+        _ => None,
+    };
+    if let Some(p) = probe {
+        if let Some(t) = ctx.fns.expr_types.get(&p.span) {
+            if !matches!(t, Ty::Unknown) {
+                return c_ty_for(t);
+            }
+        }
+        return c_ty_for_decl(None, p, ctx);
+    }
+    "int64_t".to_string()
+}
+
+/// Emit an `if` in expression position, assigning each branch's value to `dst`.
+/// Nested `el if` chains recurse; a missing `el` leaves `dst` unset (an `if`
+/// used as an expression is expected to have an else branch).
+fn emit_if_assign(out: &mut String, if_: &IfStmt, level: usize, ctx: &EmitCtx, dst: &str) {
+    out.push_str("if (");
+    emit_expr(out, &if_.cond, ctx);
+    out.push_str(") {\n");
+    emit_block_assign(out, &if_.then_branch, level + 1, ctx, dst);
+    indent(out, level);
+    out.push('}');
+    match &if_.else_branch {
+        Some(ElseBranch::Block(b)) => {
+            out.push_str(" else {\n");
+            emit_block_assign(out, b, level + 1, ctx, dst);
+            indent(out, level);
+            out.push_str("}\n");
+        }
+        Some(ElseBranch::If(inner)) => {
+            out.push_str(" else ");
+            emit_if_assign(out, inner, level, ctx, dst);
+        }
+        None => out.push('\n'),
+    }
+}
+
+/// Emit a block's statements, then route its produced value into `dst`. A tail
+/// expression becomes `dst = tail;`; failing that, a trailing `if`/`mt` last
+/// statement recurses so its branches/arms feed `dst` (mirrors the implicit-
+/// return logic in `emit_block_body`, but assigning instead of returning).
+fn emit_block_assign(out: &mut String, block: &Block, level: usize, ctx: &EmitCtx, dst: &str) {
+    let last_idx = block.stmts.len().saturating_sub(1);
+    for (i, stmt) in block.stmts.iter().enumerate() {
+        let is_last = i == last_idx && block.tail_expr.is_none();
+        if is_last {
+            match stmt {
+                Stmt::If(if_) => {
+                    indent(out, level);
+                    emit_if_assign(out, if_, level, ctx, dst);
+                    continue;
+                }
+                Stmt::Match(m) => {
+                    emit_match_stmt_inner(out, m, level, ctx, Sink::Assign(dst));
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        emit_stmt(out, stmt, level, ctx);
+    }
+    if let Some(tail) = &block.tail_expr {
+        indent(out, level);
+        let _ = write!(out, "{dst} = ");
+        emit_expr(out, tail, ctx);
+        out.push_str(";\n");
+    }
 }
 
 pub(crate) fn emit_if_stmt(out: &mut String, if_: &IfStmt, level: usize, ctx: &EmitCtx) {
@@ -542,10 +775,29 @@ pub(crate) fn emit_loop_stmt(out: &mut String, lp: &LoopStmt, level: usize, ctx:
             // we have two vars AND the iterable is a map (per sema).
             if vars.len() == 2 {
                 if let Some(Ty::Map(kt, vt)) = ctx.fns.expr_types.get(&iter.span) {
-                    let (map_ty, key_ty, val_ty) = match (&**kt, &**vt) {
-                        (Ty::Str, Ty::Str) => ("ailang_map_ss", "const char*", "const char*"),
-                        (Ty::Str, _) => ("ailang_map_si", "const char*", "int64_t"),
-                        _ => ("ailang_map_ii", "int64_t", "int64_t"),
+                    let (map_ty, key_ty, val_ty): (String, String, String) = match (&**kt, &**vt) {
+                        (Ty::Str, Ty::Str) => (
+                            "ailang_map_ss".into(),
+                            "const char*".into(),
+                            "const char*".into(),
+                        ),
+                        // `{str:Sym}` — same storage layout; value is `Sym` by value.
+                        (Ty::Str, Ty::Struct(n))
+                            if ctx.fns.struct_table.contains_key(n)
+                                || ctx.fns.enum_table.contains_key(n) =>
+                        {
+                            (
+                                format!("ailang_smap_{}", c_safe_name(n)),
+                                "const char*".into(),
+                                c_safe_name(n),
+                            )
+                        }
+                        (Ty::Str, _) => (
+                            "ailang_map_si".into(),
+                            "const char*".into(),
+                            "int64_t".into(),
+                        ),
+                        _ => ("ailang_map_ii".into(), "int64_t".into(), "int64_t".into()),
                     };
                     let k = c_safe_name(&vars[0].name);
                     let v = c_safe_name(&vars[1].name);
@@ -604,9 +856,17 @@ pub(crate) fn emit_loop_stmt(out: &mut String, lp: &LoopStmt, level: usize, ctx:
                 _ => {
                     // Array iteration. The element type is taken from sema's
                     // expression types where possible, defaulting to i64.
-                    let (elem_ty, container_ty) = match infer_iter_ty(iter, ctx) {
-                        Some(Ty::Str) => ("const char*", "ailang_arr_str"),
-                        _ => ("int64_t", "ailang_arr_i64"),
+                    // `[Struct]`/`[Enum]` iterate over the monomorphic array's
+                    // typed `.data` buffer.
+                    let (elem_ty, container_ty): (String, String) = match infer_iter_ty(iter, ctx) {
+                        Some(Ty::Str) => ("const char*".to_string(), "ailang_arr_str".to_string()),
+                        Some(Ty::Struct(n))
+                            if ctx.fns.struct_table.contains_key(&n)
+                                || ctx.fns.enum_table.contains_key(&n) =>
+                        {
+                            (c_safe_name(&n), format!("ailang_arr_{}", c_safe_name(&n)))
+                        }
+                        _ => ("int64_t".to_string(), "ailang_arr_i64".to_string()),
                     };
                     let arr = format!("__arr{tag}");
                     let idx = format!("__i{tag}");
@@ -735,16 +995,73 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
                         .unwrap_or(false);
                     if !user_extern {
                         let ret_c = ctx.current_ret_ty.borrow().clone();
+                        // `err(msg)` builds an err-shaped result of the enclosing
+                        // fn's return type. Primitive results use the prelude's
+                        // `err_<T>`; an aggregate `!T` uses `ailang_err_<T>`.
                         let helper = match ret_c.as_str() {
-                            "ailang_result_str" => "err_str",
-                            "ailang_result_bool" => "err_bool",
-                            "ailang_result_f64" => "err_f64",
-                            _ => "err_i64",
+                            "ailang_result_str" => "err_str".to_string(),
+                            "ailang_result_bool" => "err_bool".to_string(),
+                            "ailang_result_f64" => "err_f64".to_string(),
+                            other if other.starts_with("ailang_result_") => {
+                                format!("ailang_err_{}", &other["ailang_result_".len()..])
+                            }
+                            _ => "err_i64".to_string(),
                         };
                         let _ = write!(out, "{helper}(");
                         emit_expr(out, &args[0], ctx);
                         out.push(')');
                         return;
+                    }
+                }
+                // len / push / pop on an aggregate-element array → the
+                // monomorphic `ailang_arr_<T>_*` helper. The prelude `_Generic`
+                // macros only cover primitive-element arrays, so these would
+                // otherwise have no matching arm.
+                if matches!(n.as_str(), "len" | "push" | "pop" | "slice" | "reverse")
+                    && !args.is_empty()
+                {
+                    if let Some(suf) = aggregate_arr_suffix(&args[0], ctx) {
+                        let user_extern = ctx
+                            .fns
+                            .fn_table
+                            .get(n)
+                            .map(|s| s.is_extern)
+                            .unwrap_or(false);
+                        if !user_extern {
+                            let _ = write!(out, "ailang_arr_{suf}_{n}(");
+                            for (i, a) in args.iter().enumerate() {
+                                if i > 0 {
+                                    out.push_str(", ");
+                                }
+                                emit_expr(out, a, ctx);
+                            }
+                            out.push(')');
+                            return;
+                        }
+                    }
+                }
+                // len / has / keys / values on an aggregate-value map
+                // ({str:Sym}) → the monomorphic `ailang_smap_<V>_*` helper, for
+                // the same reason (no `_Generic` arm covers it).
+                if matches!(n.as_str(), "len" | "has" | "keys" | "values") && !args.is_empty() {
+                    if let Some(suf) = aggregate_smap_suffix(&args[0], ctx) {
+                        let user_extern = ctx
+                            .fns
+                            .fn_table
+                            .get(n)
+                            .map(|s| s.is_extern)
+                            .unwrap_or(false);
+                        if !user_extern {
+                            let _ = write!(out, "ailang_smap_{suf}_{n}(");
+                            for (i, a) in args.iter().enumerate() {
+                                if i > 0 {
+                                    out.push_str(", ");
+                                }
+                                emit_expr(out, a, ctx);
+                            }
+                            out.push(')');
+                            return;
+                        }
                     }
                 }
             }
@@ -866,17 +1183,40 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
             out.push(')');
         }
         ExprKind::Index { container, index } => {
-            // Polymorphic — `_Generic` dispatches on the container type so
-            // `s[i]` works for strings and `a[i]` works for `[i64]`/`[str]`.
-            out.push_str("ailang_at(");
-            emit_expr(out, container, ctx);
-            out.push_str(", ");
-            emit_expr(out, index, ctx);
-            out.push(')');
+            // Aggregate-value maps ({str:Sym}) read via their `_get` helper;
+            // aggregate-element arrays ([Point], [Expr]) read straight through
+            // the typed backing buffer; strings and primitive collections
+            // dispatch via the polymorphic `ailang_at` macro.
+            if let Some(suf) = aggregate_smap_suffix(container, ctx) {
+                let _ = write!(out, "ailang_smap_{suf}_get(");
+                emit_expr(out, container, ctx);
+                out.push_str(", ");
+                emit_expr(out, index, ctx);
+                out.push(')');
+            } else if aggregate_arr_suffix(container, ctx).is_some() {
+                out.push('(');
+                emit_expr(out, container, ctx);
+                out.push_str(").data[");
+                emit_expr(out, index, ctx);
+                out.push(']');
+            } else {
+                out.push_str("ailang_at(");
+                emit_expr(out, container, ctx);
+                out.push_str(", ");
+                emit_expr(out, index, ctx);
+                out.push(')');
+            }
         }
         ExprKind::Field { container, name } => {
             emit_expr(out, container, ctx);
-            out.push('.');
+            // A `*Struct` container dereferences with `->`; a by-value struct
+            // uses `.`. sema records the container's pointer-ness in
+            // expr_types (from `&x` / an `ex fn -> *T`).
+            if matches!(ctx.fns.expr_types.get(&container.span), Some(Ty::Ptr(_))) {
+                out.push_str("->");
+            } else {
+                out.push('.');
+            }
             out.push_str(&name.name);
         }
         ExprKind::Pipe { lhs, rhs } => {
@@ -935,22 +1275,42 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
             }
         }
         ExprKind::Array(elems) => {
-            // Pick the macro based on the first element's static type. Mixed
-            // arrays fall back to the i64 ctor; user code shouldn't write
-            // mixed arrays at this point in the language anyway.
-            let is_str = matches!(
-                elems.first().map(|e| &e.kind),
-                Some(ExprKind::Lit(l)) if matches!(l.kind, Lit::Str(_))
-            );
-            let macro_name = if is_str {
-                "AILANG_ARR_STR"
-            } else {
-                "AILANG_ARR_I64"
+            // Choose the literal macro by element type. Prefer sema's recorded
+            // element type — it's the only source that's correct for an EMPTY
+            // literal (`[]`), whose own shape reveals nothing; an annotation or
+            // a later `push` pins it in sema. An aggregate (struct/enum) element
+            // uses its per-type `AILANG_ARR_<T>`; `str` → `AILANG_ARR_STR`;
+            // everything else → `AILANG_ARR_I64`. For a non-empty literal with
+            // no recorded type, fall back to the first element's shape.
+            let recorded_elem = match ctx.fns.expr_types.get(&e.span) {
+                Some(Ty::Array(elem)) if !matches!(**elem, Ty::Unknown) => Some((**elem).clone()),
+                _ => None,
+            };
+            let macro_name = match recorded_elem {
+                Some(Ty::Struct(n))
+                    if ctx.fns.struct_table.contains_key(&n)
+                        || ctx.fns.enum_table.contains_key(&n) =>
+                {
+                    format!("AILANG_ARR_{}", c_safe_name(&n))
+                }
+                Some(Ty::Str) => "AILANG_ARR_STR".to_string(),
+                Some(_) => "AILANG_ARR_I64".to_string(),
+                None => {
+                    let is_str = matches!(
+                        elems.first().map(|e2| &e2.kind),
+                        Some(ExprKind::Lit(l)) if matches!(l.kind, Lit::Str(_))
+                    );
+                    if is_str {
+                        "AILANG_ARR_STR".to_string()
+                    } else {
+                        "AILANG_ARR_I64".to_string()
+                    }
+                }
             };
             let _ = write!(out, "{}({}", macro_name, elems.len());
-            for e in elems {
+            for el in elems {
                 out.push_str(", ");
-                emit_expr(out, e, ctx);
+                emit_expr(out, el, ctx);
             }
             out.push(')');
         }
@@ -960,16 +1320,26 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
             // refined type when available (so empty `{}` whose K/V was
             // pinned by later usage picks the right helpers), else fall
             // back to inspecting the first key+value pair's static shape.
+            let mk = |base: &str| {
+                (
+                    base.to_string(),
+                    format!("{base}_make"),
+                    format!("{base}_set"),
+                )
+            };
             let from_sema = ctx.fns.expr_types.get(&e.span).and_then(|t| match t {
                 Ty::Map(k, v) if !matches!(**k, Ty::Unknown) || !matches!(**v, Ty::Unknown) => {
                     Some(match (&**k, &**v) {
-                        (Ty::Str, Ty::Str) => {
-                            ("ailang_map_ss", "ailang_map_ss_make", "ailang_map_ss_set")
+                        (Ty::Str, Ty::Str) => mk("ailang_map_ss"),
+                        // `{str:Sym}` symbol-table literal.
+                        (Ty::Str, Ty::Struct(n))
+                            if ctx.fns.struct_table.contains_key(n)
+                                || ctx.fns.enum_table.contains_key(n) =>
+                        {
+                            mk(&format!("ailang_smap_{}", c_safe_name(n)))
                         }
-                        (Ty::Str, _) => {
-                            ("ailang_map_si", "ailang_map_si_make", "ailang_map_si_set")
-                        }
-                        _ => ("ailang_map_ii", "ailang_map_ii_make", "ailang_map_ii_set"),
+                        (Ty::Str, _) => mk("ailang_map_si"),
+                        _ => mk("ailang_map_ii"),
                     })
                 }
                 _ => None,
@@ -979,12 +1349,12 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
                     Some((ExprKind::Lit(lk), ExprKind::Lit(lv)))
                         if matches!(lk.kind, Lit::Str(_)) && matches!(lv.kind, Lit::Str(_)) =>
                     {
-                        ("ailang_map_ss", "ailang_map_ss_make", "ailang_map_ss_set")
+                        mk("ailang_map_ss")
                     }
                     Some((ExprKind::Lit(lk), _)) if matches!(lk.kind, Lit::Str(_)) => {
-                        ("ailang_map_si", "ailang_map_si_make", "ailang_map_si_set")
+                        mk("ailang_map_si")
                     }
-                    _ => ("ailang_map_ii", "ailang_map_ii_make", "ailang_map_ii_set"),
+                    _ => mk("ailang_map_ii"),
                 }
             });
             let cap = (entries.len() * 2).max(8);
@@ -1017,20 +1387,45 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
             }
             out.push_str(" })");
         }
-        ExprKind::Block(_) => {
-            out.push_str("/* block expression not yet supported in M2 */0");
+        ExprKind::Block(b) => {
+            // GNU statement-expression: run the block's statements, the value
+            // is its tail expression.
+            let dst = format!("__be{}", e.span.start);
+            let ty = expr_value_cty(e, ctx);
+            let _ = write!(out, "({{ {ty} {dst}; ");
+            emit_block_assign(out, b, 0, ctx, &dst);
+            let _ = write!(out, " {dst}; }})");
         }
-        ExprKind::If(_) | ExprKind::Match(_) => {
-            out.push_str("/* if/match as expression not yet supported in M2 */0");
+        ExprKind::If(if_) => {
+            // `x := if c {a} el {b}` → `({ T __ie; if (c) {__ie=a;} else {__ie=b;} __ie; })`.
+            let dst = format!("__ie{}", e.span.start);
+            let ty = expr_value_cty(e, ctx);
+            let _ = write!(out, "({{ {ty} {dst}; ");
+            emit_if_assign(out, if_, 0, ctx, &dst);
+            let _ = write!(out, " {dst}; }})");
+        }
+        ExprKind::Match(m) => {
+            // `x := mt v { ... }` → statement-expression assigning each arm's
+            // value to a result temp via the Assign sink.
+            let dst = format!("__xe{}", e.span.start);
+            let ty = expr_value_cty(e, ctx);
+            let _ = write!(out, "({{ {ty} {dst}; ");
+            emit_match_stmt_inner(out, m, 0, ctx, Sink::Assign(&dst));
+            let _ = write!(out, " {dst}; }})");
         }
         ExprKind::Try(inner) => {
-            // `expr?` — evaluate inner; if `.ok` is false, return early
-            // with an err-struct shaped like the enclosing fn's return.
-            // Assumes the inner's result shape matches (caller's
-            // responsibility — v1 doesn't auto-convert err structs).
+            // `expr?` — evaluate inner; if `.ok` is false, return early with an
+            // err-struct shaped like the *enclosing fn's* return (`ret`). The
+            // temp `__r` is typed from the *inner expression* (`inner_ty`),
+            // which may differ from `ret` — e.g. `lookup()->!Sym` used inside a
+            // `run()->!i64`. `__r.value` then yields the inner's unwrapped value.
             let ret = ctx.current_ret_ty.borrow().clone();
+            let inner_ty = match ctx.fns.expr_types.get(&inner.span) {
+                Some(t) if !matches!(t, Ty::Unknown) => c_ty_for(t),
+                _ => c_ty_for_decl(None, inner, ctx),
+            };
             out.push_str("({ ");
-            let _ = write!(out, "{ret} __r = ");
+            let _ = write!(out, "{inner_ty} __r = ");
             emit_expr(out, inner, ctx);
             let _ = write!(
                 out,

@@ -12,18 +12,9 @@ im "std/sock.ail"
 im "std/http.ail"
 im "std/ws.ail"
 
-port_str := get_env("PORT")
-mu port := str_to_int(port_str)
-if port == 0 port = 18765
-
+port := env_int("PORT", 18765)
 proc_no_zombies()
-
-fd := tcp_listen("127.0.0.1", port)
-if fd < 0 {
-  println("listen failed")
-  exit(1)
-}
-println("WebSocket on 127.0.0.1:" + int_to_str(port))
+fd := must_listen("127.0.0.1", port, "WebSocket")
 
 lp i in 0..1000000 {
   cli := tcp_accept(fd)

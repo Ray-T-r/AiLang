@@ -1,0 +1,17 @@
+cinc "zlib.h"
+cinc "math.h"
+
+ex "z" fn zlibVersion() -> str
+
+ex fn cbrt(x:f64) -> f64
+ex fn hypot(x:f64, y:f64) -> f64
+ex fn frexp(x:f64, e:*i32) -> f64
+
+println("linked zlib ${zlibVersion()}")
+
+println("cbrt(27)   = ${cbrt(27.0)}")
+println("hypot(3,4) = ${hypot(3.0, 4.0)}")
+
+mu exp := 0
+mantissa := frexp(1024.0, &exp)
+println("1024.0     = ${mantissa} * 2^${exp}")

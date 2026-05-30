@@ -8,6 +8,100 @@ pub(crate) fn is_primitive_ty(t: &Ty) -> bool {
     matches!(t, Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str)
 }
 
+/// True when a syntactic type-name (a `TypeKind::Path`) is a built-in scalar
+/// rather than a user struct/enum. Used to decide whether `[name]` is a
+/// primitive-element array (handled by the prelude) or an aggregate-element
+/// array (handled by an on-demand `ailang_arr_<name>` template).
+pub(crate) fn is_prim_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "i8" | "i16"
+            | "i32"
+            | "i64"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "str"
+            | "bytes"
+    )
+}
+
+/// True when an enum variant field must be **boxed** (stored as a heap pointer)
+/// to give the C tagged-union a finite size. A by-value aggregate field
+/// (`TypeKind::Path` naming a struct/enum) needs boxing when it can
+/// transitively reach the enclosing enum through other by-value aggregate
+/// fields — i.e. it closes a value-type size cycle. Covers:
+///   - direct self-reference: `Add(l:Expr, r:Expr)` in `en Expr` (Expr→Expr),
+///   - mutual recursion: `en Expr {…Stmt…}` ↔ `en Stmt {…Expr…}`.
+/// A field of array/map type is NOT boxed here — its own heap buffer already
+/// breaks the cycle (so `Branch(kids:[Tree])` needs no boxing).
+pub(crate) fn is_boxed_enum_field(
+    f: &Field,
+    enclosing: &str,
+    enums: &std::collections::HashMap<String, EnumDecl>,
+    structs: &std::collections::HashMap<String, StructDecl>,
+) -> bool {
+    let TypeKind::Path(n) = &f.ty.kind else {
+        return false;
+    };
+    if !(enums.contains_key(n) || structs.contains_key(n)) {
+        return false;
+    }
+    aggregate_reaches(n, enclosing, enums, structs)
+}
+
+/// Can aggregate type `start` reach `target` by following only *by-value*
+/// (`TypeKind::Path`) aggregate fields? DFS over the value-type dependency
+/// graph. Array/map fields are skipped — they hold elements behind a heap
+/// pointer, so they don't contribute to a by-value size cycle.
+fn aggregate_reaches(
+    start: &str,
+    target: &str,
+    enums: &std::collections::HashMap<String, EnumDecl>,
+    structs: &std::collections::HashMap<String, StructDecl>,
+) -> bool {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut stack = vec![start];
+    while let Some(cur) = stack.pop() {
+        if !seen.insert(cur) {
+            continue;
+        }
+        let field_tys: Vec<&str> = if let Some(en) = enums.get(cur) {
+            en.variants
+                .iter()
+                .flat_map(|v| v.fields.iter())
+                .filter_map(|f| match &f.ty.kind {
+                    TypeKind::Path(n) => Some(n.as_str()),
+                    _ => None,
+                })
+                .collect()
+        } else if let Some(st) = structs.get(cur) {
+            st.fields
+                .iter()
+                .filter_map(|f| match &f.ty.kind {
+                    TypeKind::Path(n) => Some(n.as_str()),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        for ft in field_tys {
+            if ft == target {
+                return true;
+            }
+            if (enums.contains_key(ft) || structs.contains_key(ft)) && !seen.contains(ft) {
+                stack.push(ft);
+            }
+        }
+    }
+    false
+}
+
 /// One-shot unification: walks the param AST type alongside the arg Ty,
 /// recording type-var → concrete-type bindings. Mismatched shapes are
 /// ignored (caller decides what to do with an incomplete subst).
@@ -66,7 +160,7 @@ pub(crate) fn substitute_fn_decl(f: &FnDecl, type_args: &[Ty]) -> FnDecl {
 pub(crate) fn substitute_ty(t: &Type, subst: &std::collections::HashMap<String, Ty>) -> Type {
     let kind = match &t.kind {
         TypeKind::Path(name) => match subst.get(name) {
-            Some(ty) => TypeKind::Path(ty_to_path_name(ty).to_string()),
+            Some(ty) => TypeKind::Path(ty_to_path_name(ty)),
             None => TypeKind::Path(name.clone()),
         },
         TypeKind::Array(inner) => TypeKind::Array(Box::new(substitute_ty(inner, subst))),
@@ -85,13 +179,20 @@ pub(crate) fn substitute_ty(t: &Type, subst: &std::collections::HashMap<String, 
     Type { kind, span: t.span }
 }
 
-pub(crate) fn ty_to_path_name(t: &Ty) -> &'static str {
+/// Mangling/suffix name for a concrete type argument. Primitives get their
+/// short spelling; a user struct/enum (carried as `Ty::Struct`) uses its own
+/// name so `id<Point>` and `id<Expr>` mangle distinctly (`id_Point`,
+/// `id_Expr`) instead of colliding on `i64`. Also used by `substitute_ty` to
+/// turn a resolved type var back into a `TypeKind::Path` spelling.
+pub(crate) fn ty_to_path_name(t: &Ty) -> String {
     match t {
-        Ty::I64 => "i64",
-        Ty::F64 => "f64",
-        Ty::Bool => "bool",
-        Ty::Str => "str",
-        _ => "i64",
+        Ty::I64 => "i64".to_string(),
+        Ty::F64 => "f64".to_string(),
+        Ty::Bool => "bool".to_string(),
+        Ty::Str => "str".to_string(),
+        Ty::Bytes => "bytes".to_string(),
+        Ty::Struct(name) => name.clone(),
+        _ => "i64".to_string(),
     }
 }
 
@@ -144,11 +245,20 @@ pub(crate) fn c_ty_from_ast(t: &Type) -> String {
         },
         TypeKind::Array(inner) => match &inner.kind {
             TypeKind::Path(name) if name == "str" => "ailang_arr_str".to_string(),
+            // A non-primitive element names a user struct/enum → its
+            // monomorphic array type (`[Point]` → `ailang_arr_Point`).
+            TypeKind::Path(name) if !is_prim_type_name(name) => {
+                format!("ailang_arr_{}", c_safe_name(name))
+            }
             _ => "ailang_arr_i64".to_string(),
         },
         TypeKind::Map(k, v) => match (&k.kind, &v.kind) {
             (TypeKind::Path(kn), TypeKind::Path(vn)) if kn == "str" && vn == "str" => {
                 "ailang_map_ss".to_string()
+            }
+            // `{str:Struct}` / `{str:Enum}` → its on-demand symbol-table type.
+            (TypeKind::Path(kn), TypeKind::Path(vn)) if kn == "str" && !is_prim_type_name(vn) => {
+                format!("ailang_smap_{}", c_safe_name(vn))
             }
             (TypeKind::Path(kn), _) if kn == "str" => "ailang_map_si".to_string(),
             _ => "ailang_map_ii".to_string(),
@@ -158,6 +268,10 @@ pub(crate) fn c_ty_from_ast(t: &Type) -> String {
             TypeKind::Path(n) if n == "str" => "ailang_result_str".to_string(),
             TypeKind::Path(n) if n == "bool" => "ailang_result_bool".to_string(),
             TypeKind::Path(n) if n == "f64" || n == "f32" => "ailang_result_f64".to_string(),
+            // A non-primitive `!Name` names a user struct/enum result.
+            TypeKind::Path(n) if !is_prim_type_name(n) => {
+                format!("ailang_result_{}", c_safe_name(n))
+            }
             _ => "ailang_result_i64".to_string(),
         },
         TypeKind::Fn { .. } => {
@@ -174,10 +288,11 @@ pub(crate) fn c_ty_for_decl(ty: Option<&Type>, init: &Expr, ctx: &EmitCtx) -> St
     if let Some(t) = ty {
         return c_ty_for(&ailang_sema::ast_ty_kind_to_ty(t));
     }
-    // Trust sema's recorded type when it's a struct/enum — the syntactic
-    // fallback below can't tell `Some(42)` is a `Maybe`.
+    // Trust sema's recorded type when it's a struct/enum or a pointer — the
+    // syntactic fallback below can't tell `Some(42)` is a `Maybe`, nor that
+    // `&r` / an `ex fn -> *T` call yields a pointer rather than an i64.
     if let Some(t) = ctx.fns.expr_types.get(&init.span) {
-        if matches!(t, Ty::Struct(_)) {
+        if matches!(t, Ty::Struct(_) | Ty::Ptr(_)) {
             return c_ty_for(t);
         }
     }
@@ -292,6 +407,14 @@ pub(crate) fn c_ty_for_decl(ty: Option<&Type>, init: &Expr, ctx: &EmitCtx) -> St
                 if name == "reduce" {
                     return "int64_t".to_string();
                 }
+                // `unwrap(r)` yields the result's inner T. The builtin's sema
+                // return type is Unknown (polymorphic), so derive it from the
+                // argument's recorded `Result(T)` type.
+                if name == "unwrap" && !args.is_empty() {
+                    if let Some(Ty::Result(inner)) = ctx.fns.expr_types.get(&args[0].span) {
+                        return c_ty_for(inner);
+                    }
+                }
                 if let Some(sig) = ctx.fns.fn_table.get(name) {
                     return c_ty_for(&sig.return_ty);
                 }
@@ -330,22 +453,30 @@ pub(crate) fn c_ty_for(t: &Ty) -> String {
         Ty::Str => "const char*".to_string(),
         Ty::Bytes => "ailang_bytes".to_string(),
         Ty::Unit => "void".to_string(),
-        Ty::Array(elem) => match **elem {
+        Ty::Array(elem) => match &**elem {
             Ty::Str => "ailang_arr_str".to_string(),
+            // `[Struct]` / `[Enum]` → its monomorphic array type (template
+            // emitted on demand in emit_c). Both structs and enums are Ty::Struct.
+            Ty::Struct(n) => format!("ailang_arr_{}", c_safe_name(n)),
             _ => "ailang_arr_i64".to_string(),
         },
         Ty::Map(k, v) => match (&**k, &**v) {
             (Ty::Str, Ty::Str) => "ailang_map_ss".to_string(),
+            // `{str:Struct}` / `{str:Enum}` → its on-demand symbol-table type.
+            (Ty::Str, Ty::Struct(n)) => format!("ailang_smap_{}", c_safe_name(n)),
             (Ty::Str, _) => "ailang_map_si".to_string(),
             _ => "ailang_map_ii".to_string(),
         },
         Ty::Struct(name) => name.clone(),
-        Ty::Result(inner) => match **inner {
+        Ty::Result(inner) => match &**inner {
             Ty::Str => "ailang_result_str".to_string(),
             Ty::Bool => "ailang_result_bool".to_string(),
             Ty::F64 => "ailang_result_f64".to_string(),
+            // `!Struct` / `!Enum` → its on-demand result type.
+            Ty::Struct(n) => format!("ailang_result_{}", c_safe_name(n)),
             _ => "ailang_result_i64".to_string(),
         },
+        Ty::Ptr(inner) => format!("{}*", c_ty_for(inner)),
         Ty::Unknown => "int64_t".to_string(),
     }
 }

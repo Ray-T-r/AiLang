@@ -182,7 +182,16 @@ println(area(Circle(5)))              // 75
 
 en Color { Red, Green, Blue }         // classic enum (unit variants)
 en Maybe { None, Some(v:i64) }        // Maybe-like
+en Expr { Num(v:i64), Add(l:Expr, r:Expr) }  // recursive — self-ref payloads are heap-boxed
+en Tree { Leaf(v:i64), Branch(kids:[Tree]) } // recursion through an array child-list
 ```
+
+**Recursive ADTs work** — a variant may carry its own enum, directly
+(`Add(l:Expr, r:Expr)`), through an array (`Branch(kids:[Tree])`), and
+**mutually** across two enums (`en Expr`↔`en Stmt`). This is how you build an AST.
+
+A **non-exhaustive `mt` on an enum** warns (naming the missing variants) but still
+compiles — cover every variant or add a `_` catch-all.
 
 **Gotchas:**
 - Variant constructors are **bare**, not namespaced: `Some(42)` and `None`, NOT `Maybe::Some(42)` or `Maybe.Some(42)`.
@@ -205,7 +214,7 @@ println(first(["alice", "bob"]))      // alice
 fn pair<A, B>(a:A, b:B) -> A a        // multiple type params
 ```
 
-`T` can appear bare, as `[T]`, or as `{K:V}`. Generics no longer collapse to `i64` — each call-site type gets its own specialization.
+`T` can appear bare, as `[T]`, or as `{K:V}`, and may be a primitive **or a user struct/enum** (`id(Point(3, 4))`, `fst(Circle(5), Square(4))`). Generics no longer collapse to `i64` — each call-site type gets its own specialization. (T = fn-pointer is still future work.)
 
 ## Error handling: `!T` + `?` propagation
 
@@ -277,7 +286,7 @@ slice := bytes_slice(b, 6, 11)           // bytes "world"
 println(bytes_to_str(slice))             // world
 ```
 
-Supported instantiations today: `[i64]`, `[str]`, `[bytes]`, `{i64:i64}`, `{str:i64}`, `{str:str}`. Other map combos may or may not be implemented — check examples before assuming.
+Supported instantiations today: `[i64]`, `[str]`, `[bytes]`, **`[Struct]` / `[Enum]`** (arrays of user types, including self-recursive ones like `[Tree]`), `{i64:i64}`, `{str:i64}`, `{str:str}`, and **`{str:Struct}` / `{str:Enum}`** (symbol tables — `has`/`keys`/`values`/`(k,v)` iteration all work). Non-`str` map keys with aggregate values aren't supported yet. Other combos may or may not be implemented — check examples before assuming.
 
 **Empty `{}` / `[]` infer `(K,V)` / element type from later usage.** Prefer the short form when the binding is filled in by a loop or a sequence of writes — the type annotation is redundant:
 
@@ -352,7 +361,23 @@ println(zlibVersion())                   // 1.2.12
 - `ex "lib" fn …` both declares the symbol (so sema accepts the call) and tells the driver to link `-llib`. Bare `ex fn` (or `ex "c" fn`) = libc, no extra link.
 - A header typedef can be named directly in a signature: `ex "sqlite3" fn sqlite3_open(path:str, db:*sqlite3) -> i32` — unknown type names are emitted to C verbatim, and `cinc "sqlite3.h"` supplies the real definition. Use `*T` for pointers, `&x` to take an address.
 
-**Limits (current FFI):** you still hand-write each `ex fn` signature — no header auto-binding/bindgen. `#define` macros and constants aren't visible as AiLang names (sema would see them undefined); wrap one in a tiny C function if you need it. Only system include/lib search paths are wired.
+**Structs work, by value and by pointer:**
+
+```
+cinc "stdlib.h"
+ex fn div(a:i32, b:i32) -> div_t       // returns a struct BY VALUE
+r := div(17, 5)
+println("${r.quot} ${r.rem}")          // 3 2 — read fields with `.`
+
+ex fn fopen(p:str, m:str) -> *FILE     // opaque struct POINTER, pass it around
+ex fn fclose(f:*FILE) -> i32
+```
+
+- **By-value struct return + `.field` read** works for typedef'd structs (`div_t`, `ldiv_t`, …).
+- **Opaque struct pointers** (`*FILE`, `*sqlite3`) pass through cleanly — declare with `*Typename`.
+- **`.field` through a pointer auto-selects `->`.** `&x` yields a real `*T`, and `p.field` on any `*Struct` codegens as `p->field`. This also gives **pointer out-params for your own `st` structs** — `fn bump(c:*Counter) { c.value = c.value + 1 }` then `bump(&ctr)` mutates the caller's struct. See [`examples/ptr_fields.ail`](../../examples/ptr_fields.ail).
+
+**Limits (current FFI):** you still hand-write each `ex fn` signature — no header auto-binding/bindgen. **Tag-only structs can't be named** — `struct tm`/`struct stat` (no typedef) have no AiLang spelling, since a bare name emits `tm` not `struct tm`; wrap field access in a tiny C function, or use a typedef'd alias header. `#define` macros and constants aren't visible as AiLang names (sema would see them undefined); wrap one in a tiny C function if you need it. Only system include/lib search paths are wired. If your `ex fn` signature's types don't match a prototype the header already declares (e.g. `u64` vs zlib's `uLong`), clang reports `conflicting types` — name the header's own typedef in the signature to match exactly.
 
 ## Modules and stdlib
 
@@ -390,7 +415,7 @@ Resolution: first relative to the importing file, then to cwd. Imported `fn main
 | `read_file(path)`  | `(str) -> str`        | full file as a string |
 | `write_file(p, s)` | `(str, str) -> bool`  | true on success |
 | `read_line()`      | `() -> str`           | one line from stdin (no trailing `\n`) |
-| `args()`           | `() -> [str]`         | command-line args (program name at `[0]`) |
+| `args()`           | `() -> [str]`         | user command-line args **only** (no program name); first user arg is at `[0]`, count is `len(args())` |
 | `get_env(name)`    | `(str) -> str`        | empty string if unset |
 | `exit(code)`       | `(i64) -> ()`         | does not return |
 
@@ -498,17 +523,22 @@ Resolution: first relative to the importing file, then to cwd. Imported `fn main
 ailangc run prog.ail                # compile + execute (forwards exit code)
 ailangc compile prog.ail            # produces ./prog binary
 ailangc compile prog.ail -o out     # custom output path
-ailangc compile --emit-c prog.ail   # print generated C (debug aid)
+ailangc compile --emit-c prog.ail   # print generated C to stdout, skip clang
+ailangc compile --keep-c prog.ail   # keep the generated prog.c next to the binary
 ailangc parse  prog.ail             # dump AST
 ailangc tokens prog.ail             # dump token stream
 ```
 
-Output binary and generated `.c` land next to the source.
+The output binary lands next to the source. The generated `.c` (or `.ll`)
+is a temporary build artifact: it's deleted once the binary links, unless
+you pass `--keep-c`. A *failed* compile always leaves it behind so the
+codegen can be inspected.
 
 ## What is NOT supported (don't generate these)
 
-- `?` postfix at top level (implicit-main scope) — wrap in `fn run() -> !T { … }`
+- `?` postfix at top level (implicit-main scope) — wrap in `fn run() -> !T { … }`. (`!T` and `?` now work for T = primitive **or** struct/enum.)
 - `match` guards (`if cond` on a pattern arm), rest patterns (`..`), or `@` bindings
+- Multi-statement `mt` arm bodies — an arm body is one expression; wrap multiple statements in a `{...}` block expression. (`if`/`mt`/blocks otherwise work as expressions: `x := if c {a} el {b}`, `x := mt v {…}`.)
 - Closures that mutate captured variables (capture is by-value snapshot)
 - Interpolation where the expression itself contains a literal `}` (e.g. a `${ {1:2} }` map/block literal) — the first `}` closes the `${`. `${p.x}`, `${f(a)}`, `${m[k]}`, `${a+b}` are all fine; only hoist the rare `}`-containing case into a local.
 - Python-style `f"..."` or `{x}` (no `$`) interpolation — AiLang only recognises `${x}`

@@ -195,15 +195,19 @@ The compiler runs the full pipeline: lex → parse → sema → codegen → `cla
 
 Working: functions, recursion, mutual recursion, `if`/`el`, `lp` (for-in
 + while + map `(k,v)` destructure), `mt` match with tuple **and variant**
-patterns, `|>` pipe, arrays (`[i64]` and `[str]`), maps (`{i64:i64}`,
+patterns, `|>` pipe, arrays (`[i64]`/`[str]` **and `[Struct]`/`[Enum]`,
+including self-recursive `[Tree]`**), maps (`{i64:i64}`,
 `{str:i64}`, `{str:str}`), string `+` concat with Boehm GC, FFI to
 C (`ex fn`, `cinc` for headers, `ex "lib"` to link a library), modules
 (`im "path"`), a seed stdlib in
 [`std/`](std/), **real generic monomorphization** (one `fn id<T>(x:T)`,
-specialized per call-site type via `_Generic`), **user-defined structs**
+specialized per call-site type via `_Generic`, over primitives **and
+user struct/enum types**), **user-defined structs**
 (`st Point { x:i64; y:i64 }` + struct literal + `.field` access + auto
 pretty-print), **ADTs / tagged unions** (`en Maybe { None, Some(v:i64) }`
-+ constructor calls + destructuring match), **first-class lambdas with
++ constructor calls + destructuring match, **including recursive variants**
+— `Add(l:Expr, r:Expr)` directly and `Branch(kids:[Tree])` through an array),
+**first-class lambdas with
 capture** (lifted to top-level static fns, `{fn, env}` fat pointers,
 env GC-allocated, by-value capture; **str-returning closures supported**),
 **implicit return from tail-position `if`/`mt`** (no explicit `rt`
@@ -250,21 +254,24 @@ machine code. There's also an experimental LLVM IR text backend
 grows incrementally.
 
 **Known limitations**:
-- Arrays/maps only carry primitive elements (`[i64]`/`[str]`,
-  `{i64:i64}`/`{str:i64}`/`{str:str}`); element types of user structs
-  or enums need a follow-up runtime variant.
-- Nested JSON (`std/json.ail` flat-only) wants `[JsonValue]` and a
-  recursive variant — depends on the array-of-struct work above.
-- Real generics support T = primitive (`i64`/`f64`/`bool`/`str`) with
-  unification through `[T]`/`{K:V}`; T = struct/enum/fn-pointer is
-  future work.
-- `?` postfix and `!T` only support T = primitive.
-- ADT variants can't yet recurse into the enclosing enum (e.g.
-  `Cons(head:i64, tail:List)`) — needs heap boxing for self-reference.
-- `arr[i] = x` from inside a function body currently mis-codegens
-  (the `ailang_at` macro is rvalue-only); top-level main works. Mutating
-  algorithms across function calls need to use functional rebuild
-  (`filter`/`push`) for now.
+- **Arrays and string-keyed maps carry user struct/enum elements** — `[Point]`,
+  `[Expr]` (incl. self-referential `[Tree]` inside `en Tree`), and `{str:Sym}`
+  symbol tables. Non-string map keys with aggregate values are still primitive-only.
+- **ADT variants may recurse into the enclosing enum** — directly
+  (`Cons(head:i64, tail:List)`, heap-boxed automatically), through an array
+  (`Branch(kids:[Tree])`), and **mutually** across two enums (`en Expr`↔`en Stmt`).
+- **Generics monomorphize over T = primitive *or* user struct/enum**, with
+  unification through `[T]`/`{K:V}`; T = fn-pointer is future work.
+- **`!T` results and `?` propagation work for T = primitive *or* user struct/enum**
+  (`fn parse() -> !Ast`).
+- **`if` / `mt` (and `{...}` blocks) work as expressions** — `x := if c {a} el {b}`,
+  `x := mt v { … }`. A `mt` arm body is still a single expression; wrap multiple
+  statements in a `{...}` block expression.
+- **Non-exhaustive `mt` on an enum is a warning** (lists the missing variants),
+  not an error — add the arms or a `_` catch-all to silence it.
+- Nested JSON (`std/json.ail` flat-only) wants a recursive `JsonValue` variant —
+  now expressible (recursive ADTs + `[JsonValue]` both work); the bundled parser
+  just hasn't been rewritten to use it yet.
 
 ---
 
@@ -412,9 +419,29 @@ ex "z" fn zlibVersion() -> str              // declares it + links -lz
 println(zlibVersion())                      // → 1.2.12
 ```
 
+Structs work both by value and by pointer. A typedef'd struct can be returned
+by value and its fields read with `.`; opaque struct pointers pass through as
+`*Typename`; and `.field` on any pointer auto-selects `->`:
+
+```
+cinc "stdlib.h"
+ex fn div(a:i32, b:i32) -> div_t            // struct returned by value
+r := div(17, 5)
+println("${r.quot} ${r.rem}")               // → 3 2
+```
+
+Because `&x` now yields a real `*T` and `p.field` lowers to `p->field`, you
+also get **pointer out-params for your own `st` structs** —
+`fn bump(c:*Counter) { c.value = c.value + 1 }` then `bump(&ctr)` mutates the
+caller's struct (see [`examples/ptr_fields.ail`](examples/ptr_fields.ail)).
+
 You still hand-write each signature (no header auto-binding yet); unknown type
 names pass through to C verbatim, so the typedefs `cinc` makes visible can be
-named directly in `ex fn` declarations.
+named directly in `ex fn` declarations. Two limits worth knowing: tag-only
+structs (`struct tm`, no typedef) have no AiLang spelling, and an `ex fn`
+signature whose types disagree with a prototype the header already declares
+(e.g. `u64` vs zlib's `uLong`) draws a clang `conflicting types` error — name
+the header's own typedef to match. Wrap either case in a one-line C function.
 
 ### Arrays & maps
 

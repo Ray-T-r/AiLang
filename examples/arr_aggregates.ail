@@ -1,0 +1,29 @@
+// Arrays whose elements are user structs / enums — `[Token]`-style streams.
+// Construct, index + field-access, iterate, and grow with push.
+
+st Tok { kind: i64; text: str }
+en Op { Plus, Minus }
+
+fn opval(o:Op) -> i64 {
+  mt o {
+    Plus  => 1;
+    Minus => 0;
+  }
+}
+
+toks := [Tok(1, "fn"), Tok(2, "main"), Tok(3, "x")]
+println(len(toks))          // 3
+println(toks[1].text)       // main
+
+mu total := 0
+lp t in toks { total += t.kind }
+println(total)              // 6
+
+toks2 := push(toks, Tok(4, "y"))
+println(len(toks2))         // 4
+println(toks2[3].text)      // y
+
+ops := [Plus, Minus, Plus]
+mu pc := 0
+lp o in ops { pc += opval(o) }
+println(pc)                 // 2

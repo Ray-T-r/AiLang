@@ -20,7 +20,7 @@ use crate::decl::*;
 use crate::emit::*;
 use crate::names::*;
 use crate::typegen::*;
-use ailang_sema::ResolvedModule;
+use ailang_sema::{ResolvedModule, Ty};
 use ailang_syntax::ast::*;
 use std::fmt::Write;
 
@@ -34,23 +34,179 @@ pub fn emit_c(resolved: &ResolvedModule) -> String {
 
     let module = &resolved.module;
 
-    // ----- Struct typedefs (must precede anything that references them) -----
+    // ----- Aggregate (struct/enum) forward declarations. -----
+    // Emit every named tag (`typedef struct T T;`) first, so the array
+    // templates and the aggregate bodies below can reference any aggregate —
+    // including self- and mutually-recursive ones — through pointers.
     let mut struct_decls: Vec<&StructDecl> = Vec::new();
     for item in &module.items {
-        if let Item::Struct(s) = item {
-            emit_struct_typedef(&mut out, s);
-            struct_decls.push(s);
+        match item {
+            Item::Struct(s) => {
+                emit_struct_fwd(&mut out, s);
+                struct_decls.push(s);
+            }
+            Item::Enum(e) => emit_enum_fwd(&mut out, e),
+            _ => {}
         }
     }
-    // ----- Enum typedefs + per-variant constructors. -----
+
+    // ----- On-demand array support for aggregate (struct/enum) elements. -----
+    // One `ailang_arr_<T>` per distinct `[Struct]`/`[Enum]` element type, so
+    // token streams `[Token]`, statement lists `[Stmt]`, and AST child lists
+    // `[Expr]` have a concrete C representation. Discovered from recorded
+    // expression types, fn signatures, and aggregate field declarations. The
+    // array *typedef* (just `T* data`) is emitted here — after the forward
+    // decls, before the bodies — so a body can embed `ailang_arr_T` by value
+    // (`Branch(kids:[Tree])`). The *helpers* (which size/copy `T` by value, so
+    // they need `T` complete) come after all bodies, below.
+    let mut agg_arr_elems: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for t in resolved.expr_types.values() {
+        if let Some(n) = agg_array_elem(t, resolved) {
+            agg_arr_elems.insert(n.to_string());
+        }
+    }
+    for sig in resolved.fn_table.values() {
+        for (_, pt) in &sig.params {
+            if let Some(n) = agg_array_elem(pt, resolved) {
+                agg_arr_elems.insert(n.to_string());
+            }
+        }
+        if let Some(n) = agg_array_elem(&sig.return_ty, resolved) {
+            agg_arr_elems.insert(n.to_string());
+        }
+    }
     for item in &module.items {
-        if let Item::Enum(e) = item {
-            emit_enum_typedef(&mut out, e);
-            for v in &e.variants {
-                emit_enum_ctor(&mut out, e, v);
+        match item {
+            Item::Struct(s) => {
+                for f in &s.fields {
+                    if let Some(n) = agg_array_elem_syn(&f.ty, resolved) {
+                        agg_arr_elems.insert(n.to_string());
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for v in &e.variants {
+                    for f in &v.fields {
+                        if let Some(n) = agg_array_elem_syn(&f.ty, resolved) {
+                            agg_arr_elems.insert(n.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // ----- On-demand string-keyed maps with aggregate values ({str:Sym}). ---
+    // The symbol-table case. Discovered the same three ways as arrays. Each
+    // value type T also needs its `ailang_arr_<T>` (so `values()` can return
+    // one), so fold the set into `agg_arr_elems` before emitting array support.
+    let mut agg_smap_vals: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for t in resolved.expr_types.values() {
+        if let Some(n) = agg_smap_val(t, resolved) {
+            agg_smap_vals.insert(n.to_string());
+        }
+    }
+    for sig in resolved.fn_table.values() {
+        for (_, pt) in &sig.params {
+            if let Some(n) = agg_smap_val(pt, resolved) {
+                agg_smap_vals.insert(n.to_string());
+            }
+        }
+        if let Some(n) = agg_smap_val(&sig.return_ty, resolved) {
+            agg_smap_vals.insert(n.to_string());
+        }
+    }
+    for item in &module.items {
+        let fields: Vec<&Field> = match item {
+            Item::Struct(s) => s.fields.iter().collect(),
+            Item::Enum(e) => e.variants.iter().flat_map(|v| v.fields.iter()).collect(),
+            _ => Vec::new(),
+        };
+        for f in fields {
+            if let Some(n) = agg_smap_val_syn(&f.ty, resolved) {
+                agg_smap_vals.insert(n.to_string());
             }
         }
     }
+    for n in &agg_smap_vals {
+        agg_arr_elems.insert(n.clone());
+    }
+
+    for n in &agg_arr_elems {
+        let c = c_safe_name(n);
+        emit_arr_typedef(&mut out, &c, &c);
+    }
+    for n in &agg_smap_vals {
+        let c = c_safe_name(n);
+        emit_smap_typedef(&mut out, &c, &c);
+    }
+
+    // ----- Aggregate bodies (structs, then enums). -----
+    // A body may now embed `ailang_arr_T` by value (its typedef is above) and
+    // box a self-referential field as `T*` (its forward decl is above).
+    for item in &module.items {
+        if let Item::Struct(s) = item {
+            emit_struct_typedef(&mut out, s);
+        }
+    }
+    for item in &module.items {
+        if let Item::Enum(e) = item {
+            emit_enum_typedef(&mut out, e, resolved);
+        }
+    }
+
+    // ----- Array + smap helpers (need complete element types), then ctors. ---
+    // smap helpers come after array helpers because `values()` returns an
+    // `ailang_arr_<T>` built by the array helper set.
+    for n in &agg_arr_elems {
+        let c = c_safe_name(n);
+        emit_arr_helpers(&mut out, &c, &c);
+    }
+    for n in &agg_smap_vals {
+        let c = c_safe_name(n);
+        emit_smap_helpers(&mut out, &c, &c);
+    }
+    for item in &module.items {
+        if let Item::Enum(e) = item {
+            for v in &e.variants {
+                emit_enum_ctor(&mut out, e, v, resolved);
+            }
+        }
+    }
+
+    // ----- On-demand `!T` result types for aggregate T (`!Sym`, `!Expr`). ----
+    // The fallible-aggregate case (`fn parse() -> !Ast`). Discovered from any
+    // recorded `Ty::Result(Struct)` plus fn signature return/param types.
+    // Emitted after aggregate bodies (the result struct holds `T` by value),
+    // then ok/unwrap/is_ok/err_msg `_Generic` macros are re-emitted with the
+    // extra arms.
+    let mut agg_result_inners: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for t in resolved.expr_types.values() {
+        if let Some(n) = agg_result_inner(t, resolved) {
+            agg_result_inners.insert(n.to_string());
+        }
+    }
+    for sig in resolved.fn_table.values() {
+        for (_, pt) in &sig.params {
+            if let Some(n) = agg_result_inner(pt, resolved) {
+                agg_result_inners.insert(n.to_string());
+            }
+        }
+        if let Some(n) = agg_result_inner(&sig.return_ty, resolved) {
+            agg_result_inners.insert(n.to_string());
+        }
+    }
+    let agg_result_suffixes: Vec<String> =
+        agg_result_inners.iter().map(|n| c_safe_name(n)).collect();
+    for n in &agg_result_inners {
+        let c = c_safe_name(n);
+        emit_result_template(&mut out, &c, &c);
+    }
+    if !agg_result_suffixes.is_empty() {
+        emit_extended_result_macros(&mut out, &agg_result_suffixes);
+    }
+
     out.push('\n');
 
     // ----- Per-struct pretty-printers + extend `print`/`println` _Generic. -----
@@ -233,6 +389,84 @@ pub fn emit_c(resolved: &ResolvedModule) -> String {
 /// real calls, so a gated section is never missing when it's needed.
 fn body_uses(body: &str, sigs: &[&str]) -> bool {
     sigs.iter().any(|s| body.contains(s))
+}
+
+/// If `t` is `[Struct]`/`[Enum]` for a *declared* user type, return the element
+/// type name; else `None`. Drives discovery of which `ailang_arr_<T>` array
+/// templates to emit (enums and structs are both carried as `Ty::Struct`).
+fn agg_array_elem<'a>(t: &'a Ty, res: &ResolvedModule) -> Option<&'a str> {
+    if let Ty::Array(elem) = t {
+        if let Ty::Struct(n) = &**elem {
+            if res.struct_table.contains_key(n) || res.enum_table.contains_key(n) {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Syntactic counterpart of [`agg_array_elem`]: if the AST type `t` is `[Name]`
+/// for a declared user struct/enum, return `Name`. Lets the scan discover
+/// aggregate child-list fields (e.g. `Branch(kids:[Tree])`) that may never
+/// surface as a standalone expression type.
+fn agg_array_elem_syn<'a>(t: &'a Type, res: &ResolvedModule) -> Option<&'a str> {
+    if let TypeKind::Array(inner) = &t.kind {
+        if let TypeKind::Path(n) = &inner.kind {
+            if !is_prim_type_name(n)
+                && (res.struct_table.contains_key(n) || res.enum_table.contains_key(n))
+            {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// If `t` is `{str:Struct}`/`{str:Enum}` for a declared user type, return the
+/// value type name; else `None`. Drives discovery of which `ailang_smap_<T>`
+/// symbol-table templates to emit.
+fn agg_smap_val<'a>(t: &'a Ty, res: &ResolvedModule) -> Option<&'a str> {
+    if let Ty::Map(k, v) = t {
+        if matches!(**k, Ty::Str) {
+            if let Ty::Struct(n) = &**v {
+                if res.struct_table.contains_key(n) || res.enum_table.contains_key(n) {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Syntactic counterpart of [`agg_smap_val`]: if the AST type `t` is
+/// `{str:Name}` for a declared user struct/enum, return `Name`.
+fn agg_smap_val_syn<'a>(t: &'a Type, res: &ResolvedModule) -> Option<&'a str> {
+    if let TypeKind::Map(k, v) = &t.kind {
+        if matches!(&k.kind, TypeKind::Path(kn) if kn == "str") {
+            if let TypeKind::Path(n) = &v.kind {
+                if !is_prim_type_name(n)
+                    && (res.struct_table.contains_key(n) || res.enum_table.contains_key(n))
+                {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// If `t` is `!Struct`/`!Enum` for a declared user type, return the inner type
+/// name; else `None`. Drives discovery of which `ailang_result_<T>` templates
+/// to emit.
+fn agg_result_inner<'a>(t: &'a Ty, res: &ResolvedModule) -> Option<&'a str> {
+    if let Ty::Result(inner) = t {
+        if let Ty::Struct(n) = &**inner {
+            if res.struct_table.contains_key(n) || res.enum_table.contains_key(n) {
+                return Some(n);
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

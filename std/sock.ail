@@ -27,3 +27,29 @@ fn sock_send_all(fd:i64, b:bytes) -> i64 {
 fn sock_send_str_all(fd:i64, s:str) -> i64 {
   sock_send_all(fd, str_to_bytes(s))
 }
+
+// env_int(name, default) — read an env var as i64. Returns `default` if the
+// var is unset, empty, or parses to 0. (Caveat: a literal "0" in the env is
+// also treated as unset; this matches the convention server examples already
+// used before this helper existed.)
+fn env_int(name:str, default:i64) -> i64 {
+  s := get_env(name)
+  if len(s) == 0 rt default
+  v := str_to_int(s)
+  if v == 0 rt default
+  v
+}
+
+// must_listen(host, port, banner) — tcp_listen on host:port, exit(1) on
+// failure, and (if banner is non-empty) print "<banner> on <host>:<port>".
+// Replaces the ~8-line listen+check+log boilerplate every server example used
+// to repeat.
+fn must_listen(host:str, port:i64, banner:str) -> i64 {
+  fd := tcp_listen(host, port)
+  if fd < 0 {
+    println("listen failed")
+    exit(1)
+  }
+  if len(banner) > 0 println(banner + " on " + host + ":" + int_to_str(port))
+  fd
+}

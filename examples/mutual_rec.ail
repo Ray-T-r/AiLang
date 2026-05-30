@@ -1,0 +1,25 @@
+// Mutually-recursive enums: `Expr` carries a `Stmt` and `Stmt` carries an
+// `Expr`. Codegen detects the value-type cycle and boxes the back-edges, so
+// two enums can reference each other — the shape a real AST needs.
+
+en Expr { Num(v:i64), Neg(e:Expr), Cond(s:Stmt) }
+en Stmt { Nop, Eval(e:Expr) }
+
+fn eval_e(x:Expr) -> i64 {
+  mt x {
+    Num(v)  => v;
+    Neg(e)  => 0 - eval_e(e);
+    Cond(s) => eval_s(s);
+  }
+}
+
+fn eval_s(y:Stmt) -> i64 {
+  mt y {
+    Nop     => -1;
+    Eval(e) => eval_e(e);
+  }
+}
+
+println(eval_e(Neg(Num(5))))             // -5
+println(eval_e(Cond(Eval(Num(42)))))     // 42
+println(eval_s(Eval(Neg(Num(3)))))       // -3

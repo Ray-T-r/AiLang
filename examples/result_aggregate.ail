@@ -1,0 +1,41 @@
+// `!T` result where T is a user struct/enum — a fallible function returning an
+// aggregate. ok/err/unwrap/is_ok/is_err/err_msg and `?` all work over it.
+
+st Sym { ty: i64; addr: i64 }
+
+fn lookup(found:i64) -> !Sym {
+  if found > 0 rt ok(Sym(found, found * 100))
+  err("not found")
+}
+
+fn run() -> !i64 {
+  s := lookup(7)?
+  ok(s.addr)
+}
+
+r := lookup(7)
+if is_ok(r) {
+  s := unwrap(r)
+  println(s.ty)             // 7
+  println(s.addr)           // 700
+}
+
+bad := lookup(0)
+println(is_err(bad))        // true
+println(err_msg(bad))       // not found
+println(unwrap(run()))      // 700
+
+en Tok { LParen, Num(v:i64) }
+
+fn classify(c:i64) -> !Tok {
+  if c == 40 rt ok(LParen)
+  if c >= 48 && c <= 57 rt ok(Num(c - 48))
+  err("bad char")
+}
+
+t := classify(53)
+println(is_ok(t))           // true
+mt unwrap(t) {
+  LParen => println(-1);
+  Num(v) => println(v);     // 5
+}

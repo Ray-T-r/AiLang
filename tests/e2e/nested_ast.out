@@ -1,0 +1,6 @@
+f
+1
+x
+1
+if: 1 then, 0 else
+call g with 2 args

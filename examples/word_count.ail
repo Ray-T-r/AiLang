@@ -1,14 +1,15 @@
 // word_count.ail — proves AiLang has crossed the "useful scripting"
-// threshold. Splits text on whitespace, counts each word with a
-// `{str:i64}` map, queries a few words via the pretty-printer + format.
+// threshold. Splits text on whitespace, counts each word with a map,
+// queries a few words via the pretty-printer + format.
+//
+// The empty `{}` literal's `(K,V)` is inferred from the `counts[w] += 1`
+// usage inside the loop — no type annotation needed.
 
 text := "the quick brown fox jumps over the lazy dog the fox is quick"
-
-mu counts := {"_pin": 0_i64}   // type-pin so codegen picks {str:i64}
-counts["_pin"] = 0             // clear the pin
+counts := {}
 words := split(text, " ")
 lp w in words {
-  counts[w] = counts[w] + 1
+  counts[w] += 1
 }
 
 println(format("total words: %lld", len(words)))

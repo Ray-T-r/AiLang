@@ -27,47 +27,79 @@ enum LogosTok {
     BlockComment,
 
     // ----- Keywords -----
-    #[token("fn")]    Fn,
-    #[token("if")]    If,
-    #[token("el")]    El,
-    #[token("lp")]    Lp,
-    #[token("rt")]    Rt,
-    #[token("mt")]    Mt,
-    #[token("st")]    St,
-    #[token("tr")]    Tr,
-    #[token("im")]    Im,
-    #[token("ex")]    Ex,
-    #[token("mu")]    Mu,
-    #[token("br")]    Br,
-    #[token("ct")]    Ct,
-    #[token("as")]    As,
-    #[token("in")]    In,
-    #[token("en")]    En,
-    #[token("cinc")]  Cinc,
-    #[token("true")]  True,
-    #[token("false")] False,
-    #[token("nil")]   Nil,
+    #[token("fn")]
+    Fn,
+    #[token("if")]
+    If,
+    #[token("el")]
+    El,
+    #[token("lp")]
+    Lp,
+    #[token("rt")]
+    Rt,
+    #[token("mt")]
+    Mt,
+    #[token("st")]
+    St,
+    #[token("tr")]
+    Tr,
+    #[token("im")]
+    Im,
+    #[token("ex")]
+    Ex,
+    #[token("mu")]
+    Mu,
+    #[token("br")]
+    Br,
+    #[token("ct")]
+    Ct,
+    #[token("as")]
+    As,
+    #[token("in")]
+    In,
+    #[token("en")]
+    En,
+    #[token("cinc")]
+    Cinc,
+    #[token("true")]
+    True,
+    #[token("false")]
+    False,
+    #[token("nil")]
+    Nil,
 
     // ----- Primitive type keywords -----
-    #[token("i8")]   I8,
-    #[token("i16")]  I16,
-    #[token("i32")]  I32,
-    #[token("i64")]  I64,
-    #[token("u8")]   U8,
-    #[token("u16")]  U16,
-    #[token("u32")]  U32,
-    #[token("u64")]  U64,
-    #[token("f32")]  F32,
-    #[token("f64")]  F64,
-    #[token("bool")] Bool,
-    #[token("str")]  Str,
+    #[token("i8")]
+    I8,
+    #[token("i16")]
+    I16,
+    #[token("i32")]
+    I32,
+    #[token("i64")]
+    I64,
+    #[token("u8")]
+    U8,
+    #[token("u16")]
+    U16,
+    #[token("u32")]
+    U32,
+    #[token("u64")]
+    U64,
+    #[token("f32")]
+    F32,
+    #[token("f64")]
+    F64,
+    #[token("bool")]
+    Bool,
+    #[token("str")]
+    Str,
 
     // ----- Identifiers (and the wildcard `_`) -----
     #[token("_")]
     Underscore,
 
     #[regex(r"[a-zA-Z][a-zA-Z0-9_]*")]
-    #[regex(r"_[a-zA-Z0-9_]+")]  // `_foo` is an ident; bare `_` is matched above
+    #[regex(r"_[a-zA-Z0-9_]+")] // `_foo` is an ident; bare `_` is matched above
     Ident,
 
     // ----- Numeric literals -----
@@ -93,60 +125,109 @@ enum LogosTok {
     // Explicit priorities guarantee longest match wins over `.` / `+` / etc.
     // logos's default priority can let a shorter `Dot` token win when the
     // surrounding regex (e.g. the numeric literal) shares a starting state.
-    #[token("...", priority = 40)] Ellipsis,
-    #[token("..=", priority = 30)] DotDotEq,
-    #[token("..",  priority = 20)] DotDot,
-    #[token("++",  priority = 20)] Concat,
-    #[token("&&")]  AndAnd,
-    #[token("||")]  OrOr,
-    #[token("==")]  EqEq,
-    #[token("!=")]  Neq,
-    #[token("<=")]  Le,
-    #[token(">=")]  Ge,
-    #[token("<<")]  Shl,
-    #[token(">>")]  Shr,
-    #[token(":=")]  Walrus,
-    #[token("->")]  Arrow,
-    #[token("=>")]  FatArrow,
-    #[token("|>")]  Pipeline,
-    #[token("??")]  Coalesce,
+    #[token("...", priority = 40)]
+    Ellipsis,
+    #[token("..=", priority = 30)]
+    DotDotEq,
+    #[token("..", priority = 20)]
+    DotDot,
+    #[token("++", priority = 20)]
+    Concat,
+    #[token("&&")]
+    AndAnd,
+    #[token("||")]
+    OrOr,
+    #[token("==")]
+    EqEq,
+    #[token("!=")]
+    Neq,
+    #[token("<=")]
+    Le,
+    #[token(">=")]
+    Ge,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
+    #[token(":=")]
+    Walrus,
+    #[token("->")]
+    Arrow,
+    #[token("=>")]
+    FatArrow,
+    #[token("|>")]
+    Pipeline,
+    #[token("??")]
+    Coalesce,
     // Compound assignment — longer-match wins over the single-char operator.
-    #[token("+=")]  PlusEq,
-    #[token("-=")]  MinusEq,
-    #[token("*=")]  StarEq,
-    #[token("/=")]  SlashEq,
-    #[token("%=")]  PercentEq,
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
+    #[token("%=")]
+    PercentEq,
 
     // ----- Punctuation -----
-    #[token("(")] LParen,
-    #[token(")")] RParen,
-    #[token("{")] LBrace,
-    #[token("}")] RBrace,
-    #[token("[")] LBracket,
-    #[token("]")] RBracket,
-    #[token(",")] Comma,
-    #[token(";")] Semi,
-    #[token(".")] Dot,
-    #[token("@")] At,
-    #[token("#")] Hash,
-    #[token("$")] Dollar,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
+    #[token(",")]
+    Comma,
+    #[token(";")]
+    Semi,
+    #[token(".")]
+    Dot,
+    #[token("@")]
+    At,
+    #[token("#")]
+    Hash,
+    #[token("$")]
+    Dollar,
 
     // ----- Single-char operators -----
-    #[token("=")] Eq,
-    #[token("+")] Plus,
-    #[token("-")] Minus,
-    #[token("*")] Star,
-    #[token("/")] Slash,
-    #[token("%")] Percent,
-    #[token("<")] Lt,
-    #[token(">")] Gt,
-    #[token("!")] Bang,
-    #[token("&")] Amp,
-    #[token("|")] Pipe,
-    #[token("^")] Caret,
-    #[token("~")] Tilde,
-    #[token(":")] Colon,
-    #[token("?")] Question,
+    #[token("=")]
+    Eq,
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
+    #[token("<")]
+    Lt,
+    #[token(">")]
+    Gt,
+    #[token("!")]
+    Bang,
+    #[token("&")]
+    Amp,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("~")]
+    Tilde,
+    #[token(":")]
+    Colon,
+    #[token("?")]
+    Question,
 }
 
 fn map(t: LogosTok) -> TokenKind {
@@ -157,57 +238,98 @@ fn map(t: LogosTok) -> TokenKind {
         // including them keeps the match exhaustive without a wildcard arm.
         L::Whitespace | L::LineComment | L::BlockComment => unreachable!("skip variant leaked"),
 
-        L::Fn => K::KwFn,           L::If => K::KwIf,           L::El => K::KwEl,
-        L::Lp => K::KwLp,           L::Rt => K::KwRt,           L::Mt => K::KwMt,
-        L::St => K::KwSt,           L::Tr => K::KwTr,           L::Im => K::KwIm,
+        L::Fn => K::KwFn,
+        L::If => K::KwIf,
+        L::El => K::KwEl,
+        L::Lp => K::KwLp,
+        L::Rt => K::KwRt,
+        L::Mt => K::KwMt,
+        L::St => K::KwSt,
+        L::Tr => K::KwTr,
+        L::Im => K::KwIm,
         L::En => K::KwEn,
         L::Cinc => K::KwCinc,
-        L::Ex => K::KwEx,           L::Mu => K::KwMu,           L::Br => K::KwBr,
-        L::Ct => K::KwCt,           L::As => K::KwAs,           L::In => K::KwIn,
-        L::True => K::KwTrue,       L::False => K::KwFalse,     L::Nil => K::KwNil,
+        L::Ex => K::KwEx,
+        L::Mu => K::KwMu,
+        L::Br => K::KwBr,
+        L::Ct => K::KwCt,
+        L::As => K::KwAs,
+        L::In => K::KwIn,
+        L::True => K::KwTrue,
+        L::False => K::KwFalse,
+        L::Nil => K::KwNil,
 
-        L::I8 => K::TyI8,           L::I16 => K::TyI16,
-        L::I32 => K::TyI32,         L::I64 => K::TyI64,
-        L::U8 => K::TyU8,           L::U16 => K::TyU16,
-        L::U32 => K::TyU32,         L::U64 => K::TyU64,
-        L::F32 => K::TyF32,         L::F64 => K::TyF64,
-        L::Bool => K::TyBool,       L::Str => K::TyStr,
+        L::I8 => K::TyI8,
+        L::I16 => K::TyI16,
+        L::I32 => K::TyI32,
+        L::I64 => K::TyI64,
+        L::U8 => K::TyU8,
+        L::U16 => K::TyU16,
+        L::U32 => K::TyU32,
+        L::U64 => K::TyU64,
+        L::F32 => K::TyF32,
+        L::F64 => K::TyF64,
+        L::Bool => K::TyBool,
+        L::Str => K::TyStr,
 
         L::Underscore => K::Underscore,
         L::Ident => K::Ident,
-        L::IntLit => K::IntLit,     L::FloatLit => K::FloatLit,
-        L::StrLit => K::StrLit,     L::CharLit => K::CharLit,
+        L::IntLit => K::IntLit,
+        L::FloatLit => K::FloatLit,
+        L::StrLit => K::StrLit,
+        L::CharLit => K::CharLit,
 
         L::Ellipsis => K::Ellipsis,
-        L::DotDotEq => K::DotDotEq, L::DotDot => K::DotDot,
+        L::DotDotEq => K::DotDotEq,
+        L::DotDot => K::DotDot,
         L::Concat => K::Concat,
-        L::AndAnd => K::AndAnd,     L::OrOr => K::OrOr,
-        L::EqEq => K::EqEq,         L::Neq => K::Neq,
-        L::Le => K::Le,             L::Ge => K::Ge,
-        L::Shl => K::Shl,           L::Shr => K::Shr,
+        L::AndAnd => K::AndAnd,
+        L::OrOr => K::OrOr,
+        L::EqEq => K::EqEq,
+        L::Neq => K::Neq,
+        L::Le => K::Le,
+        L::Ge => K::Ge,
+        L::Shl => K::Shl,
+        L::Shr => K::Shr,
         L::Walrus => K::Walrus,
-        L::Arrow => K::Arrow,       L::FatArrow => K::FatArrow,
-        L::Pipeline => K::Pipeline, L::Coalesce => K::Coalesce,
-        L::PlusEq => K::PlusEq,     L::MinusEq => K::MinusEq,
-        L::StarEq => K::StarEq,     L::SlashEq => K::SlashEq,
+        L::Arrow => K::Arrow,
+        L::FatArrow => K::FatArrow,
+        L::Pipeline => K::Pipeline,
+        L::Coalesce => K::Coalesce,
+        L::PlusEq => K::PlusEq,
+        L::MinusEq => K::MinusEq,
+        L::StarEq => K::StarEq,
+        L::SlashEq => K::SlashEq,
         L::PercentEq => K::PercentEq,
 
-        L::LParen => K::LParen,     L::RParen => K::RParen,
-        L::LBrace => K::LBrace,     L::RBrace => K::RBrace,
-        L::LBracket => K::LBracket, L::RBracket => K::RBracket,
-        L::Comma => K::Comma,       L::Semi => K::Semi,
+        L::LParen => K::LParen,
+        L::RParen => K::RParen,
+        L::LBrace => K::LBrace,
+        L::RBrace => K::RBrace,
+        L::LBracket => K::LBracket,
+        L::RBracket => K::RBracket,
+        L::Comma => K::Comma,
+        L::Semi => K::Semi,
         L::Dot => K::Dot,
-        L::At => K::At,             L::Hash => K::Hash,         L::Dollar => K::Dollar,
+        L::At => K::At,
+        L::Hash => K::Hash,
+        L::Dollar => K::Dollar,
 
         L::Eq => K::Eq,
-        L::Plus => K::Plus,         L::Minus => K::Minus,
-        L::Star => K::Star,         L::Slash => K::Slash,
+        L::Plus => K::Plus,
+        L::Minus => K::Minus,
+        L::Star => K::Star,
+        L::Slash => K::Slash,
         L::Percent => K::Percent,
-        L::Lt => K::Lt,             L::Gt => K::Gt,
+        L::Lt => K::Lt,
+        L::Gt => K::Gt,
         L::Bang => K::Bang,
-        L::Amp => K::Amp,           L::Pipe => K::Pipe,
-        L::Caret => K::Caret,       L::Tilde => K::Tilde,
-        L::Colon => K::Colon,       L::Question => K::Question,
+        L::Amp => K::Amp,
+        L::Pipe => K::Pipe,
+        L::Caret => K::Caret,
+        L::Tilde => K::Tilde,
+        L::Colon => K::Colon,
+        L::Question => K::Question,
     }
 }
 
@@ -259,10 +381,7 @@ mod tests {
         // `...` in `printf(fmt, ...)` must be one Ellipsis token, not `..` + `.`.
         let toks = kinds("(fmt, ...)");
         use TokenKind::*;
-        assert_eq!(
-            toks,
-            vec![LParen, Ident, Comma, Ellipsis, RParen, Eof]
-        );
+        assert_eq!(toks, vec![LParen, Ident, Comma, Ellipsis, RParen, Eof]);
     }
 
     #[test]

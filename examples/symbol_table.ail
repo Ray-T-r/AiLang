@@ -1,0 +1,26 @@
+// Maps whose values are user structs/enums — a symbol table `{str:Sym}`, the
+// data structure a compiler keeps for name resolution. Construct (empty `{}`
+// inferred from later writes), set/overwrite, `has`, index + field read,
+// `(k,v)` iteration, `keys`/`values`.
+
+st Sym { ty: i64; addr: i64 }
+
+mu env := {}
+env["x"] = Sym(1, 100)
+env["y"] = Sym(2, 200)
+env["x"] = Sym(9, 999)        // overwrite
+
+println(len(env))             // 2
+println(has(env, "x"))        // true
+println(has(env, "z"))        // false
+
+sx := env["x"]
+println(sx.ty)                // 9
+println(sx.addr)              // 999
+
+mu total := 0
+lp (k, s) in env { total += s.addr }
+println(total)                // 999 + 200 = 1199
+
+println(len(keys(env)))       // 2
+println(len(values(env)))     // 2
