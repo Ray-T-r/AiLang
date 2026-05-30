@@ -1,0 +1,8 @@
+// `cinc "h"` pulls a C header in so its declarations are visible; `ex "lib" fn`
+// additionally links `-llib`. zlib's `zlibVersion()` returns a C string and is
+// the repo's canonical header-interop example (matches examples/c_header_interop).
+cinc "zlib.h"
+ex "z" fn zlibVersion() -> str
+v := zlibVersion()
+println(v)
+println(len(v) > 0)    // 1 — non-empty version string

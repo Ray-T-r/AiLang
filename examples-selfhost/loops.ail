@@ -1,0 +1,20 @@
+fn sum_to(n) {
+  mu total := 0
+  mu i := 1
+  lp i <= n {
+    total = total + i
+    i = i + 1
+  }
+  rt total
+}
+fn fact(n) {
+  mu r := 1
+  mu i := 2
+  lp i <= n {
+    r = r * i
+    i = i + 1
+  }
+  rt r
+}
+println(sum_to(100))
+println(fact(10))

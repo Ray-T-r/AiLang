@@ -1,0 +1,12 @@
+name := "Ada"
+age := 36
+line := "name=" + name + " age=" + to_str(age)
+println(line)
+println("sum=" + to_str(1 + 2 * 3))
+mu acc := ""
+mu i := 1
+lp i <= 3 {
+  acc = acc + "[" + to_str(i) + "]"
+  i = i + 1
+}
+println(acc)

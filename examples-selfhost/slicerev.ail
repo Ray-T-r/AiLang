@@ -1,0 +1,14 @@
+// slice [lo,hi) end-exclusive, and reverse — both return fresh arrays.
+mu xs:[i64] := []
+xs = push(xs, 1); xs = push(xs, 2); xs = push(xs, 3); xs = push(xs, 4); xs = push(xs, 5)
+ys := slice(xs, 1, 4)
+println(len(ys))      // 3
+println(ys[0])        // 2
+println(ys[2])        // 4
+zs := reverse(xs)
+println(zs[0])        // 5
+println(zs[4])        // 1
+mu ss:[str] := []
+ss = push(ss, "a"); ss = push(ss, "b"); ss = push(ss, "c")
+rs := reverse(ss)
+println(rs[0])        // c
