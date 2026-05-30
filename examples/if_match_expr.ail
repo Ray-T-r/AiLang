@@ -1,0 +1,31 @@
+// `if` and `mt` (and `{...}` blocks) used as expressions — their value binds
+// directly to a name, no helper fn or pre-declared `mu` needed.
+
+c := 7
+x := if c > 0 { 10 } el { 20 }
+println(x)                          // 10
+
+// el-if chain, string-valued
+sign := if c > 0 { "pos" } el if c == 0 { "zero" } el { "neg" }
+println(sign)                       // pos
+
+en Color { Red, Green, Blue }
+col := Green
+n := mt col {
+  Red   => 1;
+  Green => 2;
+  Blue  => 3;
+}
+println(n)                          // 2
+
+// match-expression yielding a struct
+st Pt { x: i64; y: i64 }
+p := mt n {
+  2 => Pt(2, 20);
+  _ => Pt(0, 0);
+}
+println(p.y)                        // 20
+
+// block expression
+y := { a := 3; b := 4; a * b }
+println(y)                          // 12

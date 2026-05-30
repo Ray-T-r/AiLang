@@ -1,0 +1,19 @@
+st Counter { n:i64; tag:str }
+
+fn bump(c:*Counter) {
+  c.n = c.n + 1
+}
+fn bumpby(c:*Counter, by:i64) {
+  c.n = c.n + by
+}
+fn getn(c:*Counter) -> i64 {
+  rt c.n
+}
+
+mu ctr := Counter(10, "hits")
+bump(&ctr)
+bump(&ctr)
+bumpby(&ctr, 5)
+println(getn(&ctr))
+println(ctr.n)
+println(ctr.tag)

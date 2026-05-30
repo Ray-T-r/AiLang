@@ -1,0 +1,25 @@
+// Generics monomorphized over user-defined types — `id<T>`/`pick<T>` work
+// when T is a struct or an enum, not just a primitive. The result of a
+// generic call binds to a local via C `__auto_type` inference.
+
+st Box { v: i64 }
+en Color { Red, Green, Blue }
+
+fn id<T>(x:T) -> T x
+fn pick<T>(a:T, b:T) -> T a
+
+b := id(Box(7))
+println(b.v)              // 7
+
+println(id(99))           // 99   (primitive specialization still works)
+println(id("ok"))         // ok
+
+c := id(Blue)
+mt c {
+  Red   => println(0);
+  Green => println(1);
+  Blue  => println(2);    // 2
+}
+
+bb := pick(Box(3), Box(8))
+println(bb.v)             // 3

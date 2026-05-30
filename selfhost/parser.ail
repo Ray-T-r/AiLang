@@ -1,0 +1,202 @@
+// selfhost/parser.ail — the AiLang parser, written in AiLang.
+//
+//   [Token]  →  recursive Expr AST
+//
+// Recursive-descent with operator precedence:
+//   expr   := term   (('+' | '-') term)*
+//   term   := factor (('*' | '/') factor)*
+//   factor := INT | '(' expr ')'
+//
+// Position is threaded through a `*P` parser-state struct (AiLang fns return a
+// single value, so the cursor is mutated in place). The recursive `Expr` enum
+// is the whole point — it's the data structure that was impossible before the
+// language gained recursive ADTs, and it's what makes a real compiler AST
+// expressible in AiLang.
+//
+// This file bundles the lexer (copied — the bootstrap has no cross-file `im`
+// for these yet) and ends with a tree-eval harness so the parse can be verified
+// independently of codegen:
+//   ailangc run selfhost/parser.ail
+
+// ===== token kinds + Token (mirrors lexer.ail) ==============================
+fn TK_EOF() -> i64    { 0 }
+fn TK_INT() -> i64    { 1 }
+fn TK_PLUS() -> i64   { 2 }
+fn TK_MINUS() -> i64  { 3 }
+fn TK_STAR() -> i64   { 4 }
+fn TK_SLASH() -> i64  { 5 }
+fn TK_LPAREN() -> i64 { 6 }
+fn TK_RPAREN() -> i64 { 7 }
+fn TK_IDENT() -> i64  { 8 }
+fn TK_ERR() -> i64    { 9 }
+
+st Token { kind: i64; text: str; pos: i64 }
+
+fn is_digit(c:i64) -> bool { c >= 48 && c <= 57 }
+fn is_alpha(c:i64) -> bool {
+  (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95
+}
+fn is_space(c:i64) -> bool { c == 32 || c == 9 || c == 10 || c == 13 }
+
+fn op_kind(c:i64) -> i64 {
+  if c == 43 rt TK_PLUS()
+  if c == 45 rt TK_MINUS()
+  if c == 42 rt TK_STAR()
+  if c == 47 rt TK_SLASH()
+  if c == 40 rt TK_LPAREN()
+  if c == 41 rt TK_RPAREN()
+  TK_ERR()
+}
+
+// Clean 0-based [Token] ending in a TK_EOF token (see lexer.ail).
+fn lex(src:str) -> [Token] {
+  mu toks:[Token] := []
+  mu i := 0
+  lp i < len(src) {
+    c := src[i]
+    if is_space(c) { i += 1; ct }
+    if is_digit(c) {
+      mu j := i
+      lp j < len(src) { if is_digit(src[j]) == false { br } j += 1 }
+      toks = push(toks, Token(TK_INT(), substring(src, i, j), i))
+      i = j
+      ct
+    }
+    if is_alpha(c) {
+      mu j := i
+      lp j < len(src) {
+        d := src[j]
+        if is_alpha(d) == false && is_digit(d) == false { br }
+        j += 1
+      }
+      toks = push(toks, Token(TK_IDENT(), substring(src, i, j), i))
+      i = j
+      ct
+    }
+    toks = push(toks, Token(op_kind(c), substring(src, i, i + 1), i))
+    i += 1
+  }
+  toks = push(toks, Token(TK_EOF(), "", i))
+  toks
+}
+
+// ===== the AST ==============================================================
+// The recursive ADT. `op` is the operator byte (`+`=43, `-`=45, `*`=42, `/`=47).
+en Expr {
+  Num(v:i64),
+  Bin(op:i64, l:Expr, r:Expr),
+  Bad,                              // parse error placeholder
+}
+
+// ===== parser state =========================================================
+st P { toks: [Token]; pos: i64 }
+
+fn cur(p:*P) -> Token { p.toks[p.pos] }
+fn cur_kind(p:*P) -> i64 { p.toks[p.pos].kind }
+fn advance(p:*P) { p.pos = p.pos + 1 }
+
+// expr := term (('+' | '-') term)*
+fn parse_expr(p:*P) -> Expr {
+  mu left := parse_term(p)
+  lp true {
+    k := cur_kind(p)
+    if k == TK_PLUS() || k == TK_MINUS() {
+      op := opbyte(k)
+      advance(p)
+      right := parse_term(p)
+      left = Bin(op, left, right)
+    } el {
+      br
+    }
+  }
+  left
+}
+
+// term := factor (('*' | '/') factor)*
+fn parse_term(p:*P) -> Expr {
+  mu left := parse_factor(p)
+  lp true {
+    k := cur_kind(p)
+    if k == TK_STAR() || k == TK_SLASH() {
+      op := opbyte(k)
+      advance(p)
+      right := parse_factor(p)
+      left = Bin(op, left, right)
+    } el {
+      br
+    }
+  }
+  left
+}
+
+// factor := INT | '(' expr ')'
+fn parse_factor(p:*P) -> Expr {
+  k := cur_kind(p)
+  if k == TK_INT() {
+    v := str_to_int(cur(p).text)
+    advance(p)
+    rt Num(v)
+  }
+  if k == TK_LPAREN() {
+    advance(p)                       // consume '('
+    inner := parse_expr(p)
+    if cur_kind(p) == TK_RPAREN() { advance(p) }   // consume ')'
+    rt inner
+  }
+  Bad
+}
+
+// token-kind → operator byte
+fn opbyte(k:i64) -> i64 {
+  if k == TK_PLUS()  rt 43
+  if k == TK_MINUS() rt 45
+  if k == TK_STAR()  rt 42
+  if k == TK_SLASH() rt 47
+  0
+}
+
+// Parse the first `println(<expr>)` and return its argument expression.
+// (v0 grammar: a program is one or more `println(expr)` statements; here we
+// expose a single-expression entry for the eval harness, and the full
+// statement walk lives in codegen.ail.)
+fn parse_paren_arg(p:*P) -> Expr {
+  // expect: IDENT '(' expr ')'
+  if cur_kind(p) == TK_IDENT() { advance(p) }      // println
+  if cur_kind(p) == TK_LPAREN() { advance(p) }     // (
+  e := parse_expr(p)
+  if cur_kind(p) == TK_RPAREN() { advance(p) }     // )
+  e
+}
+
+// ===== tree-eval verifier ===================================================
+// Proves the AST is structurally correct: evaluating it must match the value
+// the real ailangc computes for the same expression.
+fn eval(e:Expr) -> i64 {
+  mt e {
+    Num(v)       => v;
+    Bin(op,l,r)  => eval_bin(op, eval(l), eval(r));
+    Bad          => 0;
+  }
+}
+
+fn eval_bin(op:i64, a:i64, b:i64) -> i64 {
+  if op == 43 rt a + b
+  if op == 45 rt a - b
+  if op == 42 rt a * b
+  if op == 47 rt a / b
+  0
+}
+
+// Helper: lex+parse a `println(expr)` source line and eval its argument.
+fn run_expr(src:str) -> i64 {
+  toks := lex(src)
+  mu p := P(toks, 0)
+  e := parse_paren_arg(&p)
+  eval(e)
+}
+
+println(run_expr("println(1 + 2 * 3)"))     // 7
+println(run_expr("println((1 + 2) * 3)"))   // 9
+println(run_expr("println(100 - 4 * 5)"))   // 80
+println(run_expr("println(2 * 3 + 4 * 5)")) // 26
+println(run_expr("println(20 / 4 - 1)"))    // 4

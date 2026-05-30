@@ -1,0 +1,17 @@
+st Point { x:i64; y:i64 }
+
+fn dist2(p:Point) -> i64 {
+  rt p.x * p.x + p.y * p.y
+}
+
+fn mid(a:Point, b:Point) -> Point {
+  rt Point((a.x + b.x) / 2, (a.y + b.y) / 2)
+}
+
+p := Point(3, 4)
+println(dist2(p))
+println(p.x)
+println(p.y)
+m := mid(Point(0, 0), Point(10, 20))
+println(m.x)
+println(m.y)

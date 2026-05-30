@@ -1,13 +1,14 @@
-// Heap-allocated string concatenation via unified `+`.
-// Backed by Boehm GC — no malloc/free in user code.
+// String interpolation + heap-allocated string concatenation. Both compile
+// down to the same `ailang_str_concat` calls (Boehm GC, no malloc/free in
+// user code); `${ident}` is the terser form.
 
-fn greet(name:str) "Hello, " + name + "!"
+fn greet(name:str) "Hello, ${name}!"
 
 msg := greet("AiLang")
 println(msg)
 println(len(msg))            // 14: "Hello, AiLang!"
 
-println("a" + "bc" + "def")  // abcdef
+println("a" + "bc" + "def")  // abcdef (raw `+` still works)
 
 who := "world"
-println("hi, " + who)
+println("hi, ${who}")

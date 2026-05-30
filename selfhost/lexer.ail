@@ -1,0 +1,103 @@
+// selfhost/lexer.ail — the AiLang lexer, written in AiLang.
+//
+// source string  →  [Token]
+//
+// v0 subset: integer literals, the operators + - * / ( ), and the bare word
+// `println`. Whitespace separates tokens and is otherwise ignored. Everything
+// the lexer can't classify becomes a TK_ERR token (the parser reports it).
+//
+// Run standalone to dump the token stream:
+//   ailangc run selfhost/lexer.ail
+
+// ---- token kinds (small integer tags) --------------------------------------
+// Kept as fns (AiLang has no const bindings); the compiler inlines them.
+fn TK_EOF() -> i64    { 0 }
+fn TK_INT() -> i64    { 1 }   // integer literal,  text = the digits
+fn TK_PLUS() -> i64   { 2 }   // +
+fn TK_MINUS() -> i64  { 3 }   // -
+fn TK_STAR() -> i64   { 4 }   // *
+fn TK_SLASH() -> i64  { 5 }   // /
+fn TK_LPAREN() -> i64 { 6 }   // (
+fn TK_RPAREN() -> i64 { 7 }   // )
+fn TK_IDENT() -> i64  { 8 }   // identifier / keyword, text = the word
+fn TK_ERR() -> i64    { 9 }   // unrecognised byte
+
+st Token { kind: i64; text: str; pos: i64 }
+
+// ---- character classes (byte-code based) -----------------------------------
+fn is_digit(c:i64) -> bool { c >= 48 && c <= 57 }                  // '0'..'9'
+fn is_alpha(c:i64) -> bool {
+  (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95         // a-z A-Z _
+}
+fn is_space(c:i64) -> bool { c == 32 || c == 9 || c == 10 || c == 13 }
+
+// Map a single-char operator/paren byte to its token kind, or TK_ERR.
+fn op_kind(c:i64) -> i64 {
+  if c == 43 rt TK_PLUS()      // +
+  if c == 45 rt TK_MINUS()     // -
+  if c == 42 rt TK_STAR()      // *
+  if c == 47 rt TK_SLASH()     // /
+  if c == 40 rt TK_LPAREN()    // (
+  if c == 41 rt TK_RPAREN()    // )
+  TK_ERR()
+}
+
+// ---- the lexer -------------------------------------------------------------
+// Builds a clean 0-based [Token] ending in a TK_EOF token. (Empty `[Token]`
+// arrays work directly on a current `ailangc`.)
+fn lex(src:str) -> [Token] {
+  mu toks:[Token] := []
+  mu i := 0
+  lp i < len(src) {
+    c := src[i]
+    if is_space(c) { i += 1; ct }
+
+    // integer literal: run of digits
+    if is_digit(c) {
+      mu j := i
+      lp j < len(src) { if is_digit(src[j]) == false { br } j += 1 }
+      toks = push(toks, Token(TK_INT(), substring(src, i, j), i))
+      i = j
+      ct
+    }
+
+    // identifier / keyword: alpha then alnum
+    if is_alpha(c) {
+      mu j := i
+      lp j < len(src) {
+        d := src[j]
+        if is_alpha(d) == false && is_digit(d) == false { br }
+        j += 1
+      }
+      toks = push(toks, Token(TK_IDENT(), substring(src, i, j), i))
+      i = j
+      ct
+    }
+
+    // single-char operator / paren
+    k := op_kind(c)
+    toks = push(toks, Token(k, substring(src, i, i + 1), i))
+    i += 1
+  }
+  toks = push(toks, Token(TK_EOF(), "", i))
+  toks
+}
+
+// ---- standalone token dump (verification harness) --------------------------
+fn kind_name(k:i64) -> str {
+  if k == TK_EOF()    rt "EOF"
+  if k == TK_INT()    rt "INT"
+  if k == TK_PLUS()   rt "PLUS"
+  if k == TK_MINUS()  rt "MINUS"
+  if k == TK_STAR()   rt "STAR"
+  if k == TK_SLASH()  rt "SLASH"
+  if k == TK_LPAREN() rt "LPAREN"
+  if k == TK_RPAREN() rt "RPAREN"
+  if k == TK_IDENT()  rt "IDENT"
+  "ERR"
+}
+
+ts := lex("println(1 + 2 * 3)")
+lp t in ts {
+  println("${kind_name(t.kind)} '${t.text}' @${t.pos}")
+}

@@ -1,9 +1,8 @@
 // bench.ail — performance benchmark for AiLang's compiler-generated code.
 // Each section exercises a different hot-path the codegen + clang -O2 stack
-// should handle well. clock() is libc's CPU-time clock; on POSIX it ticks
-// once per microsecond (CLOCKS_PER_SEC = 1_000_000), so t1-t0 is microseconds.
-
-ex fn clock() -> i64
+// should handle well. Times are wall-microseconds via the now_us() builtin.
+// (Previously we used `ex fn now_us()`, but recent macOS SDKs declare now_us()
+// with a different return type than int64_t, which broke compilation.)
 
 // --- workloads ----------------------------------------------------------
 
@@ -86,7 +85,7 @@ fn pipe_chain(n:i64, seed:i64) -> i64 {
   // input depends on the previous acc; otherwise clang -O2 sees a pure
   // polynomial sum and folds the whole loop to a constant at compile
   // time (the previous version of this benchmark clocked 0us — true,
-  // but uninteresting). The `seed` (a runtime clock() value) also
+  // but uninteresting). The `seed` (a runtime now_us() value) also
   // prevents the compiler from precomputing the final result.
   mu acc := seed
   lp i in 1..=n {
@@ -120,9 +119,18 @@ fn report(label:str, t0:i64, t1:i64, result:i64) {
   println(")")
 }
 
+// bench(label, work) — time a thunk and report it. Collapses the 4-line
+// `t0=now_us(); r=work; t1=now_us(); report(...)` block into one line per case.
+fn bench(label:str, work:fn()->i64) {
+  t0 := now_us()
+  r := work()
+  t1 := now_us()
+  report(label, t0, t1, r)
+}
+
 fn main() {
   println("== AiLang codegen perf benchmark ==")
-  println("(times are CPU microseconds via libc clock())")
+  println("(times are wall microseconds via now_us())")
   println("")
 
   // Warm caches & GC.
@@ -132,47 +140,16 @@ fn main() {
   println(warm)
   println("")
 
-  mu t0 := clock()
-  mu r := fib(35)
-  mu t1 := clock()
-  report("fib(35)            ", t0, t1, r)
-
-  t0 = clock()
-  r = ackermann(3, 11)
-  t1 = clock()
-  report("ackermann(3,11)    ", t0, t1, r)
-
-  t0 = clock()
-  r = collatz_total(200000)
-  t1 = clock()
-  report("collatz_total(2e5) ", t0, t1, r)
-
-  t0 = clock()
-  r = count_primes(50000)
-  t1 = clock()
-  report("count_primes(5e4)  ", t0, t1, r)
-
-  t0 = clock()
-  r = triple_nested(300)
-  t1 = clock()
-  report("triple_nested(300) ", t0, t1, r)
-
-  t0 = clock()
-  r = fizzbuzz_score(2000000)
-  t1 = clock()
-  report("fizzbuzz_score(2e6)", t0, t1, r)
-
-  // Seed with t0 to keep the result runtime-dependent and prevent
-  // whole-loop constant folding.
-  t0 = clock()
-  r = pipe_chain(2000000, t0)
-  t1 = clock()
-  report("pipe_chain(2e6)    ", t0, t1, r)
-
-  t0 = clock()
-  r = string_build(20000)
-  t1 = clock()
-  report("string_build(2e4)  ", t0, t1, r)
+  bench("fib(35)            ", fn() fib(35))
+  bench("ackermann(3,11)    ", fn() ackermann(3, 11))
+  bench("collatz_total(2e5) ", fn() collatz_total(200000))
+  bench("count_primes(5e4)  ", fn() count_primes(50000))
+  bench("triple_nested(300) ", fn() triple_nested(300))
+  bench("fizzbuzz_score(2e6)", fn() fizzbuzz_score(2000000))
+  // now_us() as seed keeps each iteration runtime-dependent so clang -O2
+  // can't fold the loop to a constant.
+  bench("pipe_chain(2e6)    ", fn() pipe_chain(2000000, now_us()))
+  bench("string_build(2e4)  ", fn() string_build(20000))
 
   println("")
   println("== done ==")

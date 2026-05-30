@@ -1,0 +1,23 @@
+nums := [10, 20, 30, 40]
+println(len(nums))
+println(nums[2])
+
+mu total := 0
+lp x in nums {
+  total = total + x
+}
+println(total)
+
+mu xs:[i64] := []
+mu i := 1
+lp i <= 5 {
+  xs = push(xs, i * i)
+  i = i + 1
+}
+println(len(xs))
+println(xs[4])
+mu sum := 0
+lp v in xs {
+  sum = sum + v
+}
+println(sum)

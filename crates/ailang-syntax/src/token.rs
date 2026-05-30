@@ -83,7 +83,8 @@ pub enum TokenKind {
     KwCt,
     KwAs,
     KwIn,
-    KwEn,  // `en` — enum / ADT declaration
+    KwEn,   // `en` — enum / ADT declaration
+    KwCinc, // `cinc` — C `#include` directive
 
     // ----- Keywords (literals) -----
     KwTrue,
@@ -118,36 +119,36 @@ pub enum TokenKind {
     Underscore,
 
     // ----- Punctuation -----
-    LParen,    // (
-    RParen,    // )
-    LBrace,    // {
-    RBrace,    // }
-    LBracket,  // [
-    RBracket,  // ]
-    Comma,     // ,
-    Semi,      // ;
-    Dot,       // .
-    At,        // @
-    Hash,      // #
-    Dollar,    // $
+    LParen,   // (
+    RParen,   // )
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+    Comma,    // ,
+    Semi,     // ;
+    Dot,      // .
+    At,       // @
+    Hash,     // #
+    Dollar,   // $
 
     // ----- Operators -----
-    Eq,        // =
-    Walrus,    // :=
-    Colon,     // :
-    Arrow,     // ->
-    FatArrow,  // =>
-    Pipeline,  // |>
-    Question,  // ?
-    Coalesce,  // ??
+    Eq,       // =
+    Walrus,   // :=
+    Colon,    // :
+    Arrow,    // ->
+    FatArrow, // =>
+    Pipeline, // |>
+    Question, // ?
+    Coalesce, // ??
 
     // arithmetic
-    Plus,      // +
-    Minus,     // -
-    Star,      // *
-    Slash,     // /
-    Percent,   // %
-    Concat,    // ++
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    Percent, // %
+    Concat,  // ++
 
     // compound assignment (desugared to `target = target op rhs` by parser)
     PlusEq,    // +=
@@ -157,30 +158,30 @@ pub enum TokenKind {
     PercentEq, // %=
 
     // comparison
-    EqEq,      // ==
-    Neq,       // !=
-    Lt,        // <
-    Le,        // <=
-    Gt,        // >
-    Ge,        // >=
+    EqEq, // ==
+    Neq,  // !=
+    Lt,   // <
+    Le,   // <=
+    Gt,   // >
+    Ge,   // >=
 
     // logical
-    AndAnd,    // &&
-    OrOr,      // ||
-    Bang,      // !
+    AndAnd, // &&
+    OrOr,   // ||
+    Bang,   // !
 
     // bitwise
-    Amp,       // &
-    Pipe,      // |
-    Caret,     // ^
-    Tilde,     // ~
-    Shl,       // <<
-    Shr,       // >>
+    Amp,   // &
+    Pipe,  // |
+    Caret, // ^
+    Tilde, // ~
+    Shl,   // <<
+    Shr,   // >>
 
     // ranges + variadic
-    DotDot,    // ..
-    DotDotEq,  // ..=
-    Ellipsis,  // ...  (C-style variadic; used in `ex` declarations)
+    DotDot,   // ..
+    DotDotEq, // ..=
+    Ellipsis, // ...  (C-style variadic; used in `ex` declarations)
 
     // ----- Meta -----
     /// Synthetic end-of-file marker, emitted by the lexer adapter.
@@ -194,37 +195,93 @@ impl TokenKind {
     pub fn name(self) -> &'static str {
         use TokenKind::*;
         match self {
-            KwFn => "fn",        KwIf => "if",        KwEl => "el",
-            KwLp => "lp",        KwRt => "rt",        KwMt => "mt",
-            KwSt => "st",        KwTr => "tr",        KwIm => "im",
+            KwFn => "fn",
+            KwIf => "if",
+            KwEl => "el",
+            KwLp => "lp",
+            KwRt => "rt",
+            KwMt => "mt",
+            KwSt => "st",
+            KwTr => "tr",
+            KwIm => "im",
             KwEn => "en",
-            KwEx => "ex",        KwMu => "mu",        KwBr => "br",
-            KwCt => "ct",        KwAs => "as",        KwIn => "in",
-            KwTrue => "true",    KwFalse => "false",  KwNil => "nil",
-            TyI8 => "i8",        TyI16 => "i16",      TyI32 => "i32",  TyI64 => "i64",
-            TyU8 => "u8",        TyU16 => "u16",      TyU32 => "u32",  TyU64 => "u64",
-            TyF32 => "f32",      TyF64 => "f64",      TyBool => "bool", TyStr => "str",
+            KwCinc => "cinc",
+            KwEx => "ex",
+            KwMu => "mu",
+            KwBr => "br",
+            KwCt => "ct",
+            KwAs => "as",
+            KwIn => "in",
+            KwTrue => "true",
+            KwFalse => "false",
+            KwNil => "nil",
+            TyI8 => "i8",
+            TyI16 => "i16",
+            TyI32 => "i32",
+            TyI64 => "i64",
+            TyU8 => "u8",
+            TyU16 => "u16",
+            TyU32 => "u32",
+            TyU64 => "u64",
+            TyF32 => "f32",
+            TyF64 => "f64",
+            TyBool => "bool",
+            TyStr => "str",
             Ident => "ident",
-            IntLit => "int",     FloatLit => "float", StrLit => "string", CharLit => "char",
+            IntLit => "int",
+            FloatLit => "float",
+            StrLit => "string",
+            CharLit => "char",
             Underscore => "_",
-            LParen => "(",       RParen => ")",
-            LBrace => "{",       RBrace => "}",
-            LBracket => "[",     RBracket => "]",
-            Comma => ",",        Semi => ";",         Dot => ".",
-            At => "@",           Hash => "#",         Dollar => "$",
-            Eq => "=",           Walrus => ":=",      Colon => ":",
-            Arrow => "->",       FatArrow => "=>",    Pipeline => "|>",
-            Question => "?",     Coalesce => "??",
-            Plus => "+",         Minus => "-",        Star => "*",
-            Slash => "/",        Percent => "%",      Concat => "++",
-            PlusEq => "+=",      MinusEq => "-=",     StarEq => "*=",
-            SlashEq => "/=",     PercentEq => "%=",
-            EqEq => "==",        Neq => "!=",
-            Lt => "<",           Le => "<=",          Gt => ">",   Ge => ">=",
-            AndAnd => "&&",      OrOr => "||",        Bang => "!",
-            Amp => "&",          Pipe => "|",         Caret => "^", Tilde => "~",
-            Shl => "<<",         Shr => ">>",
-            DotDot => "..",      DotDotEq => "..=",   Ellipsis => "...",
+            LParen => "(",
+            RParen => ")",
+            LBrace => "{",
+            RBrace => "}",
+            LBracket => "[",
+            RBracket => "]",
+            Comma => ",",
+            Semi => ";",
+            Dot => ".",
+            At => "@",
+            Hash => "#",
+            Dollar => "$",
+            Eq => "=",
+            Walrus => ":=",
+            Colon => ":",
+            Arrow => "->",
+            FatArrow => "=>",
+            Pipeline => "|>",
+            Question => "?",
+            Coalesce => "??",
+            Plus => "+",
+            Minus => "-",
+            Star => "*",
+            Slash => "/",
+            Percent => "%",
+            Concat => "++",
+            PlusEq => "+=",
+            MinusEq => "-=",
+            StarEq => "*=",
+            SlashEq => "/=",
+            PercentEq => "%=",
+            EqEq => "==",
+            Neq => "!=",
+            Lt => "<",
+            Le => "<=",
+            Gt => ">",
+            Ge => ">=",
+            AndAnd => "&&",
+            OrOr => "||",
+            Bang => "!",
+            Amp => "&",
+            Pipe => "|",
+            Caret => "^",
+            Tilde => "~",
+            Shl => "<<",
+            Shr => ">>",
+            DotDot => "..",
+            DotDotEq => "..=",
+            Ellipsis => "...",
             Eof => "<eof>",
             Error => "<error>",
         }

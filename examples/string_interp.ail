@@ -1,0 +1,29 @@
+// String interpolation: `"...${ident}..."` desugars to `+`-concat of literal
+// parts and `to_str(ident)` calls. Mixed types (i64 / f64 / bool / str) are
+// stringified by a `_Generic`-based to_str in PRELUDE. A `$` not followed by
+// `{` stays literal, so JSON-shaped strings and `$5` survive unchanged.
+
+name := "alice"
+age := 30
+pi := 3.14
+flag := true
+
+println("hello, ${name}")
+println("age=${age}, pi=${pi}, ok=${flag}")
+println("${name} is ${age}")
+
+// Non-interpolation cases that must stay verbatim:
+println("plain string, no $ here")
+println("$dollar without brace, $5, $$")
+println("${not an ident here} kept as-is")
+println("{\"json\":\"shape\",\"ok\":true}")
+
+// ${expr} now re-parses a full expression: field access, arithmetic, calls
+// and indexing all work, so you no longer hoist them into a local first.
+st P { x: i64; y: i64 }
+p := P(3, 4)
+nums := [10, 20, 30]
+println("point ${p.x},${p.y}")
+println("next age ${age + 1}")
+println("upper ${to_upper(name)}")
+println("first ${nums[0]}")

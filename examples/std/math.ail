@@ -1,7 +1,13 @@
 // std/math.ail — seed math helpers wrapping libc + libm.
+//
+// `abs(x)` is now a polymorphic builtin (handles i64 and f64), so this
+// module no longer declares it. The libc `int abs(int)` is still on PATH
+// via the linker; if you need the i32-specific form, declare it locally:
+//     ex fn abs_i32(n:i32) -> i32 = "abs"
+// (Not provided here because i64 widens fine and the polymorphic name now
+// always means "absolute value of whatever you give me".)
 
 // integer
-ex fn abs(n:i32) -> i32
 ex fn rand() -> i32
 ex fn srand(seed:u32)
 

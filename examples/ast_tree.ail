@@ -1,0 +1,21 @@
+// A recursive AST: an enum variant holds a list of *itself* (`kids:[Tree]`).
+// Recursion through an array — the shape a real compiler's AST needs (e.g.
+// `Call(fn:str, args:[Expr])`). Walk it with mutual recursion.
+
+en Tree { Leaf(v:i64), Branch(kids:[Tree]) }
+
+fn suml(kids:[Tree]) -> i64 {
+  mu s := 0
+  lp k in kids { s += total(k) }
+  s
+}
+
+fn total(t:Tree) -> i64 {
+  mt t {
+    Leaf(v)      => v;
+    Branch(kids) => suml(kids);
+  }
+}
+
+t := Branch([Leaf(1), Leaf(2), Branch([Leaf(3), Leaf(4)])])
+println(total(t))           // 1 + 2 + 3 + 4 = 10

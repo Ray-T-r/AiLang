@@ -1,0 +1,25 @@
+// v9 probe: recursive ADT + match. An expression tree evaluator — the heart of
+// the bootstrap's own AST walker, exercised through the self-hosting subset.
+en Expr {
+  Num(v:i64),
+  Add(l:Expr, r:Expr),
+  Mul(l:Expr, r:Expr),
+  Neg(x:Expr)
+}
+
+fn eval(e:Expr) -> i64 {
+  mt e {
+    Num(v)   => v;
+    Add(l,r) => eval(l) + eval(r);
+    Mul(l,r) => eval(l) * eval(r);
+    Neg(x)   => 0 - eval(x);
+  }
+}
+
+// (2 + 3) * -(4)  =  5 * -4  =  -20
+e := Mul(Add(Num(2), Num(3)), Neg(Num(4)))
+println(eval(e))
+
+// nested deeper: 1 + 2*3 + 4*5 = 1 + 6 + 20 = 27
+e2 := Add(Num(1), Add(Mul(Num(2), Num(3)), Mul(Num(4), Num(5))))
+println(eval(e2))

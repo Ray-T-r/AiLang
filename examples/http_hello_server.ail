@@ -10,16 +10,8 @@
 im "std/sock.ail"
 im "std/http.ail"
 
-port_str := get_env("PORT")
-port := str_to_int(port_str)
-if port == 0 port = 18080
-
-fd := tcp_listen("127.0.0.1", port)
-if fd < 0 {
-  println("listen failed")
-  exit(1)
-}
-println("listening on 127.0.0.1:" + int_to_str(port))
+port := env_int("PORT", 18080)
+fd := must_listen("127.0.0.1", port, "listening")
 
 cli := tcp_accept(fd)
 if cli < 0 {

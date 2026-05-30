@@ -47,6 +47,10 @@ enum Cmd {
         /// and stop (do not invoke the linker).
         #[arg(long)]
         emit_c: bool,
+        /// Keep the generated C (or LLVM IR) file next to the binary. By
+        /// default it's deleted once the native binary is built.
+        #[arg(long)]
+        keep_c: bool,
         /// Codegen backend. `c` (default) goes through C99; `ir` emits
         /// LLVM IR text (M6+, subset only).
         #[arg(long, value_enum, default_value_t = BackendArg::C)]
@@ -59,6 +63,10 @@ enum Cmd {
     /// Compile and immediately execute the result. Forwards the binary's exit code.
     Run {
         file: PathBuf,
+        /// Keep the generated C (or LLVM IR) file next to the binary. By
+        /// default it's deleted once the native binary is built.
+        #[arg(long)]
+        keep_c: bool,
         #[arg(long, value_enum, default_value_t = BackendArg::C)]
         backend: BackendArg,
         #[arg(short, long)]
@@ -80,10 +88,18 @@ fn main() -> ExitCode {
             Ok(()) => Ok(0),
             Err(e) => Err(format!("{e}")),
         },
-        Cmd::Compile { file, output, emit_c, backend, verbose } => {
+        Cmd::Compile {
+            file,
+            output,
+            emit_c,
+            keep_c,
+            backend,
+            verbose,
+        } => {
             let opts = ailang_driver::CompileOptions {
                 output,
                 emit_c_only: emit_c,
+                keep_c,
                 verbose,
                 backend: backend.into(),
                 ..Default::default()
@@ -100,8 +116,14 @@ fn main() -> ExitCode {
                 Err(e) => Err(format!("{e}")),
             }
         }
-        Cmd::Run { file, backend, verbose } => {
+        Cmd::Run {
+            file,
+            keep_c,
+            backend,
+            verbose,
+        } => {
             let opts = ailang_driver::CompileOptions {
+                keep_c,
                 verbose,
                 backend: backend.into(),
                 ..Default::default()

@@ -5,7 +5,7 @@
 //! - [`token`] — lexer output: [`Token`], [`TokenKind`], [`Span`].
 //! - [`ast`]   — parser output: [`Module`], [`Item`], [`Expr`], etc.
 
-pub mod token;
 pub mod ast;
+pub mod token;
 
 pub use token::{Span, Token, TokenKind};

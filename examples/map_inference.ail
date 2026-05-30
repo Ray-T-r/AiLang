@@ -1,0 +1,31 @@
+// Regression: empty `{}` whose (K,V) is pinned only by a later
+// `m[k] += v` inside a `lp` body. Before back-propagation in sema,
+// this fell back to `{i64:i64}` and silently treated string keys
+// as pointers — counts collided by interning luck, totals went wrong.
+
+words := ["the","quick","the","fox","the","quick","jumps"]
+counts := {}
+lp w in words {
+  counts[w] += 1
+}
+println(len(counts))
+println(counts["the"])
+println(counts["quick"])
+println(counts["fox"])
+println(counts["jumps"])
+println(counts["missing"])
+
+// Also: str→str inference via the same path.
+trans := {}
+trans["en"] = "hello"
+trans["fr"] = "bonjour"
+println(trans["en"])
+println(trans["fr"])
+
+// And i64→i64 via the same path (no annotation).
+sq := {}
+lp n in 1..5 {
+  sq[n] = n * n
+}
+println(sq[1])
+println(sq[4])

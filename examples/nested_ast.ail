@@ -1,0 +1,69 @@
+// A nested AST: enum variants holding arrays of other enums/themselves, a
+// struct holding [Stmt], and `len()` on a match-bound aggregate field. This is
+// the data-structure shape a real compiler needs — and exercises (a) empty
+// `[str]`/`[Stmt]`/`[Expr]` literals, (b) field types resolved for match
+// bindings so `len(then_b)` dispatches.
+
+en Expr {
+  Num(v:i64),
+  Var(name:str),
+  Call(fname:str, args:[Expr]),
+}
+
+en Stmt {
+  SReturn(e:Expr),
+  SIf(cond:Expr, then_b:[Stmt], else_b:[Stmt]),
+}
+
+st Fn { name:str; params:[str]; body:[Stmt] }
+
+fn build() -> Fn {
+  mu args:[Expr] := []
+  args = push(args, Var("x"))
+  args = push(args, Num(1))
+
+  mu then_b:[Stmt] := []
+  then_b = push(then_b, SReturn(Call("g", args)))
+
+  mu else_b:[Stmt] := []
+
+  mu body:[Stmt] := []
+  body = push(body, SIf(Var("x"), then_b, else_b))
+
+  mu params:[str] := []
+  params = push(params, "x")
+
+  Fn("f", params, body)
+}
+
+f := build()
+println(f.name)            // f
+println(len(f.params))     // 1
+println(f.params[0])       // x
+println(len(f.body))       // 1
+
+mt f.body[0] {
+  SReturn(e)        => println("return");
+  SIf(c, t, e)      => println("if: ${len(t)} then, ${len(e)} else");
+}
+
+// reach two levels deep: the Call inside the SReturn inside the SIf's then-branch
+mt f.body[0] {
+  SReturn(e) => println("x");
+  SIf(c, t, e) => report_call(t);
+}
+
+fn report_call(stmts:[Stmt]) {
+  mt stmts[0] {
+    SReturn(e)   => report_expr(e);
+    SIf(a, b, d) => println("nested if");
+  }
+}
+
+fn report_expr(e:Expr) {
+  mt e {
+    Num(v)         => println("num ${v}");
+    Var(n)         => println("var ${n}");
+    Call(fname, a) => println("call ${fname} with ${len(a)} args");  // call g with 2 args
+  }
+}

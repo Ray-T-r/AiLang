@@ -6,8 +6,8 @@
 //! and keeps going so users see every problem in one run.
 
 use ailang_syntax::ast::*;
-use ailang_syntax::token::{Token, TokenKind};
 pub use ailang_syntax::token::Span;
+use ailang_syntax::token::{Token, TokenKind};
 
 mod expr;
 mod literal;
@@ -21,7 +21,11 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self { message: message.into(), span, help: None }
+        Self {
+            message: message.into(),
+            span,
+            help: None,
+        }
     }
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help = Some(help.into());
@@ -39,7 +43,12 @@ pub struct Parser<'a> {
 /// Public entry point. Always returns *some* `Module` — partial parses are
 /// useful for IDE-style tooling.
 pub fn parse(source: &str, tokens: &[Token]) -> (Module, Vec<ParseError>) {
-    let mut p = Parser { tokens, source, cursor: 0, errors: vec![] };
+    let mut p = Parser {
+        tokens,
+        source,
+        cursor: 0,
+        errors: vec![],
+    };
     let module = p.parse_module();
     (module, p.errors)
 }
@@ -84,10 +93,7 @@ impl<'a> Parser<'a> {
             Some(self.bump())
         } else {
             let got = self.peek();
-            self.error(
-                format!("expected `{}`, got `{}`", kind, got.kind),
-                got.span,
-            );
+            self.error(format!("expected `{}`, got `{}`", kind, got.kind), got.span);
             None
         }
     }
@@ -143,7 +149,12 @@ impl Parser<'_> {
             // 1) Item keyword? Parse it as an item.
             if matches!(
                 self.peek_kind(),
-                TokenKind::KwFn | TokenKind::KwSt | TokenKind::KwEn | TokenKind::KwIm | TokenKind::KwEx
+                TokenKind::KwFn
+                    | TokenKind::KwSt
+                    | TokenKind::KwEn
+                    | TokenKind::KwIm
+                    | TokenKind::KwEx
+                    | TokenKind::KwCinc
             ) {
                 if let Some(item) = self.parse_item() {
                     items.push(item);
@@ -222,7 +233,10 @@ impl Parser<'_> {
                     span: body_span,
                 };
                 let synth_main = FnDecl {
-                    name: Ident { name: "main".to_string(), span: Span::empty() },
+                    name: Ident {
+                        name: "main".to_string(),
+                        span: Span::empty(),
+                    },
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_ty: None,
@@ -243,6 +257,7 @@ impl Parser<'_> {
             TokenKind::KwEn => self.parse_enum_item().map(Item::Enum),
             TokenKind::KwIm => self.parse_import_item().map(Item::Import),
             TokenKind::KwEx => self.parse_extern_item().map(Item::Extern),
+            TokenKind::KwCinc => self.parse_cinclude_item().map(Item::CInclude),
             _ => None,
         }
     }
@@ -265,16 +280,32 @@ impl Parser<'_> {
                     self.expect(TokenKind::Colon)?;
                     let ty = self.parse_type()?;
                     let end = ty.span;
-                    fields.push(Field { span: fname.span.join(end), name: fname, ty });
-                    if !self.eat(TokenKind::Comma) { break; }
+                    fields.push(Field {
+                        span: fname.span.join(end),
+                        name: fname,
+                        ty,
+                    });
+                    if !self.eat(TokenKind::Comma) {
+                        break;
+                    }
                 }
                 v_end = self.expect(TokenKind::RParen)?.span;
             }
-            variants.push(EnumVariant { span: v_name.span.join(v_end), name: v_name, fields });
-            if !self.eat(TokenKind::Comma) && !self.eat(TokenKind::Semi) { break; }
+            variants.push(EnumVariant {
+                span: v_name.span.join(v_end),
+                name: v_name,
+                fields,
+            });
+            if !self.eat(TokenKind::Comma) && !self.eat(TokenKind::Semi) {
+                break;
+            }
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        Some(EnumDecl { name, variants, span: start.join(end) })
+        Some(EnumDecl {
+            name,
+            variants,
+            span: start.join(end),
+        })
     }
 
     fn parse_fn_item(&mut self) -> Option<FnDecl> {
@@ -376,6 +407,18 @@ impl Parser<'_> {
         })
     }
 
+    /// `cinc "header.h"` — a C `#include`. Mirrors `parse_import_item`, but the
+    /// payload names a C header (its decls/macros/typedefs), not an AiLang module.
+    fn parse_cinclude_item(&mut self) -> Option<CIncludeDecl> {
+        let start = self.peek().span;
+        self.expect(TokenKind::KwCinc)?;
+        let header = self.parse_str_literal()?;
+        Some(CIncludeDecl {
+            span: start.join(header.span),
+            header,
+        })
+    }
+
     fn parse_extern_item(&mut self) -> Option<ExternDecl> {
         let start = self.peek().span;
         self.expect(TokenKind::KwEx)?;
@@ -430,7 +473,11 @@ impl Parser<'_> {
             // C already passes by value, so we just discard the marker —
             // it's a parser-level affordance to skip the `mu x := x` dance
             // at the top of a body that wants to mutate its parameter.
-            let start = if self.at(TokenKind::KwMu) { self.bump().span } else { self.peek().span };
+            let start = if self.at(TokenKind::KwMu) {
+                self.bump().span
+            } else {
+                self.peek().span
+            };
             let name = self.parse_ident()?;
             let mut ty = None;
             let mut end = name.span;
@@ -552,7 +599,9 @@ impl Parser<'_> {
                 //   lvalue = expr         (assignment)
                 //   expr                  (expression statement or tail)
                 if self.looks_like_decl() {
-                    return Some(StmtOrTail::Stmt(self.parse_decl_after_mu(false, self.peek().span)?));
+                    return Some(StmtOrTail::Stmt(
+                        self.parse_decl_after_mu(false, self.peek().span)?,
+                    ));
                 }
                 let expr = self.parse_expr()?;
                 if self.at(TokenKind::Eq) {
@@ -633,12 +682,18 @@ impl Parser<'_> {
             if ty.is_some() {
                 if !self.eat(TokenKind::Eq) {
                     let got = self.peek();
-                    self.error(format!("expected `=` or `:=` in declaration, got `{}`", got.kind), got.span);
+                    self.error(
+                        format!("expected `=` or `:=` in declaration, got `{}`", got.kind),
+                        got.span,
+                    );
                     return None;
                 }
             } else {
                 let got = self.peek();
-                self.error(format!("expected `:=` in declaration, got `{}`", got.kind), got.span);
+                self.error(
+                    format!("expected `:=` in declaration, got `{}`", got.kind),
+                    got.span,
+                );
                 return None;
             }
         }
@@ -701,11 +756,19 @@ impl Parser<'_> {
                     Stmt::Match(s) => s.span,
                     Stmt::Expr(e) => e.span,
                 };
-                Some(Block { stmts: vec![stmt], tail_expr: None, span: start.join(span) })
+                Some(Block {
+                    stmts: vec![stmt],
+                    tail_expr: None,
+                    span: start.join(span),
+                })
             }
             StmtOrTail::TailExpr(e) => {
                 let span = e.span;
-                Some(Block { stmts: vec![], tail_expr: Some(Box::new(e)), span: start.join(span) })
+                Some(Block {
+                    stmts: vec![],
+                    tail_expr: Some(Box::new(e)),
+                    span: start.join(span),
+                })
             }
         }
     }
@@ -724,14 +787,19 @@ impl Parser<'_> {
             let var = self.parse_ident()?;
             self.expect(TokenKind::KwIn)?;
             let iter = self.parse_expr()?;
-            Some(LoopHead::ForIn { vars: vec![var], iter })
+            Some(LoopHead::ForIn {
+                vars: vec![var],
+                iter,
+            })
         } else if self.at(TokenKind::LParen) && self.peek_ahead(1) == TokenKind::Ident {
             // Tuple destructure: `(k, v, …)`. Only valid when followed by `in`.
             self.bump(); // (
             let mut vars = Vec::new();
             while !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                 vars.push(self.parse_ident()?);
-                if !self.eat(TokenKind::Comma) { break; }
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
             }
             self.expect(TokenKind::RParen)?;
             self.expect(TokenKind::KwIn)?;
@@ -760,7 +828,11 @@ impl Parser<'_> {
             self.expect(TokenKind::FatArrow)?;
             let body = self.parse_expr()?;
             let span = pattern_span(&p).join(body.span);
-            arms.push(MatchArm { pattern: p, body, span });
+            arms.push(MatchArm {
+                pattern: p,
+                body,
+                span,
+            });
             // arms separated by `;` (optional after the last one).
             if !self.eat(TokenKind::Semi) {
                 break;
@@ -791,7 +863,11 @@ impl Parser<'_> {
                 // Capitalized + `(` → variant pattern that binds positional
                 // fields (`Some(v)`). Bare capitalized → unit variant
                 // (`None`). Lowercase → plain binding.
-                let starts_upper = id.name.chars().next().map_or(false, |c| c.is_ascii_uppercase());
+                let starts_upper = id
+                    .name
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_uppercase());
                 if starts_upper {
                     let mut bindings = Vec::new();
                     let mut end = id.span;
@@ -800,17 +876,24 @@ impl Parser<'_> {
                         while !self.at(RParen) && !self.at(Eof) {
                             if self.at(Underscore) {
                                 bindings.push(ailang_syntax::ast::Ident {
-                                    name: "_".to_string(), span: self.bump().span,
+                                    name: "_".to_string(),
+                                    span: self.bump().span,
                                 });
                             } else {
                                 bindings.push(self.parse_ident()?);
                             }
-                            if !self.eat(Comma) { break; }
+                            if !self.eat(Comma) {
+                                break;
+                            }
                         }
                         end = self.expect(RParen)?.span;
                     }
                     let id_span = id.span;
-                    Some(Pattern::Variant { name: id, bindings, span: id_span.join(end) })
+                    Some(Pattern::Variant {
+                        name: id,
+                        bindings,
+                        span: id_span.join(end),
+                    })
                 } else {
                     Some(Pattern::Binding(id))
                 }
@@ -840,18 +923,17 @@ impl Parser<'_> {
 
 fn pattern_span(p: &Pattern) -> Span {
     match p {
-        Pattern::Wildcard(s) | Pattern::Tuple { span: s, .. } | Pattern::Variant { span: s, .. } => *s,
+        Pattern::Wildcard(s)
+        | Pattern::Tuple { span: s, .. }
+        | Pattern::Variant { span: s, .. } => *s,
         Pattern::Literal(l) => l.span,
         Pattern::Binding(i) => i.span,
     }
 }
 
-
 fn stmt_span(s: &Stmt) -> Span {
     match s {
-        Stmt::Decl { span, .. }
-        | Stmt::Assign { span, .. }
-        | Stmt::Return { span, .. } => *span,
+        Stmt::Decl { span, .. } | Stmt::Assign { span, .. } | Stmt::Return { span, .. } => *span,
         Stmt::Break(s) | Stmt::Continue(s) => *s,
         Stmt::If(i) => i.span,
         Stmt::Loop(l) => l.span,
@@ -938,8 +1020,8 @@ impl Parser<'_> {
                 })
             }
             // Primitive type keywords + ident map to TypeKind::Path
-            TyI8 | TyI16 | TyI32 | TyI64 | TyU8 | TyU16 | TyU32 | TyU64
-            | TyF32 | TyF64 | TyBool | TyStr | Ident => {
+            TyI8 | TyI16 | TyI32 | TyI64 | TyU8 | TyU16 | TyU32 | TyU64 | TyF32 | TyF64
+            | TyBool | TyStr | Ident => {
                 let span = self.bump().span;
                 Some(Type {
                     kind: TypeKind::Path(self.ident_text(span)),
@@ -999,7 +1081,9 @@ mod tests {
         let (m, errs) = parse_str("fn main() { println(\"hi\") }");
         assert!(errs.is_empty(), "errors: {:#?}", errs);
         assert_eq!(m.items.len(), 1);
-        let Item::Fn(f) = &m.items[0] else { panic!("expected fn") };
+        let Item::Fn(f) = &m.items[0] else {
+            panic!("expected fn")
+        };
         assert_eq!(f.name.name, "main");
         assert_eq!(f.params.len(), 0);
         assert!(f.return_ty.is_none());
@@ -1020,7 +1104,9 @@ mod tests {
     fn extern_with_variadic() {
         let (m, errs) = parse_str(r#"ex "c" fn printf(fmt:*u8, ...) -> i32"#);
         assert!(errs.is_empty(), "errors: {:#?}", errs);
-        let Item::Extern(e) = &m.items[0] else { panic!() };
+        let Item::Extern(e) = &m.items[0] else {
+            panic!()
+        };
         assert!(e.sig.variadic);
         assert_eq!(e.sig.params.len(), 1);
     }
@@ -1029,7 +1115,9 @@ mod tests {
     fn struct_decl() {
         let (m, errs) = parse_str("st Point { x:f64; y:f64; }");
         assert!(errs.is_empty(), "errors: {:#?}", errs);
-        let Item::Struct(s) = &m.items[0] else { panic!() };
+        let Item::Struct(s) = &m.items[0] else {
+            panic!()
+        };
         assert_eq!(s.fields.len(), 2);
     }
 
@@ -1070,12 +1158,18 @@ mod tests {
         assert!(errs.is_empty());
         let Item::Fn(f) = &m.items[0] else { panic!() };
         let tail = f.body.tail_expr.as_ref().unwrap();
-        let ExprKind::Binary { op, lhs, rhs } = &tail.kind else { panic!() };
+        let ExprKind::Binary { op, lhs, rhs } = &tail.kind else {
+            panic!()
+        };
         assert_eq!(*op, BinOp::Add);
         // lhs should be literal 2
-        let ExprKind::Lit(_) = lhs.kind else { panic!("expected literal lhs") };
+        let ExprKind::Lit(_) = lhs.kind else {
+            panic!("expected literal lhs")
+        };
         // rhs should be `3 * 4`
-        let ExprKind::Binary { op: r_op, .. } = &rhs.kind else { panic!() };
+        let ExprKind::Binary { op: r_op, .. } = &rhs.kind else {
+            panic!()
+        };
         assert_eq!(*r_op, BinOp::Mul);
     }
 }

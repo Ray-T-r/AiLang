@@ -284,7 +284,17 @@ impl Parser<'_> {
 
             // Literals
             IntLit | FloatLit | StrLit | CharLit | KwTrue | KwFalse | KwNil => {
+                let was_str = matches!(self.peek().kind, StrLit);
                 let lit = self.parse_literal()?;
+                // String literals with `${ident}` are desugared in place into a
+                // `+`-concat chain of literal parts and `to_str(ident)` calls.
+                if was_str {
+                    if let Lit::Str(ref content) = lit.kind {
+                        if let Some(interp) = crate::literal::desugar_interp(content, lit.span) {
+                            return Some(interp);
+                        }
+                    }
+                }
                 Some(Expr {
                     span: lit.span,
                     kind: ExprKind::Lit(lit),
@@ -299,11 +309,12 @@ impl Parser<'_> {
                 // a struct literal. `if cond { body }` (lowercase cond) and
                 // expression blocks remain unaffected.
                 if self.at(TokenKind::LBrace)
-                    && name.chars().next().map_or(false, |c| c.is_ascii_uppercase())
+                    && name
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_uppercase())
                 {
-                    return self.parse_struct_literal(
-                        ailang_syntax::ast::Ident { name, span }
-                    );
+                    return self.parse_struct_literal(ailang_syntax::ast::Ident { name, span });
                 }
                 Some(Expr {
                     kind: ExprKind::Ident(name),
@@ -320,10 +331,7 @@ impl Parser<'_> {
             }
 
             _ => {
-                self.error(
-                    format!("expected expression, got `{}`", tok.kind),
-                    tok.span,
-                );
+                self.error(format!("expected expression, got `{}`", tok.kind), tok.span);
                 None
             }
         }
@@ -455,7 +463,7 @@ impl Parser<'_> {
     fn is_map_literal(&self) -> bool {
         // Save position, scan a bit, decide.
         let save = self.cursor + 1; // past the `{`
-        // Empty `{}` is a map literal.
+                                    // Empty `{}` is a map literal.
         if self.tokens.get(save).map(|t| t.kind) == Some(TokenKind::RBrace) {
             return true;
         }
@@ -464,7 +472,9 @@ impl Parser<'_> {
         let mut depth_bracket = 0;
         let mut depth_brace = 0;
         for i in 0..16 {
-            let Some(t) = self.tokens.get(save + i) else { return false };
+            let Some(t) = self.tokens.get(save + i) else {
+                return false;
+            };
             match t.kind {
                 TokenKind::LParen => depth_paren += 1,
                 TokenKind::RParen => depth_paren -= 1,
@@ -477,9 +487,7 @@ impl Parser<'_> {
                     }
                     depth_brace -= 1;
                 }
-                TokenKind::Colon
-                    if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 =>
-                {
+                TokenKind::Colon if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
                     return true;
                 }
                 TokenKind::Semi | TokenKind::Walrus | TokenKind::Eq
@@ -502,28 +510,28 @@ fn binop_bp(k: TokenKind) -> Option<(BinOp, u8, u8)> {
     // collide with TokenKind variants, which would silently mis-pattern-match.
     use TokenKind::*;
     let (op, l, r) = match k {
-        OrOr     => (BinOp::Or,        10, 11),
-        AndAnd   => (BinOp::And,       15, 16),
-        EqEq     => (BinOp::Eq,        20, 21),
-        Neq      => (BinOp::Ne,        20, 21),
-        Lt       => (BinOp::Lt,        25, 26),
-        Le       => (BinOp::Le,        25, 26),
-        Gt       => (BinOp::Gt,        25, 26),
-        Ge       => (BinOp::Ge,        25, 26),
-        DotDot   => (BinOp::Range,     30, 31),
-        DotDotEq => (BinOp::RangeEq,   30, 31),
-        Pipe     => (BinOp::BitOr,     35, 36),
-        Caret    => (BinOp::BitXor,    40, 41),
-        Amp      => (BinOp::BitAnd,    45, 46),
-        Shl      => (BinOp::Shl,       50, 51),
-        Shr      => (BinOp::Shr,       50, 51),
-        Plus     => (BinOp::Add,       60, 61),
-        Minus    => (BinOp::Sub,       60, 61),
-        Concat   => (BinOp::Concat,    65, 66),
-        Star     => (BinOp::Mul,       70, 71),
-        Slash    => (BinOp::Div,       70, 71),
-        Percent  => (BinOp::Mod,       70, 71),
-        Coalesce => (BinOp::Coalesce,   5,  4), // right-assoc
+        OrOr => (BinOp::Or, 10, 11),
+        AndAnd => (BinOp::And, 15, 16),
+        EqEq => (BinOp::Eq, 20, 21),
+        Neq => (BinOp::Ne, 20, 21),
+        Lt => (BinOp::Lt, 25, 26),
+        Le => (BinOp::Le, 25, 26),
+        Gt => (BinOp::Gt, 25, 26),
+        Ge => (BinOp::Ge, 25, 26),
+        DotDot => (BinOp::Range, 30, 31),
+        DotDotEq => (BinOp::RangeEq, 30, 31),
+        Pipe => (BinOp::BitOr, 35, 36),
+        Caret => (BinOp::BitXor, 40, 41),
+        Amp => (BinOp::BitAnd, 45, 46),
+        Shl => (BinOp::Shl, 50, 51),
+        Shr => (BinOp::Shr, 50, 51),
+        Plus => (BinOp::Add, 60, 61),
+        Minus => (BinOp::Sub, 60, 61),
+        Concat => (BinOp::Concat, 65, 66),
+        Star => (BinOp::Mul, 70, 71),
+        Slash => (BinOp::Div, 70, 71),
+        Percent => (BinOp::Mod, 70, 71),
+        Coalesce => (BinOp::Coalesce, 5, 4), // right-assoc
         _ => return None,
     };
     Some((op, l, r))

@@ -1,8 +1,8 @@
 {
   "name": "vscode-ailang",
   "displayName": "AiLang",
-  "description": "Syntax highlighting and diagnostics for the AiLang programming language (.ail).",
-  "version": "0.2.0",
+  "description": "Syntax highlighting, completion, and diagnostics for the AiLang programming language (.ail).",
+  "version": "0.3.0",
   "publisher": "ailang",
   "engines": {
     "vscode": "^1.75.0"
@@ -45,6 +45,12 @@
         "path": "./syntaxes/ailang.tmLanguage.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "ailang",
+        "path": "./snippets/ailang.json"
+      }
+    ],
     "configuration": {
       "title": "AiLang",
       "properties": {
@@ -63,7 +69,14 @@
     "configurationDefaults": {
       "[ailang]": {
         "editor.tabSize": 2,
-        "editor.insertSpaces": true
+        "editor.insertSpaces": true,
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": false
+        },
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.wordBasedSuggestions": "currentDocument"
       },
       "code-runner.executorMap": {
         "ailang": "ailangc run $fullFileName"

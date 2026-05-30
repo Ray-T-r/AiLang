@@ -1,0 +1,23 @@
+// Regression: closure with a block body whose tail expression refers to a
+// block-local `mu` binding. Used to fail sema with "undefined name" because
+// check_block popped its scope before the lambda layer re-checked the tail.
+// See LambdaBody::Block handling in ailang-sema/src/lib.rs.
+
+fn run(label:str, f:fn()->i64) {
+  println(label)
+  println(f())
+}
+
+n := 10
+
+run("sum_1_to_10", fn() {
+  mu s := 0
+  lp i in 1..=n { s = s + i }
+  s
+})
+
+run("product_1_to_5", fn() {
+  mu p := 1
+  lp i in 1..=5 { p = p * i }
+  p
+})

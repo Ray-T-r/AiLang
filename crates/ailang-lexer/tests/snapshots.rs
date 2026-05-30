@@ -35,8 +35,8 @@ macro_rules! snap_example {
     };
 }
 
-snap_example!(hello,    "hello.ail");
+snap_example!(hello, "hello.ail");
 snap_example!(fizzbuzz, "fizzbuzz.ail");
-snap_example!(fib,      "fib.ail");
-snap_example!(wc,       "wc.ail");
-snap_example!(ffi,      "ffi.ail");
+snap_example!(fib, "fib.ail");
+snap_example!(wc, "wc.ail");
+snap_example!(ffi, "ffi.ail");

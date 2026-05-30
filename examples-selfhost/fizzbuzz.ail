@@ -1,0 +1,17 @@
+fn fizzbuzz(n) {
+  mu i := 1
+  lp i <= n {
+    if i % 15 == 0 {
+      println("FizzBuzz")
+    } el if i % 3 == 0 {
+      println("Fizz")
+    } el if i % 5 == 0 {
+      println("Buzz")
+    } el {
+      println(i)
+    }
+    i = i + 1
+  }
+  rt 0
+}
+x := fizzbuzz(20)

@@ -1,0 +1,32 @@
+// Empty aggregate-array literals now honor the declared / inferred element
+// type, and slice/reverse work over arrays of structs. Before, `mu xs:[T] := []`
+// miscompiled to `[i64]`, and slice/reverse had no aggregate arm.
+
+st Tok { kind: i64; text: str }
+
+// (a) annotated empty array, then push
+fn collect() -> [Tok] {
+  mu out:[Tok] := []
+  out = push(out, Tok(1, "fn"))
+  out = push(out, Tok(2, "main"))
+  out
+}
+
+// (b) inferred empty array, element type pinned by the first push
+mu ts := []
+ts = push(ts, Tok(7, "a"))
+ts = push(ts, Tok(8, "b"))
+ts = push(ts, Tok(9, "c"))
+
+cs := collect()
+println(len(cs))            // 2
+println(cs[1].text)         // main
+println(len(ts))            // 3
+
+// (c) slice + reverse over [Tok]
+mid := slice(ts, 1, 3)
+println(len(mid))           // 2
+println(mid[0].text)        // b
+rev := reverse(ts)
+println(rev[0].text)        // c
+println(rev[2].text)        // a

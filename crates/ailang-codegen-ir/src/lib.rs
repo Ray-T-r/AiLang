@@ -126,7 +126,9 @@ fn emit_expr_stmt(
             if (name == "println" || name == "print") && args.len() == 1 {
                 let arg = &args[0];
                 match &arg.kind {
-                    ExprKind::Lit(LitExpr { kind: Lit::Str(_), .. }) => {
+                    ExprKind::Lit(LitExpr {
+                        kind: Lit::Str(_), ..
+                    }) => {
                         let idx = *next_str;
                         *next_str += 1;
                         let bytes = strings[idx].as_bytes().len() + 1;
@@ -137,7 +139,10 @@ fn emit_expr_stmt(
                         );
                         return;
                     }
-                    ExprKind::Lit(LitExpr { kind: Lit::Int { value, .. }, .. }) => {
+                    ExprKind::Lit(LitExpr {
+                        kind: Lit::Int { value, .. },
+                        ..
+                    }) => {
                         let t = *next_tmp;
                         *next_tmp += 1;
                         let _ = writeln!(
@@ -151,7 +156,11 @@ fn emit_expr_stmt(
             }
         }
     }
-    let _ = writeln!(s, "  ; TODO M6+: expr {:?}", std::mem::discriminant(&e.kind));
+    let _ = writeln!(
+        s,
+        "  ; TODO M6+: expr {:?}",
+        std::mem::discriminant(&e.kind)
+    );
 }
 
 /// Collect every string literal appearing in `println("...")` calls so we
@@ -180,7 +189,10 @@ fn walk_expr(e: &Expr, out: &mut Vec<String>) {
     if let ExprKind::Call { callee, args } = &e.kind {
         if let ExprKind::Ident(n) = &callee.kind {
             if (n == "println" || n == "print") && args.len() == 1 {
-                if let ExprKind::Lit(LitExpr { kind: Lit::Str(s), .. }) = &args[0].kind {
+                if let ExprKind::Lit(LitExpr {
+                    kind: Lit::Str(s), ..
+                }) = &args[0].kind
+                {
                     out.push(s.clone());
                 }
             }

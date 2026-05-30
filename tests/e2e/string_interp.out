@@ -1,0 +1,11 @@
+hello, alice
+age=30, pi=3.14, ok=true
+alice is 30
+plain string, no $ here
+$dollar without brace, $5, $$
+${not an ident here} kept as-is
+{"json":"shape","ok":true}
+point 3,4
+next age 31
+upper ALICE
+first 10

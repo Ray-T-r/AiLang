@@ -8,7 +8,7 @@ license     = { workspace = true }
 [dependencies]
 ailang-syntax = { workspace = true }
 ailang-diag   = { workspace = true }
+ailang-lexer  = { workspace = true }
 
 [dev-dependencies]
-ailang-lexer = { workspace = true }
 insta        = { workspace = true }

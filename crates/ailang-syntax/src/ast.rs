@@ -24,6 +24,9 @@ pub enum Item {
     Enum(EnumDecl),
     Import(ImportDecl),
     Extern(ExternDecl),
+    /// `cinc "header.h"` — emit a C `#include <header.h>` so generated code
+    /// can see a C library's declarations, macros and typedefs.
+    CInclude(CIncludeDecl),
 }
 
 /// `en Name { Variant, Variant(field:T), … }` — sum type (tagged union).
@@ -75,6 +78,16 @@ pub struct Field {
 pub struct ImportDecl {
     pub path: StrLit,
     pub alias: Option<Ident>,
+    pub span: Span,
+}
+
+/// `cinc "header.h"` — a request to `#include <header.h>` in the generated C.
+/// Unlike `im`, this pulls in a C header (its declarations / macros / typedefs),
+/// not an AiLang module. Pair with `ex "lib" fn …` to declare the functions and
+/// link the library.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CIncludeDecl {
+    pub header: StrLit,
     pub span: Span,
 }
 
@@ -197,10 +210,17 @@ pub enum Pattern {
     Wildcard(Span),
     Literal(LitExpr),
     Binding(Ident),
-    Tuple { elems: Vec<Pattern>, span: Span },
+    Tuple {
+        elems: Vec<Pattern>,
+        span: Span,
+    },
     /// `Variant` or `Variant(x, y)` — matches against an ADT variant
     /// and binds its fields by position to the listed names.
-    Variant { name: Ident, bindings: Vec<Ident>, span: Span },
+    Variant {
+        name: Ident,
+        bindings: Vec<Ident>,
+        span: Span,
+    },
 }
 
 // ============================================================================
@@ -277,12 +297,27 @@ pub enum LambdaBody {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
     Concat,
-    Eq, Ne, Lt, Le, Gt, Ge,
-    And, Or,
-    BitAnd, BitOr, BitXor, Shl, Shr,
-    Range, RangeEq,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Range,
+    RangeEq,
     Coalesce,
 }
 
@@ -290,14 +325,27 @@ impl BinOp {
     pub fn symbol(self) -> &'static str {
         use BinOp::*;
         match self {
-            Add => "+",  Sub => "-",  Mul => "*",  Div => "/",  Mod => "%",
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            Mod => "%",
             Concat => "++",
-            Eq => "==",  Ne => "!=",
-            Lt => "<",   Le => "<=",  Gt => ">",   Ge => ">=",
-            And => "&&", Or => "||",
-            BitAnd => "&", BitOr => "|", BitXor => "^",
-            Shl => "<<", Shr => ">>",
-            Range => "..", RangeEq => "..=",
+            Eq => "==",
+            Ne => "!=",
+            Lt => "<",
+            Le => "<=",
+            Gt => ">",
+            Ge => ">=",
+            And => "&&",
+            Or => "||",
+            BitAnd => "&",
+            BitOr => "|",
+            BitXor => "^",
+            Shl => "<<",
+            Shr => ">>",
+            Range => "..",
+            RangeEq => "..=",
             Coalesce => "??",
         }
     }
@@ -335,8 +383,14 @@ pub struct LitExpr {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Lit {
     /// 64-bit signed by default; `i32`/`u8`/... suffix narrows it.
-    Int { value: i64, suffix: Option<NumSuffix> },
-    Float { value: f64, suffix: Option<FloatSuffix> },
+    Int {
+        value: i64,
+        suffix: Option<NumSuffix>,
+    },
+    Float {
+        value: f64,
+        suffix: Option<FloatSuffix>,
+    },
     /// Already-unescaped string contents (no surrounding quotes).
     Str(String),
     Char(char),
@@ -346,12 +400,21 @@ pub enum Lit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumSuffix {
-    I8, I16, I32, I64,
-    U8, U16, U32, U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FloatSuffix { F32, F64 }
+pub enum FloatSuffix {
+    F32,
+    F64,
+}
 
 // ============================================================================
 // Types
@@ -367,12 +430,15 @@ pub struct Type {
 pub enum TypeKind {
     /// Primitive name (`i64`, `str`, `bool`, ...) or user struct name.
     Path(String),
-    Array(Box<Type>),                // [T]
-    Map(Box<Type>, Box<Type>),       // {K:V}
-    Fn { params: Vec<Type>, ret: Option<Box<Type>> },
-    Ptr(Box<Type>),                  // *T  (FFI only)
-    Optional(Box<Type>),             // ?T
-    Result(Box<Type>),               // !T
+    Array(Box<Type>),          // [T]
+    Map(Box<Type>, Box<Type>), // {K:V}
+    Fn {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
+    Ptr(Box<Type>),      // *T  (FFI only)
+    Optional(Box<Type>), // ?T
+    Result(Box<Type>),   // !T
 }
 
 // ============================================================================
