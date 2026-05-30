@@ -50,20 +50,23 @@ use ailang_syntax::{Token, TokenKind};
 // unlinked for hello-world programs.
 
 static STDLIB_FILES: &[(&str, &str)] = &[
-    ("std/sock.ail",  include_str!("../../../std/sock.ail")),
-    ("std/http.ail",  include_str!("../../../std/http.ail")),
+    ("std/sock.ail", include_str!("../../../std/sock.ail")),
+    ("std/http.ail", include_str!("../../../std/http.ail")),
     ("std/redis.ail", include_str!("../../../std/redis.ail")),
-    ("std/pg.ail",    include_str!("../../../std/pg.ail")),
-    ("std/tls.ail",   include_str!("../../../std/tls.ail")),
-    ("std/ws.ail",    include_str!("../../../std/ws.ail")),
-    ("std/json.ail",  include_str!("../../../std/json.ail")),
-    ("std/math.ail",  include_str!("../../../std/math.ail")),
-    ("std/str.ail",   include_str!("../../../std/str.ail")),
-    ("std/time.ail",  include_str!("../../../std/time.ail")),
+    ("std/pg.ail", include_str!("../../../std/pg.ail")),
+    ("std/tls.ail", include_str!("../../../std/tls.ail")),
+    ("std/ws.ail", include_str!("../../../std/ws.ail")),
+    ("std/json.ail", include_str!("../../../std/json.ail")),
+    ("std/math.ail", include_str!("../../../std/math.ail")),
+    ("std/str.ail", include_str!("../../../std/str.ail")),
+    ("std/time.ail", include_str!("../../../std/time.ail")),
 ];
 
 fn stdlib_source(path: &str) -> Option<&'static str> {
-    STDLIB_FILES.iter().find(|(p, _)| *p == path).map(|(_, s)| *s)
+    STDLIB_FILES
+        .iter()
+        .find(|(p, _)| *p == path)
+        .map(|(_, s)| *s)
 }
 
 /// Exported fn name → owning stdlib path. Built once by parsing every
@@ -145,7 +148,11 @@ fn print_tokens(source: &str, tokens: &[Token], out: &mut dyn Write) {
     for tok in tokens {
         match tok.kind {
             TokenKind::Eof => {
-                let _ = writeln!(out, "{:>5}..{:<5}  {}", tok.span.start, tok.span.end, tok.kind);
+                let _ = writeln!(
+                    out,
+                    "{:>5}..{:<5}  {}",
+                    tok.span.start, tok.span.end, tok.kind
+                );
             }
             _ => {
                 let slice = tok.span.slice(source);
@@ -234,6 +241,11 @@ pub struct CompileOptions {
     /// Emit the generated source (C or LLVM IR depending on backend) and
     /// stop before invoking the C compiler.
     pub emit_c_only: bool,
+    /// Keep the generated C / LLVM IR file next to the binary instead of
+    /// deleting it after a successful compile. Off by default — the source
+    /// is a build intermediate, not an output. (A *failed* compile always
+    /// leaves it behind so the codegen can be inspected.)
+    pub keep_c: bool,
     /// Pass extra args (e.g. `-lgc`) to the linker. Reserved for M4+.
     pub extra_cc_args: Vec<String>,
     /// Verbose: print every command we run.
@@ -247,6 +259,7 @@ impl Default for CompileOptions {
         Self {
             output: None,
             emit_c_only: false,
+            keep_c: false,
             extra_cc_args: Vec::new(),
             verbose: false,
             backend: Backend::C,
@@ -268,7 +281,13 @@ pub fn compile(path: &Path, opts: &CompileOptions) -> Result<CompileResult, Driv
     // ---- Parse (recursively, following `im "path"` imports) ----
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut items: Vec<Item> = Vec::new();
-    parse_with_imports(path, &source, &mut items, &mut visited, /*is_root=*/ true)?;
+    parse_with_imports(
+        path,
+        &source,
+        &mut items,
+        &mut visited,
+        /*is_root=*/ true,
+    )?;
 
     // ---- Auto-import: pull in stdlib modules whose exported names appear
     //      in user code but haven't been defined or explicitly imported.
@@ -300,7 +319,10 @@ pub fn compile(path: &Path, opts: &CompileOptions) -> Result<CompileResult, Driv
     };
 
     if opts.emit_c_only {
-        return Ok(CompileResult { c_source: source_str, binary: None });
+        return Ok(CompileResult {
+            c_source: source_str,
+            binary: None,
+        });
     }
 
     // ---- Write tmp source and invoke clang ----
@@ -342,8 +364,10 @@ fn invoke_c_compiler(
         }
     };
 
-    // Write generated source (C or LLVM IR) to a temp file next to the
-    // binary so the user can inspect it if needed.
+    // Write the generated source (C or LLVM IR) to a file next to the binary
+    // for the C compiler to consume. It's a build intermediate: deleted once
+    // the binary links (unless `--keep-c`), but left in place on a compile
+    // failure so the offending codegen can be inspected.
     let mut tmp_path = bin_path.clone();
     tmp_path.set_extension(ext);
     fs::write(&tmp_path, src_text).map_err(|e| DriverError::Read {
@@ -446,12 +470,14 @@ fn invoke_c_compiler(
     }
 
     if opts.verbose {
-        eprintln!("ailangc: {} {}",
+        eprintln!(
+            "ailangc: {} {}",
             cc,
             cmd.get_args()
                 .map(|a| a.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
-                .join(" "));
+                .join(" ")
+        );
     }
 
     let status = cmd.status().map_err(|e| DriverError::CcSpawn {
@@ -459,10 +485,20 @@ fn invoke_c_compiler(
         source: e,
     })?;
     if !status.success() {
+        // Leave `tmp_path` on disk: clang's errors point into it, so it's
+        // the first thing you'd want to read when codegen emits bad C.
         return Err(DriverError::CcFailed {
             status: status.code().unwrap_or(-1),
         });
     }
+
+    // The binary is built; the generated source was only a means to it.
+    // Remove it unless the user asked to keep it. A leftover temp file must
+    // not fail an otherwise-successful build, so ignore any unlink error.
+    if !opts.keep_c {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
     Ok(bin_path)
 }
 
@@ -475,7 +511,11 @@ fn pkgconfig_prefix(pkg: &str) -> Option<String> {
         return None;
     }
     let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn brew_prefix(pkg: &str) -> Option<String> {
@@ -484,7 +524,11 @@ fn brew_prefix(pkg: &str) -> Option<String> {
         return None;
     }
     let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn read_source(path: &Path) -> Result<String, DriverError> {
@@ -575,17 +619,21 @@ fn parse_with_imports(
             let import_path = if stdlib_source(&imp.path.value).is_some() {
                 PathBuf::from(&imp.path.value)
             } else {
-                let candidates: Vec<PathBuf> = vec![
-                    dir.join(&imp.path.value),
-                    PathBuf::from(&imp.path.value),
-                ];
+                let candidates: Vec<PathBuf> =
+                    vec![dir.join(&imp.path.value), PathBuf::from(&imp.path.value)];
                 candidates
                     .iter()
                     .find(|c| c.exists())
                     .cloned()
                     .unwrap_or_else(|| candidates[0].clone())
             };
-            parse_with_imports(&import_path, root_source, items, visited, /*is_root=*/ false)?;
+            parse_with_imports(
+                &import_path,
+                root_source,
+                items,
+                visited,
+                /*is_root=*/ false,
+            )?;
         }
     }
 
@@ -614,12 +662,20 @@ fn auto_import_stdlib(
         let mut defined: HashSet<String> = HashSet::new();
         for item in items.iter() {
             match item {
-                Item::Fn(f) => { defined.insert(f.name.name.clone()); }
-                Item::Extern(e) => { defined.insert(e.sig.name.name.clone()); }
-                Item::Struct(s) => { defined.insert(s.name.name.clone()); }
+                Item::Fn(f) => {
+                    defined.insert(f.name.name.clone());
+                }
+                Item::Extern(e) => {
+                    defined.insert(e.sig.name.name.clone());
+                }
+                Item::Struct(s) => {
+                    defined.insert(s.name.name.clone());
+                }
                 Item::Enum(e) => {
                     defined.insert(e.name.name.clone());
-                    for v in &e.variants { defined.insert(v.name.name.clone()); }
+                    for v in &e.variants {
+                        defined.insert(v.name.name.clone());
+                    }
                 }
                 Item::Import(_) => {}
                 Item::CInclude(_) => {}
@@ -700,7 +756,9 @@ fn collect_in_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
         }
         Stmt::Match(m) => {
             collect_in_expr(&m.scrutinee, out);
-            for arm in &m.arms { collect_in_expr(&arm.body, out); }
+            for arm in &m.arms {
+                collect_in_expr(&arm.body, out);
+            }
         }
     }
 }
@@ -719,10 +777,14 @@ fn collect_in_else(else_branch: Option<&ElseBranch>, out: &mut HashSet<String>) 
 
 fn collect_in_expr(e: &Expr, out: &mut HashSet<String>) {
     match &e.kind {
-        ExprKind::Ident(n) => { out.insert(n.clone()); }
+        ExprKind::Ident(n) => {
+            out.insert(n.clone());
+        }
         ExprKind::Call { callee, args } => {
             collect_in_expr(callee, out);
-            for a in args { collect_in_expr(a, out); }
+            for a in args {
+                collect_in_expr(a, out);
+            }
         }
         ExprKind::Index { container, index } => {
             collect_in_expr(container, out);
@@ -747,13 +809,27 @@ fn collect_in_expr(e: &Expr, out: &mut HashSet<String>) {
             LambdaBody::Expr(inner) => collect_in_expr(inner, out),
             LambdaBody::Block(b) => collect_in_block(b, out),
         },
-        ExprKind::Array(items) => for it in items { collect_in_expr(it, out); },
-        ExprKind::Map(entries) => for (k, v) in entries {
-            collect_in_expr(k, out);
-            collect_in_expr(v, out);
-        },
-        ExprKind::Tuple(items) => for it in items { collect_in_expr(it, out); },
-        ExprKind::StructLit { fields, .. } => for (_, v) in fields { collect_in_expr(v, out); },
+        ExprKind::Array(items) => {
+            for it in items {
+                collect_in_expr(it, out);
+            }
+        }
+        ExprKind::Map(entries) => {
+            for (k, v) in entries {
+                collect_in_expr(k, out);
+                collect_in_expr(v, out);
+            }
+        }
+        ExprKind::Tuple(items) => {
+            for it in items {
+                collect_in_expr(it, out);
+            }
+        }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, v) in fields {
+                collect_in_expr(v, out);
+            }
+        }
         ExprKind::Block(b) => collect_in_block(b, out),
         ExprKind::If(i) => {
             collect_in_expr(&i.cond, out);
@@ -762,10 +838,11 @@ fn collect_in_expr(e: &Expr, out: &mut HashSet<String>) {
         }
         ExprKind::Match(m) => {
             collect_in_expr(&m.scrutinee, out);
-            for arm in &m.arms { collect_in_expr(&arm.body, out); }
+            for arm in &m.arms {
+                collect_in_expr(&arm.body, out);
+            }
         }
         ExprKind::Try(inner) => collect_in_expr(inner, out),
         ExprKind::Lit(_) | ExprKind::Underscore => {}
     }
 }
-
