@@ -2054,6 +2054,20 @@ fn is_tparam(f:Func, ty:str) -> bool {
   lp i < len(f.tparams) { if f.tparams[i] == ty rt true   i += 1 }
   false
 }
+fn is_array_tparam(f:Func, ty:str) -> bool {        // ty is `[T]` for a type param T?
+  mu i := 0
+  lp i < len(f.tparams) { if ty == "[" + f.tparams[i] + "]" rt true   i += 1 }
+  false
+}
+fn subst_tparam(f:Func, ty:str, concrete:str) -> str {   // T→concrete, [T]→[concrete], else as-is
+  mu i := 0
+  lp i < len(f.tparams) {
+    if ty == f.tparams[i] rt concrete
+    if ty == "[" + f.tparams[i] + "]" rt "[" + concrete + "]"
+    i += 1
+  }
+  ty
+}
 fn find_gfn(sy:*Syms, name:str) -> Func {
   mu i := 0
   lp i < len(sy.gfns) {
@@ -2067,7 +2081,10 @@ fn find_gfn(sy:*Syms, name:str) -> Func {
 fn generic_T(sy:*Syms, f:Func, args:[Expr]) -> str {
   mu i := 0
   lp i < len(f.ptypes) {
-    if is_tparam(f, f.ptypes[i]) && i < len(args) rt type_of_expr(sy, args[i])
+    if i < len(args) {
+      if is_tparam(f, f.ptypes[i]) rt type_of_expr(sy, args[i])                       // scalar `T` param
+      if is_array_tparam(f, f.ptypes[i]) rt elem_of_ann(type_of_expr(sy, args[i]))    // `[T]` param → arg's elem type
+    }
     i += 1
   }
   "i64"
@@ -2096,7 +2113,7 @@ fn gen_generic_call(sy:*Syms, name:str, args:[Expr]) -> str {
   mu o := "({ "
   mu i := 0
   lp i < len(f.params) {
-    pt := if is_tparam(f, f.ptypes[i]) { gt } el { f.ptypes[i] }
+    pt := subst_tparam(f, f.ptypes[i], gt)   // substitutes both `T` and `[T]`
     set_ty(sy, f.params[i], pt)
     o = o + cty(pt) + " v_" + f.params[i] + " = " + gen_expr(sy, args[i]) + "; "
     i += 1
