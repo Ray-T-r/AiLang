@@ -2855,17 +2855,15 @@ fn gen_struct_ctor(sd:StructDef) -> str {
     out = out + cty(sd.ftypes[i]) + " " + sd.fnames[i]
     i += 1
   }
-  // NOTE: result var is `v`; a struct field literally named `v` collides (a
-  // known pre-existing bug). The clean fix (rename to `__s`) currently trips the
-  // heap-sensitivity defect during self-compile and breaks the fixpoint — see
-  // the spawned heap-bug task. Left as `v` until that's root-caused.
-  out = out + "){ s_" + sd.name + " v; "
+  // Result var is `__s` (not `v`), so a struct field literally named `v` doesn't
+  // collide with the ctor local (was a known bug: `mk_Box(int64_t v){ s_Box v; … }`).
+  out = out + "){ s_" + sd.name + " __s; "
   i = 0
   lp i < len(sd.fnames) {
-    out = out + "v." + sd.fnames[i] + "=" + sd.fnames[i] + "; "
+    out = out + "__s." + sd.fnames[i] + "=" + sd.fnames[i] + "; "
     i += 1
   }
-  out + "return v; }\n"
+  out + "return __s; }\n"
 }
 
 // --- enum emission (tagged union, boxed self-recursive fields) ---
