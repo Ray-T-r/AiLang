@@ -1435,6 +1435,13 @@ fn check_expr_inner(
             if let Some(sd) = env.structs.get(&name.name) {
                 let known: std::collections::HashSet<_> =
                     sd.fields.iter().map(|f| f.name.name.clone()).collect();
+                // Declared field types, cloned so the `env.structs` borrow ends
+                // before `check_expr` / `env.record` reborrow `env` below.
+                let field_tys: std::collections::HashMap<String, Ty> = sd
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.name.clone(), ast_ty_kind_to_ty(&f.ty)))
+                    .collect();
                 for (fname, fval) in fields {
                     check_expr(fval, fns, env, diags);
                     if !known.contains(&fname.name) {
@@ -1442,6 +1449,23 @@ fn check_expr_inner(
                             format!("struct `{}` has no field `{}`", name.name, fname.name),
                             fname.span,
                         ));
+                    }
+                    // Pin an empty `{}` / `[]` constructor arg to the field's
+                    // declared type. Without this it defaults to `{i64:i64}` /
+                    // `[i64]`, so a `{str:str}` field built from `{}` would store
+                    // string keys/values in an *atomic* (unscanned) map — Boehm
+                    // then reclaims them mid-run, a use-after-free that only bites
+                    // once allocation triggers a collection (and `clang -O1+`
+                    // drops the stack temporaries that otherwise mask it).
+                    let empty_agg = match &fval.kind {
+                        ExprKind::Map(es) => es.is_empty(),
+                        ExprKind::Array(es) => es.is_empty(),
+                        _ => false,
+                    };
+                    if empty_agg {
+                        if let Some(fty) = field_tys.get(&fname.name) {
+                            env.record(fval.span, fty.clone());
+                        }
                     }
                 }
             } else {

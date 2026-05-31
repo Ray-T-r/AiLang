@@ -288,12 +288,24 @@ pub(crate) fn c_ty_for_decl(ty: Option<&Type>, init: &Expr, ctx: &EmitCtx) -> St
     if let Some(t) = ty {
         return c_ty_for(&ailang_sema::ast_ty_kind_to_ty(t));
     }
-    // Trust sema's recorded type when it's a struct/enum or a pointer — the
-    // syntactic fallback below can't tell `Some(42)` is a `Maybe`, nor that
-    // `&r` / an `ex fn -> *T` call yields a pointer rather than an i64.
-    if let Some(t) = ctx.fns.expr_types.get(&init.span) {
-        if matches!(t, Ty::Struct(_) | Ty::Ptr(_)) {
-            return c_ty_for(t);
+    // Trust sema's recorded type whenever it's concrete — the syntactic fallback
+    // below only understands literal/array/map *shapes*, so a non-literal
+    // initializer whose value is a struct, pointer, array, map, str, … (e.g.
+    // `ys := s.items` where `items:[str]`) would otherwise wrongly default to
+    // `int64_t`. Excluded: an empty aggregate still `Unknown` in its element/KV
+    // (the syntactic path + later refinement do better), and a lambda (sema
+    // records its *return* type, but the binding is the closure value).
+    if !matches!(&init.kind, ExprKind::Lambda { .. }) {
+        if let Some(t) = ctx.fns.expr_types.get(&init.span) {
+            let concrete = match t {
+                Ty::Unknown | Ty::Unit => false,
+                Ty::Array(e) => !matches!(**e, Ty::Unknown),
+                Ty::Map(k, v) => !matches!(**k, Ty::Unknown) && !matches!(**v, Ty::Unknown),
+                _ => true,
+            };
+            if concrete {
+                return c_ty_for(t);
+            }
         }
     }
     // For a plain identifier initializer (`mu x := y`), defer to sema's
