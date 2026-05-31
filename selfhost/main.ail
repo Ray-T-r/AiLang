@@ -696,8 +696,14 @@ fn parse_primary(p:*P) -> Expr {
     eat(p, TK_LPAREN())
     mu params:[str] := []
     lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
-      if ckind(p) == TK_IDENT() { params = push(params, ctext(p)); adv(p) }
-      if ckind(p) == TK_COMMA() { adv(p) }
+      if ckind(p) == TK_IDENT() {
+        params = push(params, ctext(p)); adv(p)
+        if ckind(p) == TK_COLON() { adv(p); parse_type(p) }   // skip optional `: Type` (Lambda keeps names only)
+      } el if ckind(p) == TK_COMMA() {
+        adv(p)
+      } el {
+        adv(p)                                                // defensive: a stray token must never spin this loop
+      }
     }
     eat(p, TK_RPAREN())
     rt Lambda(params, parse_expr(p), id)
