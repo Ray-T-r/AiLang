@@ -211,7 +211,9 @@ pretty-print), **ADTs / tagged unions** (`en Maybe { None, Some(v:i64) }`
 capture** (lifted to top-level static fns, `{fn, env}` fat pointers,
 env GC-allocated, by-value capture; **str-returning closures supported**),
 **implicit return from tail-position `if`/`mt`** (no explicit `rt`
-needed on each branch), `mu` params for in-fn mutation, plus a broad
+needed on each branch), **tuples / multi-return** (`fn divmod(a,b) -> (i64,i64)`
+returns `(a/b, a%b)`; the caller destructures with `q, r := divmod(17,5)`,
+`_` ignores a slot), `mu` params for in-fn mutation, plus a broad
 set of always-available builtins:
 
 - **I/O & process**: `read_file`, `write_file`, `read_line`, `args`,
@@ -351,6 +353,21 @@ fn fib(n) {
 }
 
 println(fib(30))                               // 832040 (no fn main needed)
+```
+
+### Multi-return via tuples
+
+```
+fn divmod(a, b) -> (i64, i64) {
+  rt (a / b, a % b)                            // a tuple literal
+}
+
+q, r := divmod(17, 5)                          // destructure (Go-style, no parens)
+println(q)                                     // 3
+println(r)                                     // 2
+
+_, rem := divmod(20, 6)                        // `_` ignores a slot
+println(rem)                                   // 2
 ```
 
 ### Unified `lp` loop + compound assign
