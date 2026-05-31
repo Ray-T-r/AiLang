@@ -1,0 +1,24 @@
+// mapval.ail — map (K,V) combos beyond the original 4 hardcoded ones. The map
+// runtime is now emitted per (key, value) pair like arr_<T>, so struct-valued
+// and f64-keyed maps compile. Kept to ailangc's supported surface for fidelity:
+// string-keyed struct values + f64-keyed scalar values (ailangc folds i64-keyed
+// and f64-*valued* maps to i64, so those aren't clean fidelity samples).
+st Pt { x:i64; y:i64 }
+
+// struct-valued map, string key — a small symbol table.
+syms := {"o": Pt(3, 4), "p": Pt(7, 9)}
+a := syms["o"]
+b := syms["p"]
+println(a.x)               // 3
+println(a.y)               // 4
+println(b.x)               // 7
+println(b.y)               // 9
+println(len(syms))         // 2
+println(has(syms, "p"))    // true
+println(has(syms, "z"))    // false
+
+// f64-keyed map.
+fk := {1.5: 100, 2.5: 200}
+println(fk[1.5])           // 100
+println(fk[2.5])           // 200
+println(fk[9.9])           // 0  (missing → default)

@@ -1,0 +1,52 @@
+// builtins.ail — exercise the Phase 1 builtins. Output must be byte-identical
+// under `ailangc run` and the self-hosted compiler (the verify.sh oracle).
+
+// --- string predicates / search ---
+println(contains("hello world", "wor"))   // 1
+println(contains("hello", "xyz"))          // 0
+println(starts_with("foobar", "foo"))      // 1
+println(ends_with("foobar", "bar"))        // 1
+println(index_of("abcdef", "cd"))          // 2
+println(index_of("abcdef", "zz"))          // -1
+
+// --- string transforms ---
+println(to_upper("Hello, World!"))         // HELLO, WORLD!
+println(to_lower("Hello, World!"))         // hello, world!
+println(trim("   spaced   "))              // spaced
+println(replace("a.b.c.d", ".", "-"))      // a-b-c-d
+println(repeat("ab", 3))                   // ababab
+println(pad_left("42", 5, "0"))            // 00042
+println(pad_right("42", 5, "."))           // 42...
+println(chr(65))                           // A
+println(ord("A"))                          // 65
+println(str_to_bool("true"))               // 1
+println(str_to_bool("nope"))               // 0
+
+// --- split / join ---
+parts := split("a,b,c", ",")
+println(len(parts))                        // 3
+println(parts[1])                          // b
+println(join(parts, "|"))                  // a|b|c
+nums := [10, 20, 30]
+println(join(nums, "+"))                   // 10+20+30
+
+// --- numeric ---
+println(abs(0 - 7))                        // 7
+println(abs(3.5 - 9.0))                    // 5.5
+println(sign(0 - 4))                       // -1
+println(sign(9))                           // 1
+println(clamp(15, 0, 10))                  // 10
+println(clamp(0 - 5, 0, 10))               // 0
+
+// --- array contains / index_of / pop ---
+println(contains(nums, 20))                // 1
+println(index_of(nums, 30))                // 2
+popped := pop(nums)
+println(len(popped))                       // 2
+
+// --- format (i64 via a variable so %lld gets a real int64_t) ---
+n := 42
+println(format("%lld and %s and %g", n, "hi", 3.25))   // 42 and hi and 3.25
+
+// --- get_env of an unset var → "" ---
+println("[" + get_env("AILANG_DEFINITELY_UNSET_XYZ") + "]")   // []

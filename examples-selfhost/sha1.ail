@@ -1,0 +1,8 @@
+// sha1.ail — the SHA-1 digest is deterministic, so its byte output is identical
+// under ailangc and the self-hosted compiler. This also exercises the OpenSSL
+// link path (sha1 lives in the TLS/libcrypto section). Full TLS handshakes and
+// live Postgres aren't deterministically testable, so they're covered by
+// std/{tls,ws,pg}.ail compiling rather than by a fidelity sample.
+println(sha1("abc"))                 // a9993e36…
+println(sha1(""))                    // da39a3ee…
+println(len(sha1("hello world")))    // 20

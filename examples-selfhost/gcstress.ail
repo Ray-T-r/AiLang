@@ -1,0 +1,16 @@
+// gcstress.ail — hammer the allocator with ~4M transient strings.
+//
+// Each iteration allocates two short-lived strings (int_to_str → GC_MALLOC,
+// then scat → GC_MALLOC) and keeps only a running integer. With Boehm GC the
+// collector reclaims the garbage, so peak memory stays bounded; a
+// malloc-without-free build would grow to hundreds of MB. The printed value
+// (total bytes seen) is deterministic, so it matches under both ailangc and
+// the self-hosted compiler — and the run completing at all proves GC works.
+mu i := 0
+mu acc := 0
+lp i < 2000000 {
+  s := "item-" + int_to_str(i)
+  acc = acc + len(s)
+  i += 1
+}
+println(acc)

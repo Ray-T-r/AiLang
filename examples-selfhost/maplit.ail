@@ -1,0 +1,12 @@
+// maplit.ail — non-empty map literals {k: v, …} (Phase 5). Type inferred from
+// the first entry: {i64:i64} and {str:str} below.
+m := {1: 10, 2: 20, 3: 30}
+println(m[2])              // 20
+println(m[99])             // 0  (missing → default)
+println(len(m))            // 3
+println(has(m, 3))         // true
+
+names := {"a": "alpha", "b": "beta"}
+println(names["a"])        // alpha
+println(names["b"])        // beta
+println(len(names))        // 2

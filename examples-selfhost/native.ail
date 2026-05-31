@@ -1,0 +1,15 @@
+// native.ail — Phase 2 native builtins that are deterministic (so output is
+// identical under ailangc and the self-hosted compiler). time_iso(ms) and the
+// regex helpers go through the same libc (gmtime_r/strftime, regcomp/regexec),
+// so both compilers agree. Sockets / fork / now_ms are non-deterministic and
+// are covered by std/ compilation + a manual smoke test instead.
+//
+// Only time + regex are mentioned here, so the gating must emit <time.h> and
+// <regex.h> but NOT <sys/socket.h> — proving the optional-section gate works.
+
+println(time_iso(0))                          // 1970-01-01T00:00:00Z
+println(time_iso(1700000000000))              // 2023-11-14T22:13:20Z
+println(regex_match("^h.*o$", "hello"))       // true
+println(regex_match("^x", "hello"))           // false
+println(regex_find("[0-9]+", "abc123def"))    // 123
+println(regex_find("z+", "hello"))            // (empty line)
