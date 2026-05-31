@@ -3983,6 +3983,42 @@ fn has_import(src:str) -> bool {
 // `seen` set blocks re-imports and cycles. Paths resolve relative to `dir`.
 // Fast path: a source with no imports is returned verbatim (no reconstruction),
 // so the overwhelmingly common single-file case is byte-for-byte unchanged.
+fn is_math_export(nm:str) -> bool {
+  if nm == "sqrt" || nm == "pow" || nm == "sin" || nm == "cos" || nm == "tan" rt true
+  if nm == "log" || nm == "log2" || nm == "log10" || nm == "exp" rt true
+  if nm == "floor" || nm == "ceil" || nm == "rand" || nm == "srand" rt true
+  if nm == "min" || nm == "max" || nm == "ipow" || nm == "gcd" rt true
+  false
+}
+// Auto-import: prepend `im "std/…"` for std exports referenced-but-not-defined
+// (mirrors ailangc's driver, scaled to math+sock — the only modules the corpus
+// auto-imports). Token-based, so names inside strings/comments don't trigger
+// (main.ail mentions `max`/`sqrt` only in C-string literals → no IDENT match →
+// returns "" → fixpoint-safe).
+fn auto_imports(src:str) -> str {
+  toks := lex(src)
+  mu defined:{str:str} := {}
+  mu i := 0
+  lp i + 1 < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "fn" && toks[i + 1].kind == TK_IDENT() { defined[toks[i + 1].text] = "1" }
+    i += 1
+  }
+  mu need_math := false
+  mu need_sock := false
+  i = 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && has(defined, toks[i].text) == false {
+      nm := toks[i].text
+      if is_math_export(nm) { need_math = true }
+      if nm == "env_int" { need_sock = true }
+    }
+    i += 1
+  }
+  mu out := ""
+  if need_math { out = out + "im \"std/math.ail\"\n" }
+  if need_sock { out = out + "im \"std/sock.ail\"\n" }
+  out
+}
 fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
   if has_import(src) == false rt src
   mu out := ""
@@ -4017,6 +4053,7 @@ input := av[0]
 outbin := av[1]
 
 mu src := read_file(input)
+src = auto_imports(src) + src        // inject `im "std/…"` for referenced std exports
 if has_import(src) {
   mu seen:{str:str} := {}
   src = resolve_imports(src, dirname(input), seen)
