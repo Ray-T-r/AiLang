@@ -266,6 +266,7 @@ en Expr {
   IfE(cond:Expr, then:Expr, els:Expr),   // if c { e } el { e } as an expression
   Try(e:Expr),                           // e?  — propagate err to the enclosing fn
   Lambda(params:[str], body:Expr, lamid:i64),   // fn(a,b) expr — HOF arg (inlined) OR first-class closure value (lifted); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
+  Tuple(elems:[Expr]),                   // (a, b, …) — tuple literal, for multi-return
   Bad,
 }
 
@@ -282,6 +283,7 @@ st EnumDef { name:str; vnames:[str]; vftypes:[str] }
 
 en Stmt {
   SDecl(name:str, e:Expr),       // name := expr  (or  mu name := expr)  — declares
+  SDestructure(names:[str], e:Expr),  // a, b := expr — destructure a tuple ("_" slot ignores)
   SAssign(name:str, e:Expr),     // name = expr   — reassigns an existing binding
   SIdxAssign(obj:Expr, idx:Expr, e:Expr),  // obj[idx] = expr
   SFieldAssign(obj:Expr, fname:str, e:Expr), // obj.field = expr
@@ -369,6 +371,7 @@ fn pipe_call(lhs:Expr, rhs:Expr) -> Expr {
   mt rhs {
     Var(n)             => Call(n, [lhs]);
     Call(f, a)         => Call(f, prepend_arg(lhs, a));
+    Tuple(tes)         => rhs;
     Num(v)             => rhs;
     Flt(fs)            => rhs;
     Str(s)             => rhs;
@@ -582,6 +585,7 @@ fn char_code(s:str) -> i64 {
 fn is_bad(e:Expr) -> bool {
   mt e {
     Bad                => true;
+    Tuple(tes)         => false;
     Num(v)             => false;
     Flt(fs)            => false;
     Str(s)             => false;
@@ -620,6 +624,7 @@ fn subst_args(es:[Expr], nm:str, repl:Expr) -> [Expr] {
 fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
   mt e {
     Var(n)             => subst_var_hit(n, nm, repl, e);
+    Tuple(tes)         => Tuple(subst_args(tes,nm,repl));
     Bin(o,a,b)         => Bin(o, subst_var(a,nm,repl), subst_var(b,nm,repl));
     Unary(o,x)         => Unary(o, subst_var(x,nm,repl));
     Call(f,ar)         => Call(f, subst_args(ar,nm,repl));
@@ -901,6 +906,18 @@ fn parse_primary(p:*P) -> Expr {
   if k == TK_LPAREN() {
     adv(p)
     inner := parse_expr(p)
+    // `(a, b, …)` — a tuple literal (multi-return). A lone `(e)` stays a
+    // grouped expression (collapses to the inner expr, as before).
+    if ckind(p) == TK_COMMA() {
+      mu elems:[Expr] := [inner]
+      lp ckind(p) == TK_COMMA() {
+        adv(p)
+        if ckind(p) == TK_RPAREN() { br }   // tolerate a trailing comma
+        elems = push(elems, parse_expr(p))
+      }
+      eat(p, TK_RPAREN())
+      rt Tuple(elems)
+    }
     eat(p, TK_RPAREN())
     rt inner
   }
@@ -926,6 +943,31 @@ fn parse_block(p:*P) -> [Stmt] {
     body = push(body, parse_stmt(p))
   }
   body
+}
+
+// Lookahead: does a statement start a tuple destructure `IDENT (, IDENT)+ :=`?
+// (the `+` — at least one comma — keeps a plain `name :=` on the SDecl path.)
+fn is_destructure_ahead(p:*P) -> bool {
+  if ckind(p) != TK_IDENT() { rt false }
+  mu i := p.pos + 1
+  if i >= len(p.toks) || p.toks[i].kind != TK_COMMA() { rt false }
+  lp i < len(p.toks) && p.toks[i].kind == TK_COMMA() {
+    i = i + 1
+    if i >= len(p.toks) || p.toks[i].kind != TK_IDENT() { rt false }
+    i = i + 1
+  }
+  i < len(p.toks) && p.toks[i].kind == TK_WALRUS()
+}
+// Parse `a, b, … := expr`. A name of "_" marks an ignored slot.
+fn parse_destructure(p:*P) -> Stmt {
+  mu names:[str] := []
+  lp ckind(p) == TK_IDENT() {
+    names = push(names, ctext(p))
+    adv(p)
+    if ckind(p) == TK_COMMA() { adv(p) } el { br }
+  }
+  eat(p, TK_WALRUS())               // :=
+  SDestructure(names, parse_expr(p))
 }
 
 fn parse_stmt(p:*P) -> Stmt {
@@ -998,6 +1040,7 @@ fn parse_stmt(p:*P) -> Stmt {
   // empty array literal's element type (`mu xs:[Token] := []`).
   if k == TK_IDENT() && t == "mu" {
     adv(p)
+    if is_destructure_ahead(p) { rt parse_destructure(p) }   // mu a, b := …
     name := ctext(p)
     adv(p)                          // name
     mu ann := ""
@@ -1005,6 +1048,8 @@ fn parse_stmt(p:*P) -> Stmt {
     eat(p, TK_WALRUS())             // :=
     rt SDecl(name, parse_decl_rhs(p, ann))
   }
+  // `a, b := expr` — tuple destructure (must precede the single-name `name :=`).
+  if is_destructure_ahead(p) { rt parse_destructure(p) }
   // `name := expr` — new binding
   if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_WALRUS() {
     name := t
@@ -1080,6 +1125,7 @@ fn mk_lvalue_assign(lhs:Expr, rhs:Expr) -> Stmt {
   mt lhs {
     Index(obj, idx)  => SIdxAssign(obj, idx, rhs);
     Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs);
+    Tuple(tes)       => SExpr(lhs);
     Num(v)           => SExpr(lhs);
     Flt(fs)          => SExpr(lhs);
     Str(s)           => SExpr(lhs);
@@ -1112,6 +1158,7 @@ fn parse_decl_rhs(p:*P, ann:str) -> Expr {
 fn stamp_array_ann(e:Expr, ety:str) -> Expr {
   mt e {
     Array(elems, old) => stamp_if_empty(elems, old, ety);
+    Tuple(tes)        => e;
     Num(v)            => e;
     Flt(fs)           => e;
     Str(s)            => e;
@@ -1135,6 +1182,7 @@ fn stamp_array_ann(e:Expr, ety:str) -> Expr {
 fn stamp_map_ann(e:Expr, mty:str) -> Expr {
   mt e {
     MapLit(old,mks,mvs) => MapLit(mty, mks, mvs);
+    Tuple(tes)        => e;
     Array(elems, old) => e;
     Addr(x)           => e;
     Match(sc,vn,vb,bd) => e;
@@ -1245,6 +1293,22 @@ fn parse_type(p:*P) -> str {
     eat(p, TK_RBRACE())               // }
     rt "{" + kt + ":" + vt + "}"
   }
+  // `(T1, T2, …)` — a tuple type (multi-return). Encoded "(T1;T2;…)". A single
+  // `(T)` with no comma collapses to the inner type.
+  if ckind(p) == TK_LPAREN() {
+    adv(p)                            // (
+    mu inner := "("
+    mu n := 0
+    lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+      if n > 0 { inner = inner + ";" }
+      inner = inner + parse_type(p)
+      n += 1
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_RPAREN())               // )
+    if n == 1 { rt substring(inner, 1, len(inner)) }   // (T) → T
+    rt inner + ")"
+  }
   // `fn(T,...) -> R` — a function/closure type. Encoded compactly as
   // "@fn(<pty>,...)<ret>" (e.g. "@fn()i64", "@fn(i64)i64"); `cty` maps it to
   // closure_t. Must precede the bare-IDENT branch so `fn` isn't read as a type
@@ -1300,6 +1364,40 @@ fn fn_type_of(np:i64, ret:str) -> str {
 // The pointee type of `ty` if it's a pointer, else `ty` unchanged. Used so
 // `p.field` / `p[i]` on a `*T` looks through to T's fields/elements.
 fn under_ptr(ty:str) -> str { if is_ptr_ann(ty) { deref_ann(ty) } el { ty } }
+
+// Tuple type "(T1;T2;…)": paren-prefixed, ';'-joined element type names — a new
+// prefix distinct from '[' '{' '*' '!' '@' and idents. Used for multi-return.
+// MVP: elements are flat (no nested tuples), so a flat ';' split is exact.
+fn is_tuple_ann(ty:str) -> bool { len(ty) >= 2 && ty[0] == 40 }   // '('
+fn tuple_elems(ty:str) -> [str] {
+  mu out:[str] := []
+  mu cur := ""
+  mu i := 1
+  lp i < len(ty) - 1 {                 // between the outer '(' and ')'
+    if ty[i] == 59 {                    // ';' — element separator
+      out = push(out, cur)
+      cur = ""
+    } el {
+      cur = cur + substring(ty, i, i + 1)
+    }
+    i += 1
+  }
+  out = push(out, cur)
+  out
+}
+// The C struct suffix for a tuple shape: arr_suffix of each element, joined by
+// '_' (e.g. "(i64;i64)" → "i64_i64", "(str;i64)" → "str_i64").
+fn tuple_suffix(ty:str) -> str {
+  es := tuple_elems(ty)
+  mu s := ""
+  mu i := 0
+  lp i < len(es) {
+    if i > 0 { s = s + "_" }
+    s = s + arr_suffix(es[i])
+    i += 1
+  }
+  s
+}
 
 fn parse_func(p:*P) -> Func {
   adv(p)                            // `fn`
@@ -1505,6 +1603,7 @@ fn cty(ty:str) -> str {
   if is_ptr_ann(ty) rt cty(deref_ann(ty)) + "*"                  // *T → <cty(T)>*
   if is_result_ann(ty) rt "res_" + arr_suffix(result_inner(ty)) // !T → res_T
   if is_fn_ann(ty) rt "closure_t"                               // fn(...)->R → closure_t
+  if is_tuple_ann(ty) rt "tup_" + tuple_suffix(ty)              // (T1;T2) → tup_T1_T2
   "s_" + ty               // a struct → its typedef name
 }
 
@@ -1546,6 +1645,7 @@ fn type_of_expr(sy:*Syms, e:Expr) -> str {
     IfE(c,t,el2)     => type_of_expr(sy, t);
     Try(e)           => result_inner(type_of_expr(sy, e));
     Lambda(ps,b,id)  => fn_type_of(len(ps), type_of_expr(sy, b));
+    Tuple(elems)     => tuple_type_of(sy, elems);
     Bad              => "i64";
   }
 }
@@ -1731,6 +1831,7 @@ fn gen_expr(sy:*Syms, e:Expr) -> str {
     IfE(c,t,el2)     => gen_ife(sy, c, t, el2);
     Try(e)           => gen_try(sy, e);
     Lambda(ps,b,id)  => gen_lambda(sy, id);
+    Tuple(elems)     => gen_tuple_lit(sy, elems);
     Bad              => "0";
   }
 }
@@ -1920,6 +2021,7 @@ fn lam_params(e:Expr) -> [str] {
     Field(o,f)       => empty_strs();
     Index(o,i)       => empty_strs();
     Array(es,et)     => empty_strs();
+    Tuple(tes)       => empty_strs();
     MapLit(m,mks,mvs) => empty_strs();
     Addr(x)          => empty_strs();
     Match(sc,vn,vb,bd) => empty_strs();
@@ -1931,6 +2033,7 @@ fn lam_params(e:Expr) -> [str] {
 fn lam_body(e:Expr) -> Expr {
   mt e {
     Lambda(ps,b,id)  => b;
+    Tuple(tes)       => Bad;
     Num(v)           => Bad;
     Flt(s)           => Bad;
     Str(s)           => Bad;
@@ -1983,6 +2086,7 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     Bin(op,l,r)      => fv_walk(r, fv_walk(l, acc));
     Unary(op,x)      => fv_walk(x, acc);
     Call(fname,args) => fv_args(args, acc);            // fname is a fn, not a captured var
+    Tuple(tes)       => fv_args(tes, acc);
     Field(obj,fnm)   => fv_walk(obj, acc);
     Index(obj,idx)   => fv_walk(idx, fv_walk(obj, acc));
     Array(elems,ety) => fv_args(elems, acc);
@@ -2093,6 +2197,7 @@ fn inline_stmt_value(sy:*Syms, s:Stmt) -> str {
   mt s {
     SExpr(e)              => gen_expr(sy, e) + ";";
     SReturn(e)            => gen_expr(sy, e) + ";";
+    SDestructure(names,e) => "0;";
     SDecl(name,e)         => "0;";
     SAssign(name,e)       => "0;";
     SIdxAssign(o,i,e)     => "0;";
@@ -2415,6 +2520,80 @@ fn gen_decl(sy:*Syms, name:str, e:Expr, ind:str) -> str {
   ind + "v_" + name + " = " + gen_expr(sy, e) + ";\n"
 }
 
+// ----- tuple helpers (multi-return) -----------------------------------------
+// The static type of a tuple literal: "(T1;T2;…)" from each element's type.
+fn tuple_type_of(sy:*Syms, elems:[Expr]) -> str {
+  mu s := "("
+  mu i := 0
+  lp i < len(elems) {
+    if i > 0 { s = s + ";" }
+    s = s + type_of_expr(sy, elems[i])
+    i += 1
+  }
+  s + ")"
+}
+// A tuple literal → a C compound literal of its `tup_<suffix>` struct (fields
+// positional). It only appears in `return …`, so no macro-arg-comma hazard.
+fn gen_tuple_lit(sy:*Syms, elems:[Expr]) -> str {
+  ty := tuple_type_of(sy, elems)
+  mu out := "(" + cty(ty) + "){ "
+  mu i := 0
+  lp i < len(elems) {
+    if i > 0 { out = out + ", " }
+    out = out + gen_expr(sy, elems[i])
+    i += 1
+  }
+  out + " }"
+}
+// `a, b := f()` → a block holding a temp tuple, then one assignment per name
+// into the (hoisted) locals. A "_" slot is skipped. The temp is block-scoped,
+// so two destructures never collide on the `__dt` name.
+fn gen_destructure(sy:*Syms, names:[str], e:Expr, ind:str) -> str {
+  ty := type_of_expr(sy, e)
+  ets := tuple_elems(ty)
+  mu out := ind + "{ " + cty(ty) + " __dt = " + gen_expr(sy, e) + ";"
+  mu i := 0
+  lp i < len(names) {
+    if names[i] != "_" {
+      ft := if i < len(ets) { ets[i] } el { "i64" }
+      set_ty(sy, names[i], ft)
+      out = out + " v_" + names[i] + " = __dt._" + int_to_str(i) + ";"
+    }
+    i += 1
+  }
+  out + " }\n"
+}
+// Hoist a destructure's bindings (one C local per non-"_" name, typed from the
+// tuple's element types) — like hoist_one, so `:=` lowers to an assignment.
+fn hoist_destructure(sy:*Syms, names:[str], e:Expr, ind:str) -> str {
+  ty := type_of_expr(sy, e)
+  ets := tuple_elems(ty)
+  mu out := ""
+  mu i := 0
+  lp i < len(names) {
+    if names[i] != "_" {
+      ft := if i < len(ets) { ets[i] } el { "i64" }
+      if declared(sy, names[i]) == false {
+        set_ty(sy, names[i], ft)
+        out = out + ind + cty(ft) + " v_" + names[i] + ";\n"
+      }
+    }
+    i += 1
+  }
+  out
+}
+// One `tup_<suffix>` typedef for a tuple type "(T1;T2;…)".
+fn gen_tuple_typedef(ty:str) -> str {
+  es := tuple_elems(ty)
+  mu out := "typedef struct { "
+  mu i := 0
+  lp i < len(es) {
+    out = out + cty(es[i]) + " _" + int_to_str(i) + "; "
+    i += 1
+  }
+  out + "} tup_" + tuple_suffix(ty) + ";\n"
+}
+
 // Emit `if (c) { body } [else { else_b }]`. The else block is omitted when
 // empty (no `el`); a nested `el if` lands as a single SIf inside `eb`, which
 // recursion renders as `else { if (...) ... }` — correct, if slightly nested.
@@ -2457,6 +2636,7 @@ fn hoist_decls(sy:*Syms, body:[Stmt], ind:str) -> str {
 fn hoist_stmt(sy:*Syms, s:Stmt, ind:str) -> str {
   mt s {
     SDecl(name,e)         => hoist_one(sy, name, e, ind);
+    SDestructure(names,e) => hoist_destructure(sy, names, e, ind);
     SIf(c,b,eb)           => hoist_decls(sy, b, ind) + hoist_decls(sy, eb, ind);
     SLoop(c,b)            => hoist_decls(sy, b, ind);
     SLoopIn(vnm,coll,b)   => hoist_loopin(sy, vnm, coll, b, ind);
@@ -2524,6 +2704,7 @@ fn gen_tail_stmt(sy:*Syms, s:Stmt, ret:str, ind:str) -> str {
   mt s {
     SExpr(e)                 => ind + "return " + gen_expr(sy, e) + ";\n";
     SDecl(name,e)            => gen_decl(sy, name, e, ind);
+    SDestructure(names,e)    => gen_destructure(sy, names, e, ind);
     SAssign(name,e)          => gen_assign(sy, name, e, ind);
     SIdxAssign(obj,idx,e)    => gen_idx_assign(sy, obj, idx, e, ind);
     SFieldAssign(obj,fnm,e)  => ind + gen_field(sy, obj, fnm) + " = " + gen_expr(sy, e) + ";\n";
@@ -2582,6 +2763,7 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
 fn gen_stmt(sy:*Syms, s:Stmt, ind:str) -> str {
   mt s {
     SDecl(name,e)            => gen_decl(sy, name, e, ind);
+    SDestructure(names,e)    => gen_destructure(sy, names, e, ind);
     SAssign(name,e)          => gen_assign(sy, name, e, ind);
     SIdxAssign(obj,idx,e)    => gen_idx_assign(sy, obj, idx, e, ind);
     SFieldAssign(obj,fnm,e)  => ind + gen_field(sy, obj, fnm) + " = " + gen_expr(sy, e) + ";\n";
@@ -3119,12 +3301,14 @@ fn collect_lams_expr(base:*Syms, sy:*Syms, e:Expr) -> i64 {
     Str(s)           => 0;
     Var(n)           => 0;
     MapLit(m,mks,mvs) => collect_kv(base, sy, mks, mvs);
+    Tuple(elems)     => collect_args(base, sy, elems);
     Bad              => 0;
   }
 }
 fn collect_lams_stmt(base:*Syms, sy:*Syms, s:Stmt) -> i64 {
   mt s {
     SDecl(name,e)         => collect_lams_expr(base, sy, e);
+    SDestructure(names,e) => collect_lams_expr(base, sy, e);
     SAssign(name,e)       => collect_lams_expr(base, sy, e);
     SReturn(e)            => collect_lams_expr(base, sy, e);
     SPrint(e)             => collect_lams_expr(base, sy, e);
@@ -3191,12 +3375,14 @@ fn expr_is_cmp(e:Expr) -> bool {
     IfE(cnd, thn, el2)    => false;
     Try(x)                => false;
     Lambda(ps, bd, id)    => false;
+    Tuple(tes)            => false;
     Bad                   => false;
   }
 }
 fn expr_is_call(e:Expr) -> bool {
   mt e {
     Call(fnm, args)       => true;
+    Tuple(tes)            => false;
     Num(v)                => false;
     Flt(fs)               => false;
     Str(ss)               => false;
@@ -3230,6 +3416,7 @@ fn last_expr_type(sy:*Syms, s:Stmt) -> str {
   mt s {
     SExpr(e)             => tail_sexpr_type(sy, e);
     SReturn(e)           => type_of_expr(sy, e);
+    SDestructure(names,e)=> "";
     SDecl(name,e)        => "";
     SAssign(name,e)      => "";
     SIdxAssign(o,i,e)    => "";
@@ -3251,6 +3438,7 @@ fn last_expr_type(sy:*Syms, s:Stmt) -> str {
 fn stmt_return_type(sy:*Syms, s:Stmt) -> str {
   mt s {
     SReturn(e)            => type_of_expr(sy, e);
+    SDestructure(names,e) => "";
     SDecl(name,e)         => decl_side(sy, name, e);
     SIf(c,b,eb)           => either_return(sy, b, eb);
     SLoop(c,b)            => first_return_type(sy, b);
@@ -3320,6 +3508,7 @@ fn var_name(e:Expr) -> str {
 fn is_empty_maplit(e:Expr) -> bool {
   mt e {
     MapLit(ml,mks,mvs) => len(mks) == 0;
+    Tuple(tes)         => false;
     Var(n)             => false;
     Num(v)             => false;
     Flt(fs)            => false;
@@ -3375,6 +3564,7 @@ fn idx_assign_type(sy:*Syms, o:Expr, idx:Expr, e:Expr, m:str) -> str {
 fn map_assign_type_s(sy:*Syms, s:Stmt, m:str) -> str {
   mt s {
     SIdxAssign(o,idx,e)   => idx_assign_type(sy, o, idx, e, m);
+    SDestructure(names,e) => "";
     SIf(c,b,eb)           => scan_either(sy, b, eb, m);
     SLoop(c,b)            => map_assign_type(sy, b, m);
     SLoopIn(vnm,coll,b)   => scan_loopin(sy, vnm, coll, b, m);
@@ -3397,6 +3587,7 @@ fn map_assign_type_s(sy:*Syms, s:Stmt, m:str) -> str {
 fn is_empty_array(e:Expr) -> bool {
   mt e {
     Array(es,et)       => len(es) == 0 && et == "";
+    Tuple(tes)         => false;
     MapLit(ml,mks,mvs) => false;
     Var(n)             => false;
     Num(v)             => false;
@@ -3422,6 +3613,7 @@ fn push_args_elem(sy:*Syms, fname:str, args:[Expr]) -> str {
 fn push_call_elem(sy:*Syms, e:Expr) -> str {
   mt e {
     Call(fname, args)  => push_args_elem(sy, fname, args);
+    Tuple(tes)         => "";
     Array(es,et)       => "";
     MapLit(ml,mks,mvs) => "";
     Var(n)             => "";
@@ -3447,6 +3639,7 @@ fn same_name_push(sy:*Syms, name:str, e:Expr, a:str) -> str {
 fn push_assign_elem(sy:*Syms, s:Stmt, a:str) -> str {
   mt s {
     SAssign(name, e)      => same_name_push(sy, name, e, a);
+    SDestructure(names,e) => "";
     SDecl(name,e)         => "";
     SIdxAssign(o,ix,e)    => "";
     SFieldAssign(o,f,e)   => "";
@@ -3485,6 +3678,7 @@ fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
 fn stamp_decl(sy:*Syms, body:[Stmt], s:Stmt) -> Stmt {
   mt s {
     SDecl(name,e)         => stamp_decl_e(sy, body, name, e);
+    SDestructure(names,e) => s;
     SAssign(name,e)       => s;
     SIdxAssign(o,ix,e)    => s;
     SFieldAssign(o,f,e)   => s;
@@ -3506,6 +3700,7 @@ fn seed_one(sy:*Syms, name:str, e:Expr) -> i64 { set_ty(sy, name, type_of_expr(s
 fn seed_decl_s(sy:*Syms, s:Stmt) -> i64 {
   mt s {
     SDecl(name,e)         => seed_one(sy, name, e);
+    SDestructure(names,e) => 0;
     SAssign(name,e)       => 0;
     SIdxAssign(o,ix,e)    => 0;
     SFieldAssign(o,f,e)   => 0;
@@ -3856,6 +4051,27 @@ fn compile_to_c(src:str) -> str {
   ei = 0
   lp ei < len(enums) { out = out + gen_enum_ctors(enums[ei]); ei += 1 }
   out = out + "\n"
+
+  // On-demand tuple structs: one `tup_<suffix>` per distinct tuple-typed fn
+  // return — the MVP producer (a `-> (T,U)` fn, consumed by `a, b := f()`).
+  // Emitted before fn signatures (which reference `tup_*` by value). main.ail
+  // itself returns no tuples, so nothing is emitted → fixpoint-safe.
+  mu tup_seen:[str] := []
+  mu ti := 0
+  lp ti < len(funcs) {
+    rt2 := base.frets[funcs[ti].name]
+    if is_tuple_ann(rt2) {
+      suf := tuple_suffix(rt2)
+      mu found := false
+      mu tk := 0
+      lp tk < len(tup_seen) { if tup_seen[tk] == suf { found = true } tk += 1 }
+      if found == false {
+        tup_seen = push(tup_seen, suf)
+        out = out + gen_tuple_typedef(rt2)
+      }
+    }
+    ti += 1
+  }
 
   // extern wrappers (libc passthrough), then fn forward declarations.
   mu xj := 0
