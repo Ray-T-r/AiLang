@@ -301,6 +301,7 @@ st Func { name:str; params:[str]; ptypes:[str]; ret:str; lib:str; tparams:[str];
 
 // ===== parser state =========================================================
 st P { toks: [Token]; pos: i64; src: str }
+st Binds { names:[str]; vals:[Expr] }   // match-arm bindings: name → matched scrutinee component
 fn cur(p:*P) -> Token { p.toks[p.pos] }
 fn ckind(p:*P) -> i64 { p.toks[p.pos].kind }
 fn ctext(p:*P) -> str { p.toks[p.pos].text }
@@ -599,7 +600,45 @@ fn is_bad(e:Expr) -> bool {
     Lambda(ps,b,id)    => false;
   }
 }
-fn parse_arm_cond(p:*P, scruts:[Expr], is_tuple:bool) -> Expr {
+// Substitute Var(nm) → repl throughout an expression — used to bind a match
+// pattern variable to its scrutinee component (`(0, x) => …x…` rewrites x).
+fn is_lower_ident(s:str) -> bool {
+  if len(s) == 0 rt false
+  c := s[0]
+  c >= 97 && c <= 122
+}
+fn subst_var_hit(n:str, nm:str, repl:Expr, orig:Expr) -> Expr {
+  if n == nm rt repl
+  orig
+}
+fn subst_args(es:[Expr], nm:str, repl:Expr) -> [Expr] {
+  mu out:[Expr] := []
+  mu i := 0
+  lp i < len(es) { out = push(out, subst_var(es[i], nm, repl)); i += 1 }
+  out
+}
+fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
+  mt e {
+    Var(n)             => subst_var_hit(n, nm, repl, e);
+    Bin(o,a,b)         => Bin(o, subst_var(a,nm,repl), subst_var(b,nm,repl));
+    Unary(o,x)         => Unary(o, subst_var(x,nm,repl));
+    Call(f,ar)         => Call(f, subst_args(ar,nm,repl));
+    Field(o,f)         => Field(subst_var(o,nm,repl), f);
+    Index(o,ix)        => Index(subst_var(o,nm,repl), subst_var(ix,nm,repl));
+    Array(es,et)       => Array(subst_args(es,nm,repl), et);
+    MapLit(ml,ks,vs)   => MapLit(ml, subst_args(ks,nm,repl), subst_args(vs,nm,repl));
+    Addr(x)            => Addr(subst_var(x,nm,repl));
+    Match(sc,vn,vb,bd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl));
+    IfE(c,t,el2)       => IfE(subst_var(c,nm,repl), subst_var(t,nm,repl), subst_var(el2,nm,repl));
+    Try(x)             => Try(subst_var(x,nm,repl));
+    Lambda(ps,b,id)    => Lambda(ps, subst_var(b,nm,repl), id);
+    Num(v)             => e;
+    Flt(fs)            => e;
+    Str(s)             => e;
+    Bad                => e;
+  }
+}
+fn parse_arm_cond(p:*P, scruts:[Expr], is_tuple:bool, bnd:*Binds) -> Expr {
   if is_tuple {
     if ckind(p) == TK_LPAREN() {
       adv(p)
@@ -607,6 +646,11 @@ fn parse_arm_cond(p:*P, scruts:[Expr], is_tuple:bool) -> Expr {
       mu j := 0
       lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
         if ckind(p) == TK_IDENT() && ctext(p) == "_" { adv(p) }
+        el if ckind(p) == TK_IDENT() && is_lower_ident(ctext(p)) && ctext(p) != "true" && ctext(p) != "false" {
+          // a lowercase ident → binding: no condition, bind it to this component
+          if j < len(scruts) { bnd.names = push(bnd.names, ctext(p)); bnd.vals = push(bnd.vals, scruts[j]) }
+          adv(p)
+        }
         el {
           if j >= len(scruts) { report_at(p.src, p.toks[p.pos].pos, "match arm has more components than the tuple scrutinee") }
           c := Bin(OP_EQ(), scruts[j], parse_primary(p))
@@ -639,11 +683,15 @@ fn parse_match_desugar(p:*P, scruts:[Expr], is_tuple:bool) -> Expr {
   mu conds:[Expr] := []
   mu bodies:[Expr] := []
   lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
-    cond := parse_arm_cond(p, scruts, is_tuple)
+    mu bnd := Binds(empty_strs(), no_exprs())
+    cond := parse_arm_cond(p, scruts, is_tuple, &bnd)
     if ckind(p) == TK_ASSIGN() { adv(p) }   // `=>`
     if ckind(p) == TK_GT() { adv(p) }
     conds = push(conds, cond)
-    bodies = push(bodies, parse_expr(p))
+    mu body := parse_expr(p)
+    mu bi := 0                              // bind each pattern var → its scrutinee component
+    lp bi < len(bnd.names) { body = subst_var(body, bnd.names[bi], bnd.vals[bi]); bi += 1 }
+    bodies = push(bodies, body)
     if ckind(p) == TK_SEMI() { adv(p) }     // arm separator
   }
   eat(p, TK_RBRACE())
