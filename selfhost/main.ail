@@ -1571,7 +1571,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "str_to_float" rt "f64"
   if fname == "substring" rt "str"
   if fname == "read_file" rt "str"
-  if fname == "write_file" rt "i64"
+  if fname == "write_file" rt "bool"   // success flag — ailangc prints true/false
   if fname == "str_to_bytes" rt "bytes"
   if fname == "bytes_to_str" rt "str"
   if fname == "bytes_at" rt "i64"
@@ -1582,6 +1582,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "len" rt "i64"
   // `!T` result helpers: ok(x):!Tx; err_<T>(m):!T; unwrap(r):T; is_*/err_msg.
   if fname == "ok" && len(args) > 0 { rt "!" + type_of_expr(sy, args[0]) }
+  if fname == "err" && len(args) > 0 { rt "!" + ty_of(sy, "@ret") }   // generic err → enclosing !T
   if fname == "unwrap" && len(args) > 0 { rt result_inner(type_of_expr(sy, args[0])) }
   if fname == "is_ok" || fname == "is_err" rt "bool"
   if fname == "err_msg" rt "str"
@@ -2166,6 +2167,9 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   // name suffix; inspectors read the {tag, ok, err} struct directly.
   if fname == "ok" && len(args) == 1 {
     rt "mk_ok_" + arr_suffix(type_of_expr(sy, args[0])) + "(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "err" && len(args) == 1 {     // generic err(m) → mk_err_<enclosing !T>
+    rt "mk_err_" + arr_suffix(ty_of(sy, "@ret")) + "(" + gen_expr(sy, args[0]) + ")"
   }
   if fname == "unwrap" && len(args) == 1 {
     rt "(" + gen_expr(sy, args[0]) + ").ok"
@@ -3660,6 +3664,8 @@ fn compile_to_c(src:str) -> str {
   out = out + gen_res("str", "const char*")
   si = 0
   lp si < len(structs) { out = out + gen_res(structs[si].name, "s_" + structs[si].name); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_res(enums[ei].name, "s_" + enums[ei].name); ei += 1 }   // !Enum too
   si = 0
   lp si < len(structs) { out = out + gen_struct_ctor(structs[si]); si += 1 }
   si = 0
