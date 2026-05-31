@@ -3320,10 +3320,93 @@ fn map_assign_type_s(sy:*Syms, s:Stmt, m:str) -> str {
 }
 // Top-level transform: stamp each un-annotated `m := {}` with its inferred type;
 // type regular decls so later `lp x in coll` / index types resolve.
+// Empty INFERRED array `mu x := []` (no annotation): pin its element type from
+// the first top-level `x = push(x, E)`, mirroring the empty-`{}` map back-prop.
+fn is_empty_array(e:Expr) -> bool {
+  mt e {
+    Array(es,et)       => len(es) == 0 && et == "";
+    MapLit(ml,mks,mvs) => false;
+    Var(n)             => false;
+    Num(v)             => false;
+    Flt(fs)            => false;
+    Str(s)             => false;
+    Bin(o,a,b)         => false;
+    Unary(o,x)         => false;
+    Call(f,a)          => false;
+    Field(o,f)         => false;
+    Index(o,ix)        => false;
+    Addr(x)            => false;
+    Match(sc,vn,vb,bd) => false;
+    IfE(c,t,el2)       => false;
+    Try(e2)            => false;
+    Lambda(ps,b,id)    => false;
+    Bad                => false;
+  }
+}
+fn push_args_elem(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if fname == "push" && len(args) == 2 rt type_of_expr(sy, args[1])
+  ""
+}
+fn push_call_elem(sy:*Syms, e:Expr) -> str {
+  mt e {
+    Call(fname, args)  => push_args_elem(sy, fname, args);
+    Array(es,et)       => "";
+    MapLit(ml,mks,mvs) => "";
+    Var(n)             => "";
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,b,id)    => "";
+    Bad                => "";
+  }
+}
+fn same_name_push(sy:*Syms, name:str, e:Expr, a:str) -> str {
+  if name != a rt ""
+  push_call_elem(sy, e)
+}
+fn push_assign_elem(sy:*Syms, s:Stmt, a:str) -> str {
+  mt s {
+    SAssign(name, e)      => same_name_push(sy, name, e, a);
+    SDecl(name,e)         => "";
+    SIdxAssign(o,ix,e)    => "";
+    SFieldAssign(o,f,e)   => "";
+    SReturn(e)            => "";
+    SPrint(e)             => "";
+    SIf(c,b,eb)           => "";
+    SLoop(c,b)            => "";
+    SLoopIn(vnm,coll,b)   => "";
+    SLoopKV(kn,vn,coll,b) => "";
+    SLoopRange(v,lo,hi,b) => "";
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
+fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
+  mu i := 0
+  lp i < len(body) {
+    t := push_assign_elem(sy, body[i], a)
+    if len(t) > 0 rt t
+    i += 1
+  }
+  ""
+}
 fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
   if is_empty_maplit(e) {
     t := map_assign_type(sy, body, name)
     if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()))   // typing handled by pass-1 + hoist
+  }
+  if is_empty_array(e) {
+    et := array_elem_from_push(sy, body, name)
+    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et))              // pin elem type from first push
   }
   SDecl(name, e)
 }
