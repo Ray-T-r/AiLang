@@ -1533,7 +1533,8 @@ fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
   if op == OP_ADD() || op == OP_SUB() || op == OP_MUL() || op == OP_DIV() {
     if type_of_expr(sy, l) == "f64" || type_of_expr(sy, r) == "f64" { rt "f64" }
   }
-  "i64"                          // everything else (incl. cmp/logic) → i64
+  if op >= OP_LT() && op <= OP_OR() rt "bool"   // 5..12: < > <= >= == != && || → bool
+  "i64"
 }
 
 // TLS / Postgres native builtins all lower to `fname(args)` (the C helper shares
@@ -2483,7 +2484,10 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
   if t == "f64" {                             // %g — matches AiLang's float format
     rt ind + "printf(\"%g\\n\", (double)(" + gen_expr(sy, e) + "));\n"
   }
-  if t == "bool" {                            // true/false (matches ailangc), not 1/0
+  if t == "bool" {                            // bool VALUE prints true/false; a raw
+    if expr_is_cmp(e) {                       // comparison/logic is C int → prints 1/0 (ailangc)
+      rt ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
+    }
     rt ind + "printf(\"%s\\n\", (" + gen_expr(sy, e) + ") ? \"true\" : \"false\");\n"
   }
   if t == "bytes" {                           // pretty-print via helper, then a newline
@@ -3094,6 +3098,30 @@ fn first_return_type(sy:*Syms, body:[Stmt]) -> str {
   ""                                  // empty body → no return
 }
 
+// A raw comparison/logic expression: its C value is `int` (1/0), so ailangc's
+// _Generic prints it as an int even though its inferred type is bool. (A bool
+// *variable* — typed from such an expr — prints true/false.)
+fn expr_is_cmp(e:Expr) -> bool {
+  mt e {
+    Bin(op, l, r)         => op >= OP_LT() && op <= OP_OR();
+    Unary(op, x)          => op == OP_NOT();
+    Num(v)                => false;
+    Flt(fs)               => false;
+    Str(ss)               => false;
+    Var(nm)               => false;
+    Call(fnm, args)       => false;
+    Field(ob, fnm2)       => false;
+    Index(ob, ix)         => false;
+    Array(els, ety)       => false;
+    MapLit(mty, ks, vs)   => false;
+    Addr(x)               => false;
+    Match(sc, vn, vb, bd) => false;
+    IfE(cnd, thn, el2)    => false;
+    Try(x)                => false;
+    Lambda(ps, bd, id)    => false;
+    Bad                   => false;
+  }
+}
 fn expr_is_call(e:Expr) -> bool {
   mt e {
     Call(fnm, args)       => true;
