@@ -48,6 +48,10 @@ pub enum Ty {
     /// by `ex fn`s declared to return `*T`. Codegen lowers to `<T>*` and,
     /// crucially, routes `.field` access through `->` instead of `.`.
     Ptr(Box<Ty>),
+    /// `(T1, T2, ...)` — a tuple, used for multi-return. Codegen lowers to one
+    /// `tup_<suffix>` C struct per distinct shape; produced by a tuple literal
+    /// and consumed by a destructuring decl `a, b := f()`.
+    Tuple(Vec<Ty>),
     /// Catch-all when we can't determine more precisely. Codegen falls back
     /// to `int64_t` and prints a warning.
     Unknown,
@@ -776,6 +780,43 @@ fn check_stmt(
             }
             env.insert(name.name.clone(), final_ty);
         }
+        Stmt::DestructureDecl {
+            names, value, span, ..
+        } => {
+            // `a, b := f()` — the RHS must be a tuple; bind each name to its
+            // corresponding field type. `_` slots (None) are ignored. Permissive:
+            // a non-tuple or length mismatch warns and falls back to Unknown.
+            let inferred = check_expr(value, fns, env, diags);
+            match &inferred {
+                Ty::Tuple(fields) => {
+                    if fields.len() != names.len() {
+                        diags.push(Diagnostic::warning(
+                            format!(
+                                "destructuring {} bindings from a {}-tuple",
+                                names.len(),
+                                fields.len()
+                            ),
+                            *span,
+                        ));
+                    }
+                    for (i, slot) in names.iter().enumerate() {
+                        if let Some(id) = slot {
+                            let fty = fields.get(i).cloned().unwrap_or(Ty::Unknown);
+                            env.insert(id.name.clone(), fty);
+                        }
+                    }
+                }
+                _ => {
+                    diags.push(Diagnostic::warning(
+                        "destructuring a non-tuple value".to_string(),
+                        *span,
+                    ));
+                    for slot in names.iter().flatten() {
+                        env.insert(slot.name.clone(), Ty::Unknown);
+                    }
+                }
+            }
+        }
         Stmt::Assign { target, value, .. } => {
             check_expr(target, fns, env, diags);
             let value_ty = check_expr(value, fns, env, diags);
@@ -1399,10 +1440,13 @@ fn check_expr_inner(
             Ty::Map(Box::new(kt), Box::new(vt))
         }
         ExprKind::Tuple(xs) => {
-            for x in xs {
-                check_expr(x, fns, env, diags);
-            }
-            Ty::Unknown
+            // A tuple literal's type is the tuple of its element types. Used
+            // for multi-return (`rt (a, b)`) and destructuring (`q, r := …`).
+            let elems = xs
+                .iter()
+                .map(|x| check_expr(x, fns, env, diags))
+                .collect();
+            Ty::Tuple(elems)
         }
         ExprKind::Lambda { params, body } => {
             // Walk the body with the lambda's params in scope and return
@@ -1688,6 +1732,9 @@ fn rewrite_struct_ctors_stmt(
 ) {
     match stmt {
         Stmt::Decl { value, .. } => rewrite_struct_ctors_expr(value, structs, variants),
+        Stmt::DestructureDecl { value, .. } => {
+            rewrite_struct_ctors_expr(value, structs, variants)
+        }
         Stmt::Assign { target, value, .. } => {
             rewrite_struct_ctors_expr(target, structs, variants);
             rewrite_struct_ctors_expr(value, structs, variants);
@@ -1851,6 +1898,7 @@ pub fn ast_ty_kind_to_ty(t: &Type) -> Ty {
         ),
         TypeKind::Result(inner) => Ty::Result(Box::new(ast_ty_kind_to_ty(inner))),
         TypeKind::Ptr(inner) => Ty::Ptr(Box::new(ast_ty_kind_to_ty(inner))),
+        TypeKind::Tuple(elems) => Ty::Tuple(elems.iter().map(ast_ty_kind_to_ty).collect()),
         _ => Ty::Unknown,
     }
 }

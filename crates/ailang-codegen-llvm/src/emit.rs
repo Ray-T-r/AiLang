@@ -179,6 +179,40 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &Stmt, level: usize, ctx: &EmitC
             emit_expr(out, value, ctx);
             out.push_str(";\n");
         }
+        Stmt::DestructureDecl {
+            names, value, span, ..
+        } => {
+            // `q, r := f()` → a temp holds the tuple, then one local per name
+            // pulls out a positional field (`_` slots are skipped). The temp
+            // name is span-derived (codegen ctx is immutable, so no counter).
+            let tup_ty = ctx.fns.expr_types.get(&value.span).cloned();
+            let field_tys: Vec<Ty> = match &tup_ty {
+                Some(Ty::Tuple(fs)) => fs.clone(),
+                _ => vec![Ty::Unknown; names.len()],
+            };
+            let tup_cty = match &tup_ty {
+                Some(t @ Ty::Tuple(_)) => c_ty_for(t),
+                _ => "int64_t".to_string(),
+            };
+            let tmp = format!("__dst_{}", span.start);
+            indent(out, level);
+            let _ = write!(out, "{} {} = ", tup_cty, tmp);
+            emit_expr(out, value, ctx);
+            out.push_str(";\n");
+            for (i, slot) in names.iter().enumerate() {
+                if let Some(id) = slot {
+                    indent(out, level);
+                    let cty = c_ty_for(field_tys.get(i).unwrap_or(&Ty::Unknown));
+                    let _ = write!(
+                        out,
+                        "{} = {}._{};\n",
+                        c_decl(&c_safe_name(&id.name), &cty),
+                        tmp,
+                        i
+                    );
+                }
+            }
+        }
         Stmt::Assign { target, value, .. } => {
             indent(out, level);
             // Special case: indexed assignment `coll[k] = v`.
@@ -1368,8 +1402,22 @@ pub(crate) fn emit_expr(out: &mut String, e: &Expr, ctx: &EmitCtx) {
             }
             out.push_str("__m; })");
         }
-        ExprKind::Tuple(_) => {
-            out.push_str("/* tuple literal not yet supported */0");
+        ExprKind::Tuple(elems) => {
+            // C99 compound literal of the on-demand `tup_<suffix>` struct,
+            // fields `_0, _1, ...` initialized positionally. Wrapped in outer
+            // parens so inner commas aren't read as macro-argument separators.
+            let cty = match ctx.fns.expr_types.get(&e.span) {
+                Some(t @ Ty::Tuple(_)) => c_ty_for(t),
+                _ => "int64_t".to_string(),
+            };
+            let _ = write!(out, "(({}){{ ", cty);
+            for (i, el) in elems.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                emit_expr(out, el, ctx);
+            }
+            out.push_str(" })");
         }
         ExprKind::StructLit { name, fields } => {
             // C99 compound literal with designated initializers — field

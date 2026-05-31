@@ -175,6 +175,9 @@ pub(crate) fn substitute_ty(t: &Type, subst: &std::collections::HashMap<String, 
             params: params.iter().map(|p| substitute_ty(p, subst)).collect(),
             ret: ret.as_ref().map(|r| Box::new(substitute_ty(r, subst))),
         },
+        TypeKind::Tuple(elems) => {
+            TypeKind::Tuple(elems.iter().map(|e| substitute_ty(e, subst)).collect())
+        }
     };
     Type { kind, span: t.span }
 }
@@ -192,6 +195,7 @@ pub(crate) fn ty_to_path_name(t: &Ty) -> String {
         Ty::Str => "str".to_string(),
         Ty::Bytes => "bytes".to_string(),
         Ty::Struct(name) => name.clone(),
+        Ty::Tuple(es) => format!("tup_{}", mangle_ty_suffix(es)),
         _ => "i64".to_string(),
     }
 }
@@ -280,6 +284,9 @@ pub(crate) fn c_ty_from_ast(t: &Type) -> String {
             // go through the trampoline in emit_expr::Call.
             "ailang_closure_t".to_string()
         }
+        // `(T1, T2, ...)` → its `tup_<suffix>` struct. Routed through
+        // `c_ty_for` so the suffix matches the on-demand typedef emission.
+        TypeKind::Tuple(_) => c_ty_for(&ailang_sema::ast_ty_kind_to_ty(t)),
         _ => "int64_t".to_string(),
     }
 }
@@ -489,6 +496,9 @@ pub(crate) fn c_ty_for(t: &Ty) -> String {
             _ => "ailang_result_i64".to_string(),
         },
         Ty::Ptr(inner) => format!("{}*", c_ty_for(inner)),
+        // `(T1, T2, ...)` → its monomorphic tuple struct (template emitted on
+        // demand in emit_c, keyed by the same `mangle_ty_suffix`).
+        Ty::Tuple(elems) => format!("tup_{}", mangle_ty_suffix(elems)),
         Ty::Unknown => "int64_t".to_string(),
     }
 }

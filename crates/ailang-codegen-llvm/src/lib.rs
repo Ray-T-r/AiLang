@@ -141,6 +141,34 @@ pub fn emit_c(resolved: &ResolvedModule) -> String {
         emit_smap_typedef(&mut out, &c, &c);
     }
 
+    // ----- On-demand tuples (multi-return). -----
+    // One `tup_<suffix>` struct per distinct tuple shape, discovered from
+    // recorded expr types + fn signatures (the only MVP producers: a `rt
+    // (a,b)` literal and a `-> (T,U)` return). Keyed by `mangle_ty_suffix` so
+    // codegen's `c_ty_for(Ty::Tuple)` references the same name. Emitted before
+    // fn signatures so a fn can return one by value.
+    let mut tuple_shapes: std::collections::BTreeMap<String, Vec<Ty>> =
+        std::collections::BTreeMap::new();
+    for t in resolved.expr_types.values() {
+        if let Ty::Tuple(es) = t {
+            tuple_shapes.insert(mangle_ty_suffix(es), es.clone());
+        }
+    }
+    for sig in resolved.fn_table.values() {
+        for (_, pt) in &sig.params {
+            if let Ty::Tuple(es) = pt {
+                tuple_shapes.insert(mangle_ty_suffix(es), es.clone());
+            }
+        }
+        if let Ty::Tuple(es) = &sig.return_ty {
+            tuple_shapes.insert(mangle_ty_suffix(es), es.clone());
+        }
+    }
+    for (suffix, elems) in &tuple_shapes {
+        let field_ctys: Vec<String> = elems.iter().map(c_ty_for).collect();
+        emit_tup_typedef(&mut out, suffix, &field_ctys);
+    }
+
     // ----- Aggregate bodies (structs, then enums). -----
     // A body may now embed `ailang_arr_T` by value (its typedef is above) and
     // box a self-referential field as `T*` (its forward decl is above).

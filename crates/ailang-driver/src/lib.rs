@@ -733,6 +733,7 @@ fn collect_in_block(block: &Block, out: &mut HashSet<String>) {
 fn collect_in_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
     match stmt {
         Stmt::Decl { value, .. } => collect_in_expr(value, out),
+        Stmt::DestructureDecl { value, .. } => collect_in_expr(value, out),
         Stmt::Assign { target, value, .. } => {
             collect_in_expr(target, out);
             collect_in_expr(value, out);

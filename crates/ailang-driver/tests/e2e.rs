@@ -73,6 +73,14 @@ fn e2e_fib() {
 }
 
 #[test]
+fn e2e_tuple_demo() {
+    if !project_has("examples/tuple_demo.ail") {
+        return;
+    }
+    run_case("tuple_demo");
+}
+
+#[test]
 fn e2e_fizzbuzz_simple() {
     if !project_has("examples/fizzbuzz_simple.ail") {
         return;

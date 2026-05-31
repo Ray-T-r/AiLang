@@ -185,6 +185,17 @@ pub(crate) fn emit_arr_typedef(out: &mut String, suffix: &str, elem: &str) {
     );
 }
 
+/// Emit one `tup_<suffix>` struct for a tuple shape (multi-return). Fields are
+/// positional: `_0`, `_1`, … in the given C-type order. Like the array typedef,
+/// emitted before fn signatures so a fn can return the tuple by value.
+pub(crate) fn emit_tup_typedef(out: &mut String, suffix: &str, field_ctys: &[String]) {
+    let _ = write!(out, "typedef struct {{ ");
+    for (i, cty) in field_ctys.iter().enumerate() {
+        let _ = write!(out, "{cty} _{i}; ");
+    }
+    let _ = write!(out, "}} tup_{suffix};\n");
+}
+
 /// Emit the array *helpers* (make/len/at/push/pop) + the `AILANG_ARR_<suffix>`
 /// literal macro for one aggregate element type. These size and copy elements
 /// by value (`sizeof(T)`, `data[i] = src[i]`, by-value `at`), so `T` must be

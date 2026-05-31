@@ -1,0 +1,30 @@
+// Tuples & multi-return: a fn returns `(T, T)`, the caller destructures it
+// with `q, r := f()`. A `_` slot ignores a value. Mixed element types work too.
+
+fn divmod(a, b) -> (i64, i64) {
+  rt (a / b, a % b)
+}
+
+fn minmax(a, b) -> (i64, i64) {
+  if a < b { rt (a, b) }
+  rt (b, a)
+}
+
+fn tag(n) -> (str, i64) {
+  rt ("sq", n * n)
+}
+
+q, r := divmod(17, 5)
+println(q)
+println(r)
+
+lo, hi := minmax(8, 3)
+println(lo)
+println(hi)
+
+_, rem := divmod(20, 6)
+println(rem)
+
+name, sq := tag(5)
+println(name)
+println(sq)

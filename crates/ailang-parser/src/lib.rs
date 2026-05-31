@@ -664,11 +664,57 @@ impl Parser<'_> {
                 // (we don't have those yet, so for now always treat `:` as decl).
                 true
             }
+            // Tuple destructure: `(ident|_) , (ident|_) [, ...]* :=`
+            TokenKind::Comma => {
+                let mut i = 1;
+                loop {
+                    if self.peek_ahead(i) != TokenKind::Comma {
+                        return false;
+                    }
+                    if !matches!(
+                        self.peek_ahead(i + 1),
+                        TokenKind::Ident | TokenKind::Underscore
+                    ) {
+                        return false;
+                    }
+                    i += 2;
+                    match self.peek_ahead(i) {
+                        TokenKind::Comma => continue,
+                        TokenKind::Walrus => return true,
+                        _ => return false,
+                    }
+                }
+            }
             _ => false,
         }
     }
 
     fn parse_decl_after_mu(&mut self, mutable: bool, start_span: Span) -> Option<Stmt> {
+        // Tuple destructure: `a, b, ... := expr` (a `_` slot is ignored).
+        if matches!(self.peek_kind(), TokenKind::Ident | TokenKind::Underscore)
+            && self.peek_ahead(1) == TokenKind::Comma
+        {
+            let mut names: Vec<Option<Ident>> = Vec::new();
+            loop {
+                if self.eat(TokenKind::Underscore) {
+                    names.push(None);
+                } else {
+                    names.push(Some(self.parse_ident()?));
+                }
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::Walrus)?;
+            let value = self.parse_expr()?;
+            let span = start_span.join(value.span);
+            return Some(Stmt::DestructureDecl {
+                mutable,
+                names,
+                value,
+                span,
+            });
+        }
         let name = self.parse_ident()?;
         let ty = if self.eat(TokenKind::Colon) {
             Some(self.parse_type()?)
@@ -747,6 +793,7 @@ impl Parser<'_> {
             StmtOrTail::Stmt(stmt) => {
                 let span = match &stmt {
                     Stmt::Decl { span, .. }
+                    | Stmt::DestructureDecl { span, .. }
                     | Stmt::Assign { span, .. }
                     | Stmt::Return { span, .. }
                     | Stmt::Break(span)
@@ -933,7 +980,10 @@ fn pattern_span(p: &Pattern) -> Span {
 
 fn stmt_span(s: &Stmt) -> Span {
     match s {
-        Stmt::Decl { span, .. } | Stmt::Assign { span, .. } | Stmt::Return { span, .. } => *span,
+        Stmt::Decl { span, .. }
+        | Stmt::DestructureDecl { span, .. }
+        | Stmt::Assign { span, .. }
+        | Stmt::Return { span, .. } => *span,
         Stmt::Break(s) | Stmt::Continue(s) => *s,
         Stmt::If(i) => i.span,
         Stmt::Loop(l) => l.span,
@@ -993,6 +1043,29 @@ impl Parser<'_> {
                 Some(Type {
                     span: start.join(inner.span),
                     kind: TypeKind::Result(Box::new(inner)),
+                })
+            }
+            LParen => {
+                // `(T1, T2, ...)` tuple type (multi-return). A single `(T)`
+                // with no comma collapses to the inner type.
+                let start = self.bump().span;
+                let mut elems = Vec::new();
+                let mut saw_comma = false;
+                while !self.at(RParen) && !self.at(Eof) {
+                    elems.push(self.parse_type()?);
+                    if self.eat(Comma) {
+                        saw_comma = true;
+                    } else {
+                        break;
+                    }
+                }
+                let end = self.expect(RParen)?.span;
+                if elems.len() == 1 && !saw_comma {
+                    return Some(elems.pop().unwrap());
+                }
+                Some(Type {
+                    kind: TypeKind::Tuple(elems),
+                    span: start.join(end),
                 })
             }
             KwFn => {

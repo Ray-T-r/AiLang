@@ -141,6 +141,14 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// `mu? a, b, ... := expr` — tuple destructuring of a multi-return value.
+    /// A `None` slot is an `_` (ignored binding).
+    DestructureDecl {
+        mutable: bool,
+        names: Vec<Option<Ident>>,
+        value: Expr,
+        span: Span,
+    },
     /// `lvalue = expr`
     Assign {
         target: Expr,
@@ -439,6 +447,7 @@ pub enum TypeKind {
     Ptr(Box<Type>),      // *T  (FFI only)
     Optional(Box<Type>), // ?T
     Result(Box<Type>),   // !T
+    Tuple(Vec<Type>),    // (T1, T2, ...) — multi-return
 }
 
 // ============================================================================
