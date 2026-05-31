@@ -759,7 +759,11 @@ fn parse_primary(p:*P) -> Expr {
     mu els := Bad
     if ckind(p) == TK_IDENT() && ctext(p) == "el" {
       adv(p)
-      els = parse_brace_expr(p)
+      if ckind(p) == TK_IDENT() && ctext(p) == "if" {
+        els = parse_primary(p)        // `el if …` → nested if-expression (chain)
+      } el {
+        els = parse_brace_expr(p)
+      }
     }
     rt IfE(cond, then_e, els)
   }
@@ -1596,6 +1600,8 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "regex_match" rt "bool"
   if fname == "regex_find" rt "str"
   if fname == "abs" && len(args) > 0 rt type_of_expr(sy, args[0])   // i64 or f64
+  if fname == "abs_i64" rt "i64"
+  if fname == "abs_f64" rt "f64"
   if fname == "pop" && len(args) > 0 rt type_of_expr(sy, args[0])   // same array type
   // Phase 3 TLS/PG return types (grouped); everything else native → i64.
   if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" rt "str"
@@ -2258,6 +2264,8 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
     if type_of_expr(sy, args[0]) == "f64" { rt "abs_f64(" + gen_expr(sy, args[0]) + ")" }
     rt "abs_i64(" + gen_expr(sy, args[0]) + ")"
   }
+  if fname == "abs_i64" && len(args) == 1 { rt "abs_i64(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "abs_f64" && len(args) == 1 { rt "abs_f64(" + gen_expr(sy, args[0]) + ")" }
   // contains / index_of: poly over string AND array (dispatch on arg[0]'s type).
   if fname == "contains" && len(args) == 2 {
     t := type_of_expr(sy, args[0])
@@ -2473,6 +2481,12 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
   }
   if has(sy.ctors, t) {                       // a user struct → `Name{f: v, …}` printer
     rt ind + "print_" + t + "(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
+  if is_array_ann(t) {                        // `[i64]`/`[str]` → `[e, e, …]` like ailangc
+    suf := arr_suffix(elem_of_ann(t))
+    if suf == "i64" || suf == "str" {
+      rt ind + "print_arr_" + suf + "(" + gen_expr(sy, e) + "); putchar(10);\n"
+    }
   }
   ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
 }
@@ -3622,6 +3636,10 @@ fn compile_to_c(src:str) -> str {
   out = out + gen_arr_helpers("i64", "int64_t")
   out = out + gen_arr_helpers("str", "const char*")
   out = out + gen_arr_helpers("f64", "double")
+  // array pretty-printers (match ailangc: i64 raw, str quoted via putchar(34) to
+  // dodge AiLang→C quote-escaping; `, ` separator; empty → `[]`).
+  out = out + "static void print_arr_i64(arr_i64 a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); printf(\"%lld\",(long long)a.data[i]); } printf(\"]\"); }\n"
+  out = out + "static void print_arr_str(arr_str a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); putchar(34); printf(\"%s\", a.data[i] ? a.data[i] : \"\"); putchar(34); } printf(\"]\"); }\n"
   // `args()` → argv[1..] as [str] (depends on arr_str helpers just emitted).
   out = out + "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n"
   // split(s, sep) → [str]; empty sep → [s]; uses arr_str runtime just emitted.
