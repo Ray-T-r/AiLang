@@ -1,0 +1,8 @@
+x := 3.14
+y := 2.0
+println(x + y)          // 5.14
+println(x * y)          // 6.28
+println(10.0 / 4.0)     // 2.5
+println(5.0)            // 5
+fn area(r:f64) -> f64 { 3.14159 * r * r }
+println(area(2.0))      // 12.5664

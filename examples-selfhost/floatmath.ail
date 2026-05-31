@@ -1,0 +1,21 @@
+// f64 math: cinc math.h + libm externs (need -lm) + [f64] arrays built with
+// push/index + float<->str conversions. All %g-formatted to match AiLang.
+cinc "math.h"
+ex fn sqrt(x:f64) -> f64
+ex fn pow(b:f64, e:f64) -> f64
+ex fn floor(x:f64) -> f64
+
+mu xs:[f64] := []
+xs = push(xs, 2.0)
+xs = push(xs, 16.0)
+xs = push(xs, 3.7)
+
+println(sqrt(xs[0]))                          // 1.41421
+println(sqrt(xs[1]))                          // 4
+println(pow(2.0, 10.0))                       // 1024
+println(floor(xs[2]))                         // 3
+println(len(xs))                              // 3
+
+s := float_to_str(sqrt(xs[1]))
+println("sqrt16 = " + s)                      // sqrt16 = 4
+println(str_to_float("2.5") + str_to_float("0.5"))   // 3

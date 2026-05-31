@@ -1,0 +1,12 @@
+mu m:{str:i64} := {}
+m["x"] = 10; m["y"] = 20; m["z"] = 30
+println(len(keys(m)))      // 3
+println(len(values(m)))    // 3
+mu sum := 0
+lp (k, v) in m { sum = sum + v }   // order-independent
+println(sum)               // 60
+mu m2:{str:str} := {}
+m2["a"] = "A"; m2["b"] = "B"
+mu cat := ""
+lp (k, val) in m2 { cat = cat + k }
+println(len(cat))          // 2

@@ -1,0 +1,3 @@
+im "lib/mathlib.ail"
+println(sq(9))           // 81
+println(shout("hi"))     // hi!

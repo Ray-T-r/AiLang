@@ -1,0 +1,5 @@
+name := "AiLang"
+n := 7
+println("lang=${name} n=${n} sq=${n * n}")
+fn tag(k:str, v:i64) -> str { "${k}:${v}" }
+println(tag("count", 42))
