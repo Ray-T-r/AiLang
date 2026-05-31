@@ -536,7 +536,13 @@ fn parse_interp(s:str) -> Expr {
       mu ep := P(etoks, 0, esrc)
       mu hole:[Expr] := []
       hole = push(hole, parse_expr(&ep))
-      parts = push(parts, Call("to_str", hole))
+      if ckind(&ep) == TK_EOF() {
+        parts = push(parts, Call("to_str", hole))        // a clean single expr → stringify
+      } el {
+        // leftover tokens → not an expression; keep it literal. Build the prefix
+        // as "$"+"{" so this very source line doesn't self-interpolate.
+        parts = push(parts, Str("$" + "{" + esrc + "}"))
+      }
       i = j + 1
       start = i
     } el {
@@ -801,8 +807,11 @@ fn parse_primary(p:*P) -> Expr {
   if k == TK_IDENT() {
     name := ctext(p)
     // bool literals lower to C ints (true→1, false→0)
-    if name == "true"  { adv(p); rt Num(1) }
-    if name == "false" { adv(p); rt Num(0) }
+    // bool literals → a bool-typed node (a trivial comparison): direct use prints
+    // 1/0 (expr_is_cmp), but a variable typed from it prints true/false — exactly
+    // ailangc's _Generic behavior. Value is still 1/0.
+    if name == "true"  { adv(p); rt Bin(OP_EQ(), Num(1), Num(1)) }
+    if name == "false" { adv(p); rt Bin(OP_NE(), Num(1), Num(1)) }
     adv(p)
     if ckind(p) == TK_LPAREN() {        // a call / struct ctor: name(args)
       adv(p)
