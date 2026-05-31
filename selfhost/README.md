@@ -184,8 +184,12 @@ symbol set) is chosen so these slot in without a rewrite.
   building on an **older PATH `ailangc`**; once the fixed compiler is installed,
   the sentinel and `pos = 1` start can go. Same story for `slice`/`reverse` over
   `[Struct]` — now supported in-compiler.
-- No tuples / multi-return → parser threads position through a `*P` struct.
-  (This is a genuine language shape, not a bug — the `*P` pattern stays.)
+- Tuples / multi-return **are** supported now — `fn divmod(a,b) -> (i64, i64)`
+  returns a tuple, and `q, r := divmod(17, 5)` destructures it (a `_` slot
+  ignores a value). Implemented in both `ailangc` and the bootstrap; a tuple
+  lowers to a monomorphic `tup_<suffix>` C struct. `main.ail` itself still
+  threads parser state through a `*P` struct — it predates tuples and doesn't
+  dogfood them, which is also what keeps the strict fixpoint trivially intact.
 - `mt` arm bodies are single expressions → multi-step arms use a helper fn or a
   `{ … }` block expression.
 - `args()` returns user args only (no program name): the input file is `av[0]`,
