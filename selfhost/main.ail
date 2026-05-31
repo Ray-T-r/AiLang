@@ -88,6 +88,14 @@ fn lex(src:str) -> [Token] {
       ct
     }
 
+    // block comment `/* ... */`  (42 = '*'); unterminated runs to EOF
+    if c == 47 && i + 1 < len(src) && src[i + 1] == 42 {
+      i += 2
+      lp i + 1 < len(src) { if src[i] == 42 && src[i + 1] == 47 { br } i += 1 }
+      i += 2
+      ct
+    }
+
     // string literal "..."  — text is the inner content with escapes kept raw
     // (a `\` escapes the next byte, so `\"` stays inside the string).
     if c == 34 {                 // opening "
@@ -635,6 +643,33 @@ fn parse_match_desugar(p:*P, scruts:[Expr], is_tuple:bool) -> Expr {
   eat(p, TK_RBRACE())
   build_if_chain(conds, bodies)
 }
+// Field names of struct `name`, in DECLARED order, by scanning the token stream
+// for `st name { … }`. Returns [] when `name` isn't a declared struct — which is
+// how a brace literal `Name{…}` is told apart from a loop body like `xs {…}`.
+// Brace-depth tracked so a map-typed field (`m: {str:str}`) doesn't leak its
+// inner `:`-names as fields.
+fn struct_field_names(toks:[Token], name:str) -> [str] {
+  mu out:[str] := []
+  mu i := 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "st" && i + 2 < len(toks) && toks[i + 1].text == name {
+      mu depth := 1
+      mu j := i + 3                       // past `st Name {`
+      lp depth > 0 && j < len(toks) && toks[j].kind != TK_EOF() {
+        kk := toks[j].kind
+        if kk == TK_LBRACE() { depth += 1 }
+        el if kk == TK_RBRACE() { depth = depth - 1 }   // bootstrap has no `-=`
+        el if depth == 1 && kk == TK_IDENT() && j + 1 < len(toks) && toks[j + 1].kind == TK_COLON() {
+          out = push(out, toks[j].text)
+        }
+        j += 1
+      }
+      rt out
+    }
+    i += 1
+  }
+  out
+}
 fn parse_primary(p:*P) -> Expr {
   k := ckind(p)
   if k == TK_INT() {
@@ -769,6 +804,31 @@ fn parse_primary(p:*P) -> Expr {
       eat(p, TK_RPAREN())
       rt Call(name, args)
     }
+    if ckind(p) == TK_LBRACE() {        // brace struct literal: Name { f: v, … }
+      order := struct_field_names(p.toks, name)
+      if len(order) > 0 {               // a DECLARED struct (not a loop body `xs {…}`)
+        adv(p)                          // {
+        mu fnames:[str] := []
+        mu fvals:[Expr] := []
+        lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+          fnames = push(fnames, ctext(p)); adv(p)   // field name
+          eat(p, TK_COLON())
+          fvals = push(fvals, parse_expr(p))
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RBRACE())
+        // splice named values into declared field order → positional ctor,
+        // reusing the existing `Call`→`mk_Name` lowering. Order-independent.
+        mu cargs:[Expr] := []
+        mu oi := 0
+        lp oi < len(order) {
+          mu fi := 0
+          lp fi < len(fnames) { if fnames[fi] == order[oi] { cargs = push(cargs, fvals[fi]) } fi += 1 }
+          oi += 1
+        }
+        rt Call(name, cargs)
+      }
+    }
     rt Var(name)
   }
   if k == TK_LPAREN() {
@@ -849,7 +909,10 @@ fn parse_stmt(p:*P) -> Stmt {
       // `lp i in lo..hi { … }` — counting range (parse_expr stops at `..`).
       if ckind(p) == TK_DOTDOT() {
         adv(p)                       // ..
-        hi := parse_expr(p)
+        mu incl := false
+        if ckind(p) == TK_ASSIGN() { adv(p); incl = true }   // ..=  (inclusive)
+        mu hi := parse_expr(p)
+        if incl { hi = Bin(OP_ADD(), hi, Num(1)) }           // lo..=hi  ≡  lo..(hi+1)
         rt SLoopRange(vnm, coll, hi, parse_block(p))
       }
       rt SLoopIn(vnm, coll, parse_block(p))
@@ -897,25 +960,52 @@ fn parse_stmt(p:*P) -> Stmt {
   // `obj[idx] = expr` or `obj.field = expr` — l-value assignment. A statement
   // starting `IDENT [` or `IDENT .` parses a factor first; if `=` follows, it's
   // an l-value assignment (dispatched by the factor's shape), else a bare expr.
+  // An `IDENT.`/`IDENT[` only takes the l-value-assignment path when a lookahead
+  // confirms it ends at `=`/`+=`. Otherwise it begins a bare expression (e.g. a
+  // braceless fn body `p.x * p.x + …`) which must parse in FULL — parsing just the
+  // factor here dropped the rest and mis-reported the next operator.
   if k == TK_IDENT() && (p.toks[p.pos + 1].kind == TK_LBRACK() || p.toks[p.pos + 1].kind == TK_DOT()) {
-    lhs := parse_factor(p)
-    if ckind(p) == TK_ASSIGN() {
-      adv(p)
-      rhs := parse_expr(p)
-      rt mk_lvalue_assign(lhs, rhs)
-    }
-    // `obj[idx] += expr` / `obj.field += expr` — compound add-assign on an
-    // l-value, desugared to `lhs = lhs + expr` (the bare-name case is above).
-    if ckind(p) == TK_PLUS() && p.toks[p.pos + 1].kind == TK_ASSIGN() {
-      adv(p); adv(p)                  // + =
+    if is_lvalue_assign(p) {
+      lhs := parse_factor(p)          // the l-value chain (stops before `=`/`+`)
+      if ckind(p) == TK_ASSIGN() {
+        adv(p)
+        rt mk_lvalue_assign(lhs, parse_expr(p))
+      }
+      adv(p); adv(p)                  // `+` `=` — compound add-assign `lhs += expr`
       rt mk_lvalue_assign(lhs, Bin(OP_ADD(), lhs, parse_expr(p)))
     }
-    rt SExpr(lhs)
   }
   // bare expression statement
   SExpr(parse_expr(p))
 }
 
+// Lookahead (no token consumption): does the upcoming `IDENT(.field|[idx])…`
+// chain end at an assignment operator (`=` or `+=`)? If not, that `IDENT.`/
+// `IDENT[` opens a bare expression (e.g. `p.x * p.x`) that must parse in full.
+fn is_lvalue_assign(p:*P) -> bool {
+  mu i := p.pos + 1                   // past the head IDENT
+  lp i < len(p.toks) {
+    kk := p.toks[i].kind
+    if kk == TK_DOT() && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_IDENT() {
+      i = i + 2
+    } el if kk == TK_LBRACK() {
+      mu d := 1
+      i = i + 1
+      lp i < len(p.toks) && d > 0 {
+        ik := p.toks[i].kind
+        if ik == TK_LBRACK() { d = d + 1 }
+        el if ik == TK_RBRACK() { d = d - 1 }
+        i = i + 1
+      }
+    } el {
+      br
+    }
+  }
+  if i >= len(p.toks) rt false
+  if p.toks[i].kind == TK_ASSIGN() rt true
+  if p.toks[i].kind == TK_PLUS() && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_ASSIGN() rt true
+  false
+}
 // Build the right assignment statement from an l-value: `obj[idx]` → SIdxAssign,
 // `obj.field` → SFieldAssign; anything else degrades to a bare expr statement
 // (match arms can't hold `rt`, so this dispatch lives in a helper).
@@ -2381,6 +2471,9 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
   if t == "bytes" {                           // pretty-print via helper, then a newline
     rt ind + "print_bytes(" + gen_expr(sy, e) + "); putchar(10);\n"
   }
+  if has(sy.ctors, t) {                       // a user struct → `Name{f: v, …}` printer
+    rt ind + "print_" + t + "(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
   ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
 }
 
@@ -2693,6 +2786,30 @@ fn gen_struct_body(sd:StructDef) -> str {
   out + "};\n"
 }
 
+// `static void print_<Name>(s_Name v){ … }` — pretty-prints a struct value as
+// `Name{f: v, …}`, byte-matching ailangc: str fields raw (no quotes), bool as
+// true/false, i64 as the number, any aggregate/other field as `?` (ailangc does
+// not recurse into nested structs either). Caller (gen_print) adds the newline.
+fn gen_struct_printer(sd:StructDef) -> str {
+  mu out := "static void print_" + sd.name + "(s_" + sd.name + " v){ printf(\"" + sd.name + "{\");"
+  mu i := 0
+  lp i < len(sd.fnames) {
+    if i > 0 { out = out + " printf(\", \");" }
+    out = out + " printf(\"" + sd.fnames[i] + ": \");"
+    ft := sd.ftypes[i]
+    if ft == "str" {
+      out = out + " printf(\"%s\", v." + sd.fnames[i] + ");"
+    } el if ft == "bool" {
+      out = out + " printf(\"%s\", (v." + sd.fnames[i] + ") ? \"true\" : \"false\");"
+    } el if ft == "i64" {
+      out = out + " printf(\"%lld\", (long long)(v." + sd.fnames[i] + "));"
+    } el {
+      out = out + " printf(\"?\");"
+    }
+    i += 1
+  }
+  out + " printf(\"}\"); }\n"
+}
 fn gen_struct_ctor(sd:StructDef) -> str {
   mu out := "static s_" + sd.name + " mk_" + sd.name + "("
   mu i := 0
@@ -2946,7 +3063,62 @@ fn first_return_type(sy:*Syms, body:[Stmt]) -> str {
     if r != "" { rt r }
     i += 1
   }
-  ""                                  // no return found
+  // No `rt` found: a braceless / tail-expression body returns its LAST
+  // expression's type (the loop above fed every decl into `sy`). Only the tail
+  // counts — mid-body bare expressions are side effects, not the return.
+  if len(body) > 0 { rt last_expr_type(sy, body[len(body) - 1]) }
+  ""                                  // empty body → no return
+}
+
+fn expr_is_call(e:Expr) -> bool {
+  mt e {
+    Call(fnm, args)       => true;
+    Num(v)                => false;
+    Flt(fs)               => false;
+    Str(ss)               => false;
+    Var(nm)               => false;
+    Bin(op, l, r)         => false;
+    Unary(op, x)          => false;
+    Field(ob, fnm2)       => false;
+    Index(ob, ix)         => false;
+    Array(els, ety)       => false;
+    MapLit(mty, ks, vs)   => false;
+    Addr(x)               => false;
+    Match(sc, vn, vb, bd) => false;
+    IfE(cnd, thn, el2)    => false;
+    Try(x)                => false;
+    Lambda(ps, bd, id)    => false;
+    Bad                   => false;
+  }
+}
+// A tail bare-expression's contributed return type — but a tail *call* may be
+// void (`type_of_expr` defaults unknown/void calls to i64), and emitting
+// `return <void>` from the resulting non-void fn is invalid C. So keep call-tails
+// as "" (the fn stays void, as before); only non-call value exprs infer a type.
+fn tail_sexpr_type(sy:*Syms, e:Expr) -> str {
+  if expr_is_call(e) rt ""
+  type_of_expr(sy, e)
+}
+// The type a trailing statement contributes as an implicit tail return: a bare
+// expression (or explicit `rt`) yields its expression's type; every other
+// statement form yields "" (no value falls out of it).
+fn last_expr_type(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SExpr(e)             => tail_sexpr_type(sy, e);
+    SReturn(e)           => type_of_expr(sy, e);
+    SDecl(name,e)        => "";
+    SAssign(name,e)      => "";
+    SIdxAssign(o,i,e)    => "";
+    SFieldAssign(o,f,e)  => "";
+    SIf(c,b,eb)          => "";
+    SLoop(c,b)           => "";
+    SLoopIn(vnm,coll,b)  => "";
+    SLoopKV(kn,vn,coll,b)=> "";
+    SLoopRange(v,lo,hi,b)=> "";
+    SPrint(e)            => "";
+    SBreak               => "";
+    SContinue            => "";
+  }
 }
 
 // If this statement (or a branch/loop it contains) has a tail `rt`, the type of
@@ -3466,6 +3638,8 @@ fn compile_to_c(src:str) -> str {
   lp si < len(structs) { out = out + gen_res(structs[si].name, "s_" + structs[si].name); si += 1 }
   si = 0
   lp si < len(structs) { out = out + gen_struct_ctor(structs[si]); si += 1 }
+  si = 0
+  lp si < len(structs) { out = out + gen_struct_printer(structs[si]); si += 1 }
   ei = 0
   lp ei < len(enums) { out = out + gen_enum_ctors(enums[ei]); ei += 1 }
   out = out + "\n"
@@ -3511,7 +3685,13 @@ fn compile_to_c(src:str) -> str {
   mmains := stamp_empty_maps(&msy, mains)        // infer un-annotated `m := {}`
   msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
   mdecls := hoist_decls(&msy, mmains, "    ")
-  out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + "    return 0;\n}\n"
+  // A user `fn main()` is a normal function (emitted `f_main`), not a top-level
+  // stmt, so it'd never run. Call it after any top-level stmts. Nullary only;
+  // main.ail uses top-level stmts (no `fn main`) so this stays "" → fixpoint-safe.
+  mu maincall := ""
+  mu mk := 0
+  lp mk < len(funcs) { if funcs[mk].name == "main" && len(funcs[mk].params) == 0 { maincall = "    f_main();\n" } mk += 1 }
+  out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
   out
 }
 
