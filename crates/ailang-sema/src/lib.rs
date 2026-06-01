@@ -206,15 +206,16 @@ pub fn analyze(mut module: Module) -> (ResolvedModule, Vec<Diagnostic>) {
     // the struct's declared field order and replace with `StructLit`. This
     // lets `Point(3,4)` save ~3 tokens vs `Point{x:3, y:4}` while reusing
     // every downstream code path that already handles named struct literals.
-    if !struct_table.is_empty() {
-        let struct_field_names: HashMap<String, Vec<Ident>> = struct_table
-            .iter()
-            .map(|(n, s)| (n.clone(), s.fields.iter().map(|f| f.name.clone()).collect()))
-            .collect();
-        for item in &mut module.items {
-            if let Item::Fn(f) = item {
-                rewrite_struct_ctors_block(&mut f.body, &struct_field_names, &variant_lookup);
-            }
+    // Runs unconditionally (not gated on structs): besides struct-ctor rewriting,
+    // this pass also desugars UFCS method calls `x.f(args)` → `f(x, args)`, which
+    // applies even in struct-free programs (e.g. `text.split(" ")`).
+    let struct_field_names: HashMap<String, Vec<Ident>> = struct_table
+        .iter()
+        .map(|(n, s)| (n.clone(), s.fields.iter().map(|f| f.name.clone()).collect()))
+        .collect();
+    for item in &mut module.items {
+        if let Item::Fn(f) = item {
+            rewrite_struct_ctors_block(&mut f.body, &struct_field_names, &variant_lookup);
         }
     }
 
@@ -400,6 +401,10 @@ fn register_builtins(fn_table: &mut HashMap<String, FnSigResolved>) {
             &[("s", Ty::Str), ("sep", Ty::Str)],
             Ty::Array(Box::new(Ty::Str)),
         ),
+        // `s.cstr` / `cstr(s)` — the raw C string pointer of a str, for passing
+        // to C FFI (`ex fn`). A str is already a `const char*`, so this is the
+        // identity at the C level; the distinct builtin just documents intent.
+        ("cstr", &[("s", Ty::Str)], Ty::Str),
         // Float ↔ str conversions.
         ("float_to_str", &[("x", Ty::F64)], Ty::Str),
         ("str_to_float", &[("s", Ty::Str)], Ty::F64),
@@ -1847,6 +1852,49 @@ fn rewrite_struct_ctors_expr(
         }
         ExprKind::Try(inner) => rewrite_struct_ctors_expr(inner, structs, variants),
         ExprKind::Lit(_) | ExprKind::Ident(_) | ExprKind::Underscore => {}
+    }
+
+    // UFCS method-call sugar: `x.f(args)` where `f` is NOT a struct field name
+    // (so it can't be a closure-valued field call) → `f(x, args)`. Lets
+    // `text.split(" ")` → `split(text, " ")` and `s.cstr` → `cstr(s)` reuse the
+    // normal call path (typing + codegen). Runs before the struct-ctor rewrite.
+    let not_a_field = |name: &str| -> bool {
+        !structs.values().any(|fs| fs.iter().any(|f| f.name == name))
+    };
+    let ufcs_kind = match &e.kind {
+        // `x.f(args)` → `f(x, args)`  (method call with a non-field name)
+        ExprKind::Call { callee, args } => match &callee.kind {
+            ExprKind::Field { container, name } if not_a_field(&name.name) => {
+                let mut new_args = Vec::with_capacity(args.len() + 1);
+                new_args.push((**container).clone());
+                new_args.extend(args.iter().cloned());
+                Some(ExprKind::Call {
+                    callee: Box::new(Expr {
+                        kind: ExprKind::Ident(name.name.clone()),
+                        span: name.span,
+                    }),
+                    args: new_args,
+                })
+            }
+            _ => None,
+        },
+        // `x.f` (bare property, no parens) → `f(x)`. Restricted to a small set
+        // of known property-builtins, NOT arbitrary field access — a real field
+        // on a C-header struct (`r.quot` on `div_t`, whose fields aren't in
+        // struct_table) must stay a field, not become a call `quot(r)`.
+        ExprKind::Field { container, name } if matches!(name.name.as_str(), "cstr") => {
+            Some(ExprKind::Call {
+                callee: Box::new(Expr {
+                    kind: ExprKind::Ident(name.name.clone()),
+                    span: name.span,
+                }),
+                args: vec![(**container).clone()],
+            })
+        }
+        _ => None,
+    };
+    if let Some(k) = ufcs_kind {
+        e.kind = k;
     }
 
     // Now, if THIS node is a Call to a known struct name with matching arity,

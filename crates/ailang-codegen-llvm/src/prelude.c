@@ -185,6 +185,9 @@ static int64_t ailang_str_index_of(const char* haystack, const char* needle) {
     const char* p = strstr(haystack, needle);
     return p ? (int64_t)(p - haystack) : (int64_t)-1;
 }
+/* `cstr(s)` — the raw C pointer of a str, for passing to C FFI. A str is
+   already a `const char*`, so this is the identity (NULL → ""). */
+static const char* cstr(const char* s) { return s ? s : ""; }
 static const char* to_upper(const char* s) {
     if (!s) return "";
     size_t n = strlen(s);

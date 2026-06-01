@@ -465,6 +465,17 @@ pub(crate) fn emit_fn_signature(out: &mut String, f: &FnDecl, res: &ResolvedModu
 pub(crate) fn emit_extern(out: &mut String, e: &ExternDecl) {
     let ret = c_ty_for_ret(e.sig.return_ty.as_ref());
     let name = &e.sig.name.name;
+    // Variadic stdio functions (`printf` family) are already declared by the
+    // prelude's <stdio.h>. Re-declaring them with our own spellings (e.g.
+    // `const uint8_t*` from `fmt:*u8` vs the header's `const char*`) is a
+    // "conflicting types" error, so rely on the header — the call binds to it.
+    const HEADER_VARIADIC: &[&str] = &[
+        "printf", "fprintf", "sprintf", "snprintf", "dprintf", "scanf", "fscanf", "sscanf",
+    ];
+    if e.sig.variadic && HEADER_VARIADIC.contains(&name.as_str()) {
+        let _ = writeln!(out, "#undef {name}");
+        return;
+    }
     // A `cinc`'d header may expose this symbol as a function-like macro — e.g.
     // glibc's <ctype.h> defines `toupper`/`tolower` as macros — which would
     // mangle the `extern` re-declaration below (the preprocessor expands
