@@ -267,6 +267,7 @@ en Expr {
   Try(e:Expr),                           // e?  — propagate err to the enclosing fn
   Lambda(params:[str], body:Expr, lamid:i64),   // fn(a,b) expr — HOF arg (inlined) OR first-class closure value (lifted); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
   Tuple(elems:[Expr]),                   // (a, b, …) — tuple literal, for multi-return
+  BlockE(body:[Stmt]),                   // { s1; s2; …; tail } as a value — last stmt's expr is the value
   Bad,
 }
 
@@ -372,6 +373,7 @@ fn pipe_call(lhs:Expr, rhs:Expr) -> Expr {
     Var(n)             => Call(n, [lhs]);
     Call(f, a)         => Call(f, prepend_arg(lhs, a));
     Tuple(tes)         => rhs;
+    BlockE(bb)         => rhs;
     Num(v)             => rhs;
     Flt(fs)            => rhs;
     Str(s)             => rhs;
@@ -586,6 +588,7 @@ fn is_bad(e:Expr) -> bool {
   mt e {
     Bad                => true;
     Tuple(tes)         => false;
+    BlockE(bb)         => false;
     Num(v)             => false;
     Flt(fs)            => false;
     Str(s)             => false;
@@ -625,6 +628,7 @@ fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
   mt e {
     Var(n)             => subst_var_hit(n, nm, repl, e);
     Tuple(tes)         => Tuple(subst_args(tes,nm,repl));
+    BlockE(bb)         => e;
     Bin(o,a,b)         => Bin(o, subst_var(a,nm,repl), subst_var(b,nm,repl));
     Unary(o,x)         => Unary(o, subst_var(x,nm,repl));
     Call(f,ar)         => Call(f, subst_args(ar,nm,repl));
@@ -728,6 +732,29 @@ fn struct_field_names(toks:[Token], name:str) -> [str] {
     i += 1
   }
   out
+}
+// Disambiguate a `{` in expression position: a BLOCK `{ a:=3; b:=4; a*b }` vs a
+// MAP literal `{}` / `{k:v,…}`. Scan to the matching `}` (depth-tracked over all
+// bracket kinds); at depth 1 a `:=` or `;` means block, a `:` means map. An empty
+// `{}` is a map; a brace with tokens but no `:`/`;`/`:=` (a bare tail expr) is a block.
+fn brace_is_block(p:*P) -> bool {
+  mu i := p.pos + 1
+  mu depth := 1
+  mu saw := false
+  lp i < len(p.toks) {
+    kk := p.toks[i].kind
+    if kk == TK_RBRACE() && depth == 1 { br }     // matching close
+    saw = true
+    if kk == TK_LBRACE() || kk == TK_LBRACK() || kk == TK_LPAREN() { depth += 1 }
+    el if kk == TK_RBRACE() || kk == TK_RBRACK() || kk == TK_RPAREN() { depth = depth - 1 }
+    el if depth == 1 {
+      if kk == TK_WALRUS() rt true               // a decl ⇒ block
+      if kk == TK_SEMI() rt true                 // a separator ⇒ block
+      if kk == TK_COLON() rt false               // a k:v pair ⇒ map
+    }
+    i = i + 1
+  }
+  saw                                            // bare expr ⇒ block; empty {} ⇒ map
 }
 fn parse_primary(p:*P) -> Expr {
   k := ckind(p)
@@ -842,6 +869,11 @@ fn parse_primary(p:*P) -> Expr {
     }
     eat(p, TK_RBRACK())
     rt Array(elems, "")
+  }
+  // block expression `{ s1; s2; …; tail }` — distinguished from a map literal
+  // by a `:=`/`;` (or a bare tail expr) inside the braces.
+  if k == TK_LBRACE() && brace_is_block(p) {
+    rt BlockE(parse_block(p))
   }
   // map literal `{}` or `{k: v, k: v, …}` (mirrors the array-literal loop)
   if k == TK_LBRACE() {
@@ -1126,6 +1158,7 @@ fn mk_lvalue_assign(lhs:Expr, rhs:Expr) -> Stmt {
     Index(obj, idx)  => SIdxAssign(obj, idx, rhs);
     Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs);
     Tuple(tes)       => SExpr(lhs);
+    BlockE(bb)       => SExpr(lhs);
     Num(v)           => SExpr(lhs);
     Flt(fs)          => SExpr(lhs);
     Str(s)           => SExpr(lhs);
@@ -1159,6 +1192,7 @@ fn stamp_array_ann(e:Expr, ety:str) -> Expr {
   mt e {
     Array(elems, old) => stamp_if_empty(elems, old, ety);
     Tuple(tes)        => e;
+    BlockE(bb)        => e;
     Num(v)            => e;
     Flt(fs)           => e;
     Str(s)            => e;
@@ -1183,6 +1217,7 @@ fn stamp_map_ann(e:Expr, mty:str) -> Expr {
   mt e {
     MapLit(old,mks,mvs) => MapLit(mty, mks, mvs);
     Tuple(tes)        => e;
+    BlockE(bb)        => e;
     Array(elems, old) => e;
     Addr(x)           => e;
     Match(sc,vn,vb,bd) => e;
@@ -1646,6 +1681,7 @@ fn type_of_expr(sy:*Syms, e:Expr) -> str {
     Try(e)           => result_inner(type_of_expr(sy, e));
     Lambda(ps,b,id)  => fn_type_of(len(ps), type_of_expr(sy, b));
     Tuple(elems)     => tuple_type_of(sy, elems);
+    BlockE(body)     => block_type(sy, body);
     Bad              => "i64";
   }
 }
@@ -1832,6 +1868,7 @@ fn gen_expr(sy:*Syms, e:Expr) -> str {
     Try(e)           => gen_try(sy, e);
     Lambda(ps,b,id)  => gen_lambda(sy, id);
     Tuple(elems)     => gen_tuple_lit(sy, elems);
+    BlockE(body)     => gen_block_e(sy, body);
     Bad              => "0";
   }
 }
@@ -2022,6 +2059,7 @@ fn lam_params(e:Expr) -> [str] {
     Index(o,i)       => empty_strs();
     Array(es,et)     => empty_strs();
     Tuple(tes)       => empty_strs();
+    BlockE(bb)       => empty_strs();
     MapLit(m,mks,mvs) => empty_strs();
     Addr(x)          => empty_strs();
     Match(sc,vn,vb,bd) => empty_strs();
@@ -2034,6 +2072,7 @@ fn lam_body(e:Expr) -> Expr {
   mt e {
     Lambda(ps,b,id)  => b;
     Tuple(tes)       => Bad;
+    BlockE(bb)       => Bad;
     Num(v)           => Bad;
     Flt(s)           => Bad;
     Str(s)           => Bad;
@@ -2087,6 +2126,7 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     Unary(op,x)      => fv_walk(x, acc);
     Call(fname,args) => fv_args(args, acc);            // fname is a fn, not a captured var
     Tuple(tes)       => fv_args(tes, acc);
+    BlockE(bb)       => acc;
     Field(obj,fnm)   => fv_walk(obj, acc);
     Index(obj,idx)   => fv_walk(idx, fv_walk(obj, acc));
     Array(elems,ety) => fv_args(elems, acc);
@@ -2592,6 +2632,72 @@ fn gen_tuple_typedef(ty:str) -> str {
     i += 1
   }
   out + "} tup_" + tuple_suffix(ty) + ";\n"
+}
+
+// ----- block expressions (`{ s1; s2; …; tail }` as a value) -----------------
+// Type = the tail (last stmt)'s expression type. Lowers to a GNU statement-expr
+// `({ <stmts>; <tail>; })`; the block's `:=` decls are block-LOCAL (declared in
+// place, naturally C-scoped — no function-top hoist), so a `_` of the same name
+// in two sibling blocks never collides.
+fn block_type(sy:*Syms, body:[Stmt]) -> str {
+  n := len(body)
+  if n == 0 rt "i64"
+  last_expr_type(sy, body[n - 1])
+}
+// One non-tail statement inside a block: a `:=` declares a block-local (full C
+// decl with its type); every other form reuses the normal statement codegen.
+fn gen_blk_decl(sy:*Syms, name:str, e:Expr) -> str {
+  ty := type_of_expr(sy, e)
+  set_ty(sy, name, ty)
+  cty(ty) + " v_" + name + " = " + gen_expr(sy, e) + "; "
+}
+fn gen_blk_stmt(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SDecl(name,e)            => gen_blk_decl(sy, name, e);
+    SDestructure(names,e)    => gen_stmt(sy, s, "");
+    SAssign(name,e)          => gen_stmt(sy, s, "");
+    SIdxAssign(o,i,e)        => gen_stmt(sy, s, "");
+    SFieldAssign(o,f,e)      => gen_stmt(sy, s, "");
+    SReturn(e)               => gen_stmt(sy, s, "");
+    SPrint(e)                => gen_stmt(sy, s, "");
+    SIf(c,b,eb)              => gen_stmt(sy, s, "");
+    SLoop(c,b)               => gen_stmt(sy, s, "");
+    SLoopIn(vnm,coll,b)      => gen_stmt(sy, s, "");
+    SLoopKV(kn,vn,coll,b)    => gen_stmt(sy, s, "");
+    SLoopRange(v,lo,hi,b)    => gen_stmt(sy, s, "");
+    SBreak                   => gen_stmt(sy, s, "");
+    SContinue                => gen_stmt(sy, s, "");
+    SExpr(e)                 => gen_stmt(sy, s, "");
+  }
+}
+// The tail statement supplies the block's value: a bare expr (or `rt`) is that
+// value; any other form runs as a statement and the block yields 0.
+fn gen_blk_tail(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SExpr(e)                 => gen_expr(sy, e) + "; ";
+    SReturn(e)               => gen_expr(sy, e) + "; ";
+    SDecl(name,e)            => gen_blk_decl(sy, name, e) + "0; ";
+    SDestructure(names,e)    => gen_stmt(sy, s, "") + "0; ";
+    SAssign(name,e)          => gen_stmt(sy, s, "") + "0; ";
+    SIdxAssign(o,i,e)        => gen_stmt(sy, s, "") + "0; ";
+    SFieldAssign(o,f,e)      => gen_stmt(sy, s, "") + "0; ";
+    SPrint(e)                => gen_stmt(sy, s, "") + "0; ";
+    SIf(c,b,eb)              => gen_stmt(sy, s, "") + "0; ";
+    SLoop(c,b)               => gen_stmt(sy, s, "") + "0; ";
+    SLoopIn(vnm,coll,b)      => gen_stmt(sy, s, "") + "0; ";
+    SLoopKV(kn,vn,coll,b)    => gen_stmt(sy, s, "") + "0; ";
+    SLoopRange(v,lo,hi,b)    => gen_stmt(sy, s, "") + "0; ";
+    SBreak                   => "break; 0; ";
+    SContinue                => "continue; 0; ";
+  }
+}
+fn gen_block_e(sy:*Syms, body:[Stmt]) -> str {
+  n := len(body)
+  if n == 0 rt "0"
+  mu out := "({ "
+  mu i := 0
+  lp i < n - 1 { out = out + gen_blk_stmt(sy, body[i]); i += 1 }
+  out + gen_blk_tail(sy, body[n - 1]) + "})"
 }
 
 // Emit `if (c) { body } [else { else_b }]`. The else block is omitted when
@@ -3302,6 +3408,7 @@ fn collect_lams_expr(base:*Syms, sy:*Syms, e:Expr) -> i64 {
     Var(n)           => 0;
     MapLit(m,mks,mvs) => collect_kv(base, sy, mks, mvs);
     Tuple(elems)     => collect_args(base, sy, elems);
+    BlockE(bb)       => collect_lams(base, sy, bb);
     Bad              => 0;
   }
 }
@@ -3376,6 +3483,7 @@ fn expr_is_cmp(e:Expr) -> bool {
     Try(x)                => false;
     Lambda(ps, bd, id)    => false;
     Tuple(tes)            => false;
+    BlockE(bb)            => false;
     Bad                   => false;
   }
 }
@@ -3383,6 +3491,7 @@ fn expr_is_call(e:Expr) -> bool {
   mt e {
     Call(fnm, args)       => true;
     Tuple(tes)            => false;
+    BlockE(bb)            => false;
     Num(v)                => false;
     Flt(fs)               => false;
     Str(ss)               => false;
@@ -3509,6 +3618,7 @@ fn is_empty_maplit(e:Expr) -> bool {
   mt e {
     MapLit(ml,mks,mvs) => len(mks) == 0;
     Tuple(tes)         => false;
+    BlockE(bb)         => false;
     Var(n)             => false;
     Num(v)             => false;
     Flt(fs)            => false;
@@ -3588,6 +3698,7 @@ fn is_empty_array(e:Expr) -> bool {
   mt e {
     Array(es,et)       => len(es) == 0 && et == "";
     Tuple(tes)         => false;
+    BlockE(bb)         => false;
     MapLit(ml,mks,mvs) => false;
     Var(n)             => false;
     Num(v)             => false;
@@ -3614,6 +3725,7 @@ fn push_call_elem(sy:*Syms, e:Expr) -> str {
   mt e {
     Call(fname, args)  => push_args_elem(sy, fname, args);
     Tuple(tes)         => "";
+    BlockE(bb)         => "";
     Array(es,et)       => "";
     MapLit(ml,mks,mvs) => "";
     Var(n)             => "";
