@@ -265,7 +265,7 @@ en Expr {
   Match(scrut:Expr, vnames:[str], vbinds:[str], bodies:[Expr]),
   IfE(cond:Expr, then:Expr, els:Expr),   // if c { e } el { e } as an expression
   Try(e:Expr),                           // e?  — propagate err to the enclosing fn
-  Lambda(params:[str], body:Expr, lamid:i64),   // fn(a,b) expr — HOF arg (inlined) OR first-class closure value (lifted); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
+  Lambda(params:[str], ptypes:[str], body:Expr, lamid:i64),   // fn(a:T,b) expr — HOF arg (inlined) OR first-class closure value (lifted); ptypes parallel to params ("i64" if unannotated); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
   Tuple(elems:[Expr]),                   // (a, b, …) — tuple literal, for multi-return
   BlockE(body:[Stmt]),                   // { s1; s2; …; tail } as a value — last stmt's expr is the value
   Bad,
@@ -387,7 +387,7 @@ fn pipe_call(lhs:Expr, rhs:Expr) -> Expr {
     Match(sc,vn,vb,bd) => rhs;
     IfE(c,t,el2)       => rhs;
     Try(e2)            => rhs;
-    Lambda(ps,b,id)    => rhs;
+    Lambda(ps,pts,b,id)    => rhs;
     Bad                => rhs;
   }
 }
@@ -604,7 +604,7 @@ fn is_bad(e:Expr) -> bool {
     Match(sc,vn,vb,bd) => false;
     IfE(c,t,el2)       => false;
     Try(e2)            => false;
-    Lambda(ps,b,id)    => false;
+    Lambda(ps,pts,b,id)    => false;
   }
 }
 // Substitute Var(nm) → repl throughout an expression — used to bind a match
@@ -640,7 +640,7 @@ fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
     Match(sc,vn,vb,bd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl));
     IfE(c,t,el2)       => IfE(subst_var(c,nm,repl), subst_var(t,nm,repl), subst_var(el2,nm,repl));
     Try(x)             => Try(subst_var(x,nm,repl));
-    Lambda(ps,b,id)    => Lambda(ps, subst_var(b,nm,repl), id);
+    Lambda(ps,pts,b,id)    => Lambda(ps, pts, subst_var(b,nm,repl), id);
     Num(v)             => e;
     Flt(fs)            => e;
     Str(s)             => e;
@@ -781,10 +781,12 @@ fn parse_primary(p:*P) -> Expr {
     adv(p)                              // fn
     eat(p, TK_LPAREN())
     mu params:[str] := []
+    mu ptypes:[str] := []
     lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
       if ckind(p) == TK_IDENT() {
         params = push(params, ctext(p)); adv(p)
-        if ckind(p) == TK_COLON() { adv(p); parse_type(p) }   // skip optional `: Type` (Lambda keeps names only)
+        if ckind(p) == TK_COLON() { adv(p); ptypes = push(ptypes, parse_type(p)) }   // `: Type`
+        el { ptypes = push(ptypes, "i64") }                  // unannotated param → i64
       } el if ckind(p) == TK_COMMA() {
         adv(p)
       } el {
@@ -792,7 +794,7 @@ fn parse_primary(p:*P) -> Expr {
       }
     }
     eat(p, TK_RPAREN())
-    rt Lambda(params, parse_expr(p), id)
+    rt Lambda(params, ptypes, parse_expr(p), id)
   }
   // `mt scrut { Variant(b…) => body; … }` — match expression
   if k == TK_IDENT() && ctext(p) == "mt" {
@@ -1172,7 +1174,7 @@ fn mk_lvalue_assign(lhs:Expr, rhs:Expr) -> Stmt {
     Match(sc,vn,vb,bd) => SExpr(lhs);
     IfE(c,t,el2)     => SExpr(lhs);
     Try(e2)          => SExpr(lhs);
-    Lambda(ps,b,id)  => SExpr(lhs);
+    Lambda(ps,pts,b,id)  => SExpr(lhs);
     Bad              => SExpr(lhs);
   }
 }
@@ -1207,7 +1209,7 @@ fn stamp_array_ann(e:Expr, ety:str) -> Expr {
     Match(sc,vn,vb,bd) => e;
     IfE(c,t,el2)      => e;
     Try(e2)           => e;
-    Lambda(ps,b,id)   => e;
+    Lambda(ps,pts,b,id)   => e;
     Bad               => e;
   }
 }
@@ -1232,7 +1234,7 @@ fn stamp_map_ann(e:Expr, mty:str) -> Expr {
     Index(o,i)        => e;
     IfE(c,t,el2)      => e;
     Try(e2)           => e;
-    Lambda(ps,b,id)   => e;
+    Lambda(ps,pts,b,id)   => e;
     Bad               => e;
   }
 }
@@ -1395,6 +1397,39 @@ fn fn_type_of(np:i64, ret:str) -> str {
   mu k := 0
   lp k < np { if k > 0 { s = s + "," }   s = s + "i64"; k += 1 }
   s + ")" + ret
+}
+// A lambda's closure type "@fn(<pts>)<ret>": seed the params with their declared
+// types first so the body's return type infers correctly (`fn(name:str) greeting
+// + name` returns str, not i64). Mirrors register_lam's seeding.
+fn lambda_type(sy:*Syms, ps:[str], pts:[str], b:Expr) -> str {
+  mu i := 0
+  lp i < len(ps) { if i < len(pts) { set_ty(sy, ps[i], pts[i]) }   i += 1 }
+  fn_type_of_pts(pts, type_of_expr(sy, b))
+}
+// Like fn_type_of but with the real (possibly annotated) param types.
+fn fn_type_of_pts(pts:[str], ret:str) -> str {
+  mu s := "@fn("
+  mu k := 0
+  lp k < len(pts) { if k > 0 { s = s + "," }   s = s + pts[k]; k += 1 }
+  s + ")" + ret
+}
+// The param type list of a closure type "@fn(<pts>)<ret>". Splits on a top-level
+// ',' (depth-tracked over nested parens). MVP: simple param types (str/i64/…).
+fn fn_params_of(sig:str) -> [str] {
+  mu out:[str] := []
+  mu i := 4                                  // skip "@fn("
+  mu depth := 0
+  mu cur := ""
+  lp i < len(sig) {
+    c := sig[i]
+    if c == 40 { depth += 1; cur = cur + "(" }                        // '('
+    el if c == 41 { if depth == 0 { br }   depth = depth - 1; cur = cur + ")" }   // ')'
+    el if c == 44 && depth == 0 { out = push(out, cur); cur = "" }    // ',' separator
+    el { cur = cur + substring(sig, i, i + 1) }
+    i += 1
+  }
+  if len(cur) > 0 { out = push(out, cur) }
+  out
 }
 // The pointee type of `ty` if it's a pointer, else `ty` unchanged. Used so
 // `p.field` / `p[i]` on a `*T` looks through to T's fields/elements.
@@ -1679,7 +1714,7 @@ fn type_of_expr(sy:*Syms, e:Expr) -> str {
     Match(sc,vn,vb,bd) => match_type(sy, bd);
     IfE(c,t,el2)     => type_of_expr(sy, t);
     Try(e)           => result_inner(type_of_expr(sy, e));
-    Lambda(ps,b,id)  => fn_type_of(len(ps), type_of_expr(sy, b));
+    Lambda(ps,pts,b,id)  => lambda_type(sy, ps, pts, b);
     Tuple(elems)     => tuple_type_of(sy, elems);
     BlockE(body)     => block_type(sy, body);
     Bad              => "i64";
@@ -1866,7 +1901,7 @@ fn gen_expr(sy:*Syms, e:Expr) -> str {
     Match(sc,vn,vb,bd) => gen_match(sy, sc, vn, vb, bd);
     IfE(c,t,el2)     => gen_ife(sy, c, t, el2);
     Try(e)           => gen_try(sy, e);
-    Lambda(ps,b,id)  => gen_lambda(sy, id);
+    Lambda(ps,pts,b,id)  => gen_lambda(sy, id);
     Tuple(elems)     => gen_tuple_lit(sy, elems);
     BlockE(body)     => gen_block_e(sy, body);
     Bad              => "0";
@@ -2047,7 +2082,7 @@ fn empty_strs() -> [str] { mu e:[str] := []; e }
 fn no_exprs() -> [Expr] { mu e:[Expr] := []; e }   // typed empty [Expr] for ctor args
 fn lam_params(e:Expr) -> [str] {
   mt e {
-    Lambda(ps,b,id)  => ps;
+    Lambda(ps,pts,b,id)  => ps;
     Num(v)           => empty_strs();
     Flt(s)           => empty_strs();
     Str(s)           => empty_strs();
@@ -2070,7 +2105,7 @@ fn lam_params(e:Expr) -> [str] {
 }
 fn lam_body(e:Expr) -> Expr {
   mt e {
-    Lambda(ps,b,id)  => b;
+    Lambda(ps,pts,b,id)  => b;
     Tuple(tes)       => Bad;
     BlockE(bb)       => Bad;
     Num(v)           => Bad;
@@ -2134,7 +2169,7 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     Match(sc,vn,vb,bd) => fv_args(bd, fv_walk(sc, acc));   // scrutinee + every arm body
     IfE(c,t,el2)     => fv_walk(el2, fv_walk(t, fv_walk(c, acc)));
     Try(x)           => fv_walk(x, acc);
-    Lambda(ps,b,id)  => fv_walk(b, acc);                  // nested lambda body
+    Lambda(ps,pts,b,id)  => fv_walk(b, acc);                  // nested lambda body
   }
 }
 // Free vars inside a [Stmt] body — for a block-body lambda's capture analysis.
@@ -2318,9 +2353,14 @@ fn gen_lambda(sy:*Syms, id:i64) -> str {
 // env prepended. Cast spells the exact arity; args default to int64_t.
 fn gen_closure_call(sy:*Syms, fname:str, ret:str, args:[Expr]) -> str {
   cv := gen_var(sy, fname)                     // "v_f"
+  pts := fn_params_of(ty_of(sy, fname))        // the closure's declared param types
   mu cast := cty(ret) + " (*)(void*"
   mu k := 0
-  lp k < len(args) { cast = cast + ", int64_t"; k += 1 }
+  lp k < len(args) {
+    pt := if k < len(pts) { pts[k] } el { "i64" }
+    cast = cast + ", " + cty(pt)
+    k += 1
+  }
   cast = cast + ")"
   mu out := "(((" + cast + ")(" + cv + ").fn)((" + cv + ").env"
   k = 0
@@ -3026,7 +3066,11 @@ fn gen_sig(f:Func, ret:str) -> str {
 fn gen_lam_sig(lf:Func) -> str {
   mu out := "static " + cty(lf.ret) + " __lam_" + lf.name + "(void* __env"
   mu k := 0
-  lp k < len(lf.params) { out = out + ", int64_t v_" + lf.params[k]; k += 1 }
+  lp k < len(lf.params) {
+    pt := if k < len(lf.ptypes) { lf.ptypes[k] } el { "i64" }
+    out = out + ", " + cty(pt) + " v_" + lf.params[k]
+    k += 1
+  }
   out + ")"
 }
 // `typedef struct { <cty(capt)> v_<cap>; ... } __env_<id>;` — only for capturing
@@ -3049,7 +3093,10 @@ fn gen_lifted_body(base:*Syms, lf:Func) -> str {
   mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
   sy.vty = {}
   mu pj := 0
-  lp pj < len(lf.params) { set_ty(&sy, lf.params[pj], "i64"); pj += 1 }
+  lp pj < len(lf.params) {
+    pt := if pj < len(lf.ptypes) { lf.ptypes[pj] } el { "i64" }
+    set_ty(&sy, lf.params[pj], pt); pj += 1
+  }
   mu cj := 0
   lp cj < len(caps) { set_ty(&sy, caps[cj], capt[cj]); cj += 1 }
   mu out := gen_lam_sig(lf) + "{ "
@@ -3330,8 +3377,13 @@ fn seed_fn(base:*Syms, f:Func) -> Syms {
 // Syms (so a capture's type is `ty_of(sy, name)`). All collectors return a dummy
 // i64 (AiLang `mt` is expression-valued, so a side-effecting walker can't have
 // bare-block arms); effects flow through the `*Syms` pointers.
-fn register_lam(base:*Syms, sy:*Syms, ps:[str], b:Expr, id:i64) -> i64 {
+fn register_lam(base:*Syms, sy:*Syms, ps:[str], pts:[str], b:Expr, id:i64) -> i64 {
   idstr := int_to_str(id)
+  // Seed the lambda's params with their declared types so the body — and the
+  // captured-var detection / return-type inference below — types correctly
+  // (`fn(name:str) greeting + name` needs `name:str` to pick string concat).
+  mu sp := 0
+  lp sp < len(ps) { if sp < len(pts) { set_ty(sy, ps[sp], pts[sp]) }   sp += 1 }
   fvs := free_vars(b)
   mu cn := ""                              // ";"-joined capture NAMES
   mu cts := ""                             // ";"-joined capture TYPES (parallel) — `ct` is a reserved word
@@ -3349,10 +3401,7 @@ fn register_lam(base:*Syms, sy:*Syms, ps:[str], b:Expr, id:i64) -> i64 {
   // type names contain ':' (e.g. "{str:i64}", "!T") and would corrupt a split.
   base.evar["@lamcaps." + idstr] = cn
   base.evar["@lamcapt." + idstr] = cts
-  rty := type_of_expr(sy, b)               // params absent ⇒ i64 default == their real type
-  mu pts:[str] := []
-  mu pj := 0
-  lp pj < len(ps) { pts = push(pts, "i64"); pj += 1 }
+  rty := type_of_expr(sy, b)               // body typed with the params seeded above
   mu noTp:[str] := []
   mu lbody:[Stmt] := []
   lbody = push(lbody, SReturn(b))
@@ -3419,7 +3468,7 @@ fn collect_call(base:*Syms, sy:*Syms, fname:str, args:[Expr]) -> i64 {
 }
 fn collect_lams_expr(base:*Syms, sy:*Syms, e:Expr) -> i64 {
   mt e {
-    Lambda(ps,b,id)  => register_lam(base, sy, ps, b, id);
+    Lambda(ps,pts,b,id)  => register_lam(base, sy, ps, pts, b, id);
     Call(fname,args) => collect_call(base, sy, fname, args);
     Bin(op,l,r)      => collect2(base, sy, l, r);
     Unary(op,x)      => collect_lams_expr(base, sy, x);
@@ -3509,7 +3558,7 @@ fn expr_is_cmp(e:Expr) -> bool {
     Match(sc, vn, vb, bd) => false;
     IfE(cnd, thn, el2)    => false;
     Try(x)                => false;
-    Lambda(ps, bd, id)    => false;
+    Lambda(ps, pts, bd, id)    => false;
     Tuple(tes)            => false;
     BlockE(bb)            => false;
     Bad                   => false;
@@ -3534,7 +3583,7 @@ fn expr_is_call(e:Expr) -> bool {
     Match(sc, vn, vb, bd) => false;
     IfE(cnd, thn, el2)    => false;
     Try(x)                => false;
-    Lambda(ps, bd, id)    => false;
+    Lambda(ps, pts, bd, id)    => false;
     Bad                   => false;
   }
 }
@@ -3560,7 +3609,7 @@ fn call_fname(e:Expr) -> str {
     Match(sc,vn,vb,bd) => "";
     IfE(c,t,el2)       => "";
     Try(e2)            => "";
-    Lambda(ps,b,id)    => "";
+    Lambda(ps,pts,b,id)    => "";
     Tuple(tes)         => "";
     BlockE(bb)         => "";
     Bad                => "";
@@ -3671,7 +3720,7 @@ fn var_name(e:Expr) -> str {
     Match(sc,vn,vb,bd) => "";
     IfE(c,t,el2)       => "";
     Try(e2)            => "";
-    Lambda(ps,b,id)    => "";
+    Lambda(ps,pts,b,id)    => "";
     Bad                => "";
   }
 }
@@ -3694,7 +3743,7 @@ fn is_empty_maplit(e:Expr) -> bool {
     Match(sc,vn,vb,bd) => false;
     IfE(c,t,el2)       => false;
     Try(e2)            => false;
-    Lambda(ps,b,id)    => false;
+    Lambda(ps,pts,b,id)    => false;
     Bad                => false;
   }
 }
@@ -3774,7 +3823,7 @@ fn is_empty_array(e:Expr) -> bool {
     Match(sc,vn,vb,bd) => false;
     IfE(c,t,el2)       => false;
     Try(e2)            => false;
-    Lambda(ps,b,id)    => false;
+    Lambda(ps,pts,b,id)    => false;
     Bad                => false;
   }
 }
@@ -3801,7 +3850,7 @@ fn push_call_elem(sy:*Syms, e:Expr) -> str {
     Match(sc,vn,vb,bd) => "";
     IfE(c,t,el2)       => "";
     Try(e2)            => "";
-    Lambda(ps,b,id)    => "";
+    Lambda(ps,pts,b,id)    => "";
     Bad                => "";
   }
 }
