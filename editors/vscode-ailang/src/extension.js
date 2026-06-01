@@ -5,7 +5,9 @@
 const vscode = require('vscode');
 const cp = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const { KEYWORDS, CONSTANTS, TYPES, BUILTINS } = require('./vocabulary');
+const { indexSource, resolve, DEF_KINDS } = require('./symbols');
 
 let diagnosticCollection;
 let outputChannel;
@@ -16,6 +18,7 @@ function activate(context) {
   context.subscriptions.push(diagnosticCollection, outputChannel);
 
   registerCompletion(context);
+  registerNavigation(context);
 
   const checkIfAil = (doc) => {
     if (doc && doc.languageId === 'ailang' && doc.uri.scheme === 'file') {
@@ -111,6 +114,148 @@ function registerCompletion(context) {
   };
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider('ailang', provider)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Navigation: Go to Definition (Cmd/Ctrl+click) and Hover.
+// Backed by the regex symbol indexer in symbols.js. Resolves names in the
+// current file first, then follows `im "..."` imports one level for
+// cross-module jumps (e.g. clicking `min` jumps into std/math.ail).
+// ---------------------------------------------------------------------------
+
+const BUILTIN_MAP = new Map(BUILTINS.map((b) => [b.name, b]));
+const KEYWORD_MAP = new Map(KEYWORDS);
+const TYPE_SET = new Set(TYPES);
+const CONSTANT_SET = new Set(CONSTANTS);
+
+const KIND_LABELS = {
+  function: 'function',
+  extern: 'extern function (C ABI)',
+  struct: 'struct',
+  enum: 'enum',
+  variant: 'enum variant',
+  variable: 'variable',
+  param: 'parameter',
+  import: 'import alias',
+};
+
+// uri string -> { version, index }
+const docIndexCache = new Map();
+// file path -> { mtimeMs, index }
+const fileIndexCache = new Map();
+
+function indexDocument(document) {
+  const key = document.uri.toString();
+  const cached = docIndexCache.get(key);
+  if (cached && cached.version === document.version) return cached.index;
+  const index = indexSource(document.getText());
+  docIndexCache.set(key, { version: document.version, index });
+  return index;
+}
+
+function indexFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    const cached = fileIndexCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs) return cached.index;
+    const index = indexSource(fs.readFileSync(filePath, 'utf8'));
+    fileIndexCache.set(filePath, { mtimeMs: stat.mtimeMs, index });
+    return index;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Resolve an `im "spec"` payload to a file on disk: relative to the importing
+// file first, then to each workspace folder (mirrors the driver's lookup).
+function resolveImportPath(spec, fromDocPath) {
+  const candidates = [path.resolve(path.dirname(fromDocPath), spec)];
+  for (const folder of vscode.workspace.workspaceFolders || []) {
+    candidates.push(path.resolve(folder.uri.fsPath, spec));
+  }
+  return candidates.find((c) => fs.existsSync(c)) || null;
+}
+
+// Returns { sym, uri, word, range, source } — sym/uri null if no definition
+// found (word/range still populated so hover can fall back to builtins).
+function findSymbol(document, position) {
+  const range = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+  if (!range) return null;
+  const word = document.getText(range);
+
+  const index = indexDocument(document);
+  const local = resolve(index, word, position.line);
+  if (local) return { sym: local, uri: document.uri, word, range, source: null };
+
+  for (const imp of index.imports) {
+    const p = resolveImportPath(imp.spec, document.uri.fsPath);
+    if (!p) continue;
+    const fi = indexFile(p);
+    if (!fi) continue;
+    const hit = fi.symbols.find((s) => s.name === word && DEF_KINDS.has(s.kind));
+    if (hit) return { sym: hit, uri: vscode.Uri.file(p), word, range, source: imp.spec };
+  }
+  return { sym: null, uri: null, word, range, source: null };
+}
+
+function registerNavigation(context) {
+  const definitionProvider = {
+    provideDefinition(document, position) {
+      const r = findSymbol(document, position);
+      if (!r || !r.sym) return null;
+      return new vscode.Location(r.uri, new vscode.Position(r.sym.line, r.sym.character));
+    },
+  };
+
+  const hoverProvider = {
+    provideHover(document, position) {
+      const r = findSymbol(document, position);
+      if (!r) return null;
+
+      // A real definition (local or imported).
+      if (r.sym) {
+        const md = new vscode.MarkdownString();
+        md.appendCodeblock(r.sym.signature, 'ailang');
+        let meta = `_${KIND_LABELS[r.sym.kind] || r.sym.kind}_`;
+        if (r.source) meta += ` · from \`${r.source}\``;
+        md.appendMarkdown(meta);
+        if (r.sym.doc) md.appendMarkdown('\n\n' + r.sym.doc);
+        return new vscode.Hover(md, r.range);
+      }
+
+      // Builtin function.
+      const b = BUILTIN_MAP.get(r.word);
+      if (b) {
+        const md = new vscode.MarkdownString();
+        md.appendCodeblock(`${r.word}${b.sig}`, 'ailang');
+        md.appendMarkdown('_builtin function_');
+        if (b.doc) md.appendMarkdown('\n\n' + b.doc);
+        if (b.needsImport) md.appendMarkdown(`\n\nRequires \`im "${b.needsImport}"\`.`);
+        return new vscode.Hover(md, r.range);
+      }
+
+      // Keyword / type / constant.
+      if (KEYWORD_MAP.has(r.word)) {
+        return new vscode.Hover(
+          new vscode.MarkdownString(`\`${r.word}\` — _keyword_: ${KEYWORD_MAP.get(r.word)}`),
+          r.range
+        );
+      }
+      if (TYPE_SET.has(r.word)) {
+        return new vscode.Hover(new vscode.MarkdownString(`\`${r.word}\` — _primitive type_`), r.range);
+      }
+      if (CONSTANT_SET.has(r.word)) {
+        return new vscode.Hover(new vscode.MarkdownString(`\`${r.word}\` — _constant_`), r.range);
+      }
+      return null;
+    },
+  };
+
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider('ailang', definitionProvider),
+    vscode.languages.registerHoverProvider('ailang', hoverProvider),
+    vscode.workspace.onDidCloseTextDocument((doc) => docIndexCache.delete(doc.uri.toString()))
   );
 }
 
