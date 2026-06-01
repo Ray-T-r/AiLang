@@ -34,3 +34,5 @@ CLAUDE.md
 /test
 /test.ail
 /selfhost/bar1.sh
+/*.c
+/*.ail.c
