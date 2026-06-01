@@ -108,7 +108,7 @@ and drops the AiLang skill into `~/.claude/skills/` so
 curl -fsSL https://github.com/Ray-T-r/AiLang/releases/latest/download/install.sh | bash
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell)** — runs inside WSL2 (see note below):
 
 ```powershell
 iwr -useb https://github.com/Ray-T-r/AiLang/releases/latest/download/install.ps1 | iex
@@ -121,11 +121,19 @@ echo 'println("hello from ailang")' > /tmp/hi.ail
 ailc /tmp/hi.ail /tmp/hi && /tmp/hi
 ```
 
-The installer auto-installs dependencies via Homebrew (macOS),
-apt/dnf/pacman (Linux), or MSYS2 (Windows). Pass `--no-deps` (or `-NoDeps`
-on Windows) to skip that and manage them yourself — see
-[Requirements](#requirements). `ailc` shells out to clang at compile time and
-the runtime prelude links Boehm GC + OpenSSL + libpq.
+The installer auto-installs dependencies via Homebrew (macOS) or
+apt/dnf/pacman (Linux, including inside WSL). Pass `--no-deps` to skip that
+and manage them yourself — see [Requirements](#requirements). `ailc` shells
+out to clang at compile time and the runtime prelude links Boehm GC + OpenSSL
++ libpq.
+
+> **Windows = WSL2.** AiLang's compiler runtime uses POSIX APIs (BSD sockets,
+> `fork()`, POSIX regex) that have no native Windows equivalent, so there is no
+> native Windows build. The PowerShell installer above sets up
+> [WSL2](https://learn.microsoft.com/windows/wsl/) + Ubuntu (installing it if
+> needed) and runs the Linux installer inside it. After that, use `ailc` from a
+> WSL shell (`wsl`), or `wsl ailc foo.ail foo`. A native Winsock port may come
+> later.
 
 ## Build it — from nothing but C
 
