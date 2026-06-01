@@ -127,13 +127,20 @@ and manage them yourself — see [Requirements](#requirements). `ailc` shells
 out to clang at compile time and the runtime prelude links Boehm GC + OpenSSL
 + libpq.
 
-> **Windows = WSL2.** AiLang's compiler runtime uses POSIX APIs (BSD sockets,
-> `fork()`, POSIX regex) that have no native Windows equivalent, so there is no
-> native Windows build. The PowerShell installer above sets up
-> [WSL2](https://learn.microsoft.com/windows/wsl/) + Ubuntu (installing it if
-> needed) and runs the Linux installer inside it. After that, use `ailc` from a
-> WSL shell (`wsl`), or `wsl ailc foo.ail foo`. A native Winsock port may come
-> later.
+> **Windows = WSL2, with native-feeling shims.** AiLang's compiler runtime
+> uses POSIX APIs (BSD sockets, `fork()`, POSIX regex) that have no native
+> Windows equivalent, so there is no native Windows build. The PowerShell
+> installer sets up [WSL2](https://learn.microsoft.com/windows/wsl/) + Ubuntu
+> (installing it if needed), installs AiLang inside it, and adds `ailc` /
+> `ailrun` shims to your Windows `PATH` that forward into WSL transparently
+> (with path translation). So from any Windows terminal:
+>
+> ```
+> ailrun hi.ail          # compile + run, output right in your terminal
+> ailc   hi.ail myprog   # produce a binary (Linux ELF; run via: wsl ./myprog)
+> ```
+>
+> No need to type `wsl` yourself. A native Winsock port may come later.
 
 ## Build it — from nothing but C
 
