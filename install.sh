@@ -128,10 +128,7 @@ cat <<EOF
 
 Done. Try it:
 
-    cat > /tmp/hi.ail <<'AIL'
-println("hello from ailang")
-AIL
-    ailc /tmp/hi.ail /tmp/hi && /tmp/hi
+    echo 'println("hello from ailang")' > /tmp/hi.ail && ailc /tmp/hi.ail /tmp/hi && /tmp/hi
 
 If \`ailc\` is not found, restart your terminal first.
 EOF
