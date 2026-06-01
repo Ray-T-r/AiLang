@@ -710,6 +710,8 @@ fn parse_stmt(p:*P) -> Stmt {
   }
   if k == TK_IDENT() && t == "lp" {
     adv(p)
+    // `lp { … }` — bare infinite loop (≡ `lp true { … }`, i.e. C `while(1)`).
+    if ckind(p) == TK_LBRACE() { rt SLoop(Num(1), parse_block(p)) }
     // `lp (k, v) in map { … }` — iterate map entries (key + value).
     if ckind(p) == TK_LPAREN() {
       adv(p)                         // (

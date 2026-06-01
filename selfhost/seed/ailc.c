@@ -2732,6 +2732,9 @@ s_Stmt f_parse_stmt(s_P* v_p) {
     }
     if (((v_k == f_TK_IDENT()) && (strcmp(v_t, "lp") == 0))) {
         f_adv(v_p);
+        if ((f_ckind(v_p) == f_TK_LBRACE())) {
+            return mkv_SLoop(mkv_Num(1), f_parse_block(v_p));
+        }
         if ((f_ckind(v_p) == f_TK_LPAREN())) {
             f_adv(v_p);
             v_kn = f_ctext(v_p);
