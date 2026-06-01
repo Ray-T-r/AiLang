@@ -1,5 +1,6 @@
 # ---- Local-only (not shared via git) ----
 CLAUDE.md
+.vscode
 
 # ---- Editor / OS junk ----
 .DS_Store
