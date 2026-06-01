@@ -136,11 +136,17 @@ out to clang at compile time and the runtime prelude links Boehm GC + OpenSSL
 > (with path translation). So from any Windows terminal:
 >
 > ```
-> ailrun hi.ail          # compile + run, output right in your terminal
-> ailc   hi.ail myprog   # produce a binary (Linux ELF; run via: wsl ./myprog)
+> ailrun hi.ail          # compile + run, output right in your terminal (needs only WSL)
+> ailexe hi.ail hi.exe   # build a NATIVE, self-contained Windows .exe
+> ailc   hi.ail myprog   # Linux binary (run via: wsl ./myprog)
 > ```
 >
-> No need to type `wsl` yourself. A native Winsock port may come later.
+> No need to type `wsl` yourself. **`ailexe` produces a real native Windows
+> executable** (the generated C is compiled with mingw clang, Boehm GC linked
+> statically — no DLLs, no WSL needed to run it) for core AiLang programs; it
+> requires the MSYS2 mingw64 toolchain (`clang` + `gc`) on Windows. Programs
+> using the networking/regex stdlib stay POSIX-only for now — run those with
+> `ailrun`. A native Winsock port may come later.
 
 ## Build it — from nothing but C
 
