@@ -1626,14 +1626,21 @@ fn parse_extern(p:*P) -> Func {
   mu pnames:[str] := []
   mu ptypes:[str] := []
   lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
-    if ckind(p) == TK_IDENT() && ctext(p) == "mu" { adv(p) }   // optional `mu`
-    if ckind(p) == TK_IDENT() {
-      pnames = push(pnames, ctext(p)); adv(p)
-      if ckind(p) == TK_COLON() {
-        adv(p)
-        ptypes = push(ptypes, parse_type(p))
-      } el {
-        ptypes = push(ptypes, "i64")
+    if ckind(p) == TK_DOTDOT() {         // `...` variadic marker (lexed as `..` + `.`)
+      adv(p)                             // ..
+      if ckind(p) == TK_DOT() { adv(p) } // the trailing .
+      pnames = push(pnames, "...")
+      ptypes = push(ptypes, "...")       // sentinel: gen_extern emits a macro alias
+    } el {
+      if ckind(p) == TK_IDENT() && ctext(p) == "mu" { adv(p) }   // optional `mu`
+      if ckind(p) == TK_IDENT() {
+        pnames = push(pnames, ctext(p)); adv(p)
+        if ckind(p) == TK_COLON() {
+          adv(p)
+          ptypes = push(ptypes, parse_type(p))
+        } el {
+          ptypes = push(ptypes, "i64")
+        }
       }
     }
     if ckind(p) == TK_COMMA() { adv(p) }
@@ -1666,6 +1673,14 @@ fn cty_proto(ty:str) -> str {
   ty                       // a header-defined C type (e.g. div_t) — emit it raw,
 }                          // NOT s_-prefixed: an extern signature is C, not AiLang.
 fn gen_extern(f:Func) -> str {
+  // Variadic extern (`ex fn printf(fmt, ...)`): a fixed-arity `f_<name>` wrapper
+  // can't forward C varargs, so don't emit one — alias the `f_<name>` call name
+  // straight to the real symbol with a macro and rely on the system header
+  // (<stdio.h> is always included) for the prototype. Matches ailangc, which
+  // likewise skips its own prototype for the printf family and binds the header.
+  if len(f.ptypes) > 0 && f.ptypes[len(f.ptypes) - 1] == "..." {
+    rt "#undef " + f.name + "\n#define f_" + f.name + " " + f.name + "\n"
+  }
   rty := cty_ret(f.ret)
   // Always declare the real symbol (C99 needs it for libc fns with no header).
   // `#undef` first drops any function-like macro a cinc'd header defines for this
