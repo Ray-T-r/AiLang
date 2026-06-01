@@ -1,0 +1,1394 @@
+// ----- expressions ----------------------------------------------------------
+// Precedence, loosest → tightest:
+//   or  <  and  <  cmp  <  add  <  mul  <  unary(!)  <  factor
+fn cmp_op(k:i64) -> i64 {
+  if k == TK_LT() rt OP_LT()
+  if k == TK_GT() rt OP_GT()
+  if k == TK_LE() rt OP_LE()
+  if k == TK_GE() rt OP_GE()
+  if k == TK_EQ() rt OP_EQ()
+  if k == TK_NE() rt OP_NE()
+  0
+}
+
+fn parse_expr(p:*P) -> Expr { parse_coalesce(p) }
+
+// `a ?? b` — nil-coalesce, the loosest binary level. For a map index
+// `m[k] ?? d` it yields m[k] when key k is present, else the default d
+// (see gen_qq). Left-assoc; a single `??` is all the subset needs.
+fn parse_coalesce(p:*P) -> Expr {
+  mu left := parse_pipe(p)
+  lp ckind(p) == TK_QQ() { adv(p); left = Bin(OP_QQ(), left, parse_pipe(p)) }
+  left
+}
+
+// `a |> f` / `a |> f(b)` → f(a) / f(a, b): pipe the lhs in as the first argument.
+fn prepend_arg(x:Expr, xs:[Expr]) -> [Expr] {
+  mu out:[Expr] := [x]
+  mu i := 0
+  lp i < len(xs) { out = push(out, xs[i]); i += 1 }
+  out
+}
+fn pipe_call(lhs:Expr, rhs:Expr) -> Expr {
+  mt rhs {
+    Var(n)             => Call(n, [lhs]);
+    Call(f, a)         => Call(f, prepend_arg(lhs, a));
+    Tuple(tes)         => rhs;
+    BlockE(bb)         => rhs;
+    Num(v)             => rhs;
+    Flt(fs)            => rhs;
+    Str(s)             => rhs;
+    Bin(o,x,y)         => rhs;
+    Unary(o,x)         => rhs;
+    Field(o,f)         => rhs;
+    Index(o,ix)        => rhs;
+    Array(es,et)       => rhs;
+    MapLit(ml,mks,mvs) => rhs;
+    Addr(x)            => rhs;
+    Match(sc,vn,vb,bd) => rhs;
+    IfE(c,t,el2)       => rhs;
+    Try(e2)            => rhs;
+    Lambda(ps,pts,b,id)    => rhs;
+    Bad                => rhs;
+  }
+}
+fn parse_pipe(p:*P) -> Expr {
+  mu left := parse_or(p)
+  lp ckind(p) == TK_PIPEGT() { adv(p); left = pipe_call(left, parse_or(p)) }
+  left
+}
+
+fn parse_or(p:*P) -> Expr {
+  mu left := parse_and(p)
+  lp ckind(p) == TK_OR() { adv(p); left = Bin(OP_OR(), left, parse_and(p)) }
+  left
+}
+
+fn parse_and(p:*P) -> Expr {
+  mu left := parse_bitor(p)
+  lp ckind(p) == TK_AND() { adv(p); left = Bin(OP_AND(), left, parse_bitor(p)) }
+  left
+}
+// Bitwise levels (C precedence: | looser than ^ looser than &, all above cmp).
+// Infix `&` lives here; prefix address-of `&` is consumed by parse_unary when it
+// starts an operand, so the two never collide.
+fn parse_bitor(p:*P) -> Expr {
+  mu left := parse_bitxor(p)
+  lp ckind(p) == TK_PIPE() { adv(p); left = Bin(OP_BOR(), left, parse_bitxor(p)) }
+  left
+}
+fn parse_bitxor(p:*P) -> Expr {
+  mu left := parse_bitand(p)
+  lp ckind(p) == TK_CARET() { adv(p); left = Bin(OP_BXOR(), left, parse_bitand(p)) }
+  left
+}
+fn parse_bitand(p:*P) -> Expr {
+  mu left := parse_cmp(p)
+  lp ckind(p) == TK_AMP() { adv(p); left = Bin(OP_BAND(), left, parse_cmp(p)) }
+  left
+}
+
+fn parse_cmp(p:*P) -> Expr {
+  mu left := parse_shift(p)
+  o := cmp_op(ckind(p))
+  if o != 0 {
+    adv(p)
+    left = Bin(o, left, parse_shift(p))
+  }
+  left
+}
+fn parse_shift(p:*P) -> Expr {
+  mu left := parse_add(p)
+  lp true {
+    k := ckind(p)
+    if k == TK_LTLT() { adv(p); left = Bin(OP_SHL(), left, parse_add(p)) }
+    el if k == TK_GTGT() { adv(p); left = Bin(OP_SHR(), left, parse_add(p)) }
+    el { br }
+  }
+  left
+}
+
+fn parse_add(p:*P) -> Expr {
+  mu left := parse_mul(p)
+  lp true {
+    k := ckind(p)
+    if k == TK_PLUS() { adv(p); left = Bin(OP_ADD(), left, parse_mul(p)) }
+    el if k == TK_MINUS() { adv(p); left = Bin(OP_SUB(), left, parse_mul(p)) }
+    el if k == TK_CONCAT() { adv(p); left = Bin(OP_CAT(), left, parse_mul(p)) }
+    el { br }
+  }
+  left
+}
+
+fn parse_mul(p:*P) -> Expr {
+  mu left := parse_unary(p)
+  lp true {
+    k := ckind(p)
+    if k == TK_STAR() { adv(p); left = Bin(OP_MUL(), left, parse_unary(p)) }
+    el if k == TK_SLASH() { adv(p); left = Bin(OP_DIV(), left, parse_unary(p)) }
+    el if k == TK_PERCENT() { adv(p); left = Bin(OP_MOD(), left, parse_unary(p)) }
+    el { br }
+  }
+  left
+}
+
+fn parse_unary(p:*P) -> Expr {
+  if ckind(p) == TK_NOT() { adv(p); rt Unary(OP_NOT(), parse_unary(p)) }
+  if ckind(p) == TK_MINUS() { adv(p); rt Bin(OP_SUB(), Num(0), parse_unary(p)) }
+  if ckind(p) == TK_AMP() { adv(p); rt Addr(parse_unary(p)) }
+  parse_factor(p)
+}
+
+// factor := primary ('.' IDENT ('(' args ')')? | '[' index ']')*
+// `.field`/`[index]` postfixes chain left to right; `.name(args)` is a UFCS
+// method call that desugars at parse time to `name(receiver, args)` — the `(`
+// disambiguates it from a plain field access, so no struct-registry lookup is
+// needed. Bare `.cstr` is the one property-form sugar (str passthrough).
+fn parse_factor(p:*P) -> Expr {
+  mu e := parse_primary(p)
+  lp ckind(p) == TK_DOT() || ckind(p) == TK_LBRACK() {
+    if ckind(p) == TK_DOT() {
+      adv(p)                            // .
+      fname := ctext(p)
+      adv(p)                            // field / method name
+      if ckind(p) == TK_LPAREN() {      // UFCS method call: `e.f(args)` → `f(e, args)`
+        adv(p)                          // (
+        mu margs:[Expr] := [e]          // receiver becomes the first argument
+        lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+          margs = push(margs, parse_expr(p))
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RPAREN())             // )
+        e = Call(fname, margs)
+      } el if fname == "cstr" {         // bare `.cstr` property → `cstr(e)`
+        e = Call("cstr", [e])
+      } el {
+        e = Field(e, fname)
+      }
+    } el {
+      adv(p)                            // [
+      idx := parse_expr(p)
+      eat(p, TK_RBRACK())               // ]
+      e = Index(e, idx)
+    }
+  }
+  // `e?` — error propagation (postfix, binds tighter than binary operators).
+  if ckind(p) == TK_QUEST() { adv(p); rt Try(e) }
+  e
+}
+
+// Parse `{ expr }` — a brace-wrapped single expression (an `if`-expression
+// branch). The subset's value-position branches are always one expression.
+fn parse_brace_expr(p:*P) -> Expr {
+  eat(p, TK_LBRACE())
+  e := parse_expr(p)
+  eat(p, TK_RBRACE())
+  e
+}
+
+// Does a string literal's content contain a `${` interpolation hole?
+fn str_has_interp(s:str) -> bool {
+  mu i := 0
+  lp i + 1 < len(s) {
+    if s[i] == 36 && s[i + 1] == 123 { rt true }   // '$' '{'
+    i += 1
+  }
+  false
+}
+
+// Desugar an interpolated string `"a${e}b"` into a `+`-chain of literal chunks
+// and `to_str(e)` holes: `"a" + to_str(e) + "b"`. Each hole's source is lexed +
+// parsed as a fresh expression; `to_str` stringifies (str → itself, i64 → i2s).
+fn parse_interp(s:str) -> Expr {
+  mu parts:[Expr] := []
+  mu i := 0
+  mu start := 0
+  lp i < len(s) {
+    if i + 1 < len(s) && s[i] == 36 && s[i + 1] == 123 {   // ${
+      if i > start { parts = push(parts, Str(substring(s, start, i))) }
+      mu depth := 1
+      mu j := i + 2
+      lp j < len(s) {
+        d := s[j]
+        if d == 123 { depth += 1 }
+        if d == 125 { depth = depth - 1; if depth == 0 { br } }
+        j += 1
+      }
+      esrc := substring(s, i + 2, j)
+      etoks := lex(esrc)
+      mu ep := P(etoks, 0, esrc)
+      mu hole:[Expr] := []
+      hole = push(hole, parse_expr(&ep))
+      if ckind(&ep) == TK_EOF() {
+        parts = push(parts, Call("to_str", hole))        // a clean single expr → stringify
+      } el {
+        // leftover tokens → not an expression; keep it literal. Build the prefix
+        // as "$"+"{" so this very source line doesn't self-interpolate.
+        parts = push(parts, Str("$" + "{" + esrc + "}"))
+      }
+      i = j + 1
+      start = i
+    } el {
+      i += 1
+    }
+  }
+  if len(s) > start { parts = push(parts, Str(substring(s, start, len(s)))) }
+  if len(parts) == 0 rt Str("")
+  mu r := parts[0]
+  mu k := 1
+  lp k < len(parts) { r = Bin(OP_ADD(), r, parts[k]); k += 1 }
+  r
+}
+
+// Decode a char-literal's inner text to its i64 code: 'A'→65, '\n'→10, etc.
+fn char_code(s:str) -> i64 {
+  if len(s) == 0 rt 0
+  if s[0] == 92 {                  // backslash escape
+    if len(s) < 2 rt 92
+    c := s[1]
+    if c == 110 rt 10              // \n
+    if c == 116 rt 9               // \t
+    if c == 114 rt 13              // \r
+    if c == 48 rt 0                // \0
+    if c == 92 rt 92               // \\
+    if c == 39 rt 39               // \'
+    rt c
+  }
+  s[0]
+}
+// ----- match desugar: literal/wildcard/tuple patterns → an `if`/`el` chain.
+// No Match AST / gen_match change — `mt x { 0=>a; _=>b }` becomes `if x==0 {a}
+// el {b}`, and `mt (e0,e1) { (p0,p1)=>… }` ANDs each component equality. Variant
+// patterns keep the existing Match path. Tuple scrutinee components are re-
+// evaluated per arm (fine for pure exprs, which is all the examples use).
+fn is_bad(e:Expr) -> bool {
+  mt e {
+    Bad                => true;
+    Tuple(tes)         => false;
+    BlockE(bb)         => false;
+    Num(v)             => false;
+    Flt(fs)            => false;
+    Str(s)             => false;
+    Var(n)             => false;
+    Bin(o,a,b)         => false;
+    Unary(o,x)         => false;
+    Call(f,a)          => false;
+    Field(o,f)         => false;
+    Index(o,ix)        => false;
+    Array(es,et)       => false;
+    MapLit(ml,mks,mvs) => false;
+    Addr(x)            => false;
+    Match(sc,vn,vb,bd) => false;
+    IfE(c,t,el2)       => false;
+    Try(e2)            => false;
+    Lambda(ps,pts,b,id)    => false;
+  }
+}
+// Substitute Var(nm) → repl throughout an expression — used to bind a match
+// pattern variable to its scrutinee component (`(0, x) => …x…` rewrites x).
+fn is_lower_ident(s:str) -> bool {
+  if len(s) == 0 rt false
+  c := s[0]
+  c >= 97 && c <= 122
+}
+fn subst_var_hit(n:str, nm:str, repl:Expr, orig:Expr) -> Expr {
+  if n == nm rt repl
+  orig
+}
+fn subst_args(es:[Expr], nm:str, repl:Expr) -> [Expr] {
+  mu out:[Expr] := []
+  mu i := 0
+  lp i < len(es) { out = push(out, subst_var(es[i], nm, repl)); i += 1 }
+  out
+}
+fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
+  mt e {
+    Var(n)             => subst_var_hit(n, nm, repl, e);
+    Tuple(tes)         => Tuple(subst_args(tes,nm,repl));
+    BlockE(bb)         => e;
+    Bin(o,a,b)         => Bin(o, subst_var(a,nm,repl), subst_var(b,nm,repl));
+    Unary(o,x)         => Unary(o, subst_var(x,nm,repl));
+    Call(f,ar)         => Call(f, subst_args(ar,nm,repl));
+    Field(o,f)         => Field(subst_var(o,nm,repl), f);
+    Index(o,ix)        => Index(subst_var(o,nm,repl), subst_var(ix,nm,repl));
+    Array(es,et)       => Array(subst_args(es,nm,repl), et);
+    MapLit(ml,ks,vs)   => MapLit(ml, subst_args(ks,nm,repl), subst_args(vs,nm,repl));
+    Addr(x)            => Addr(subst_var(x,nm,repl));
+    Match(sc,vn,vb,bd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl));
+    IfE(c,t,el2)       => IfE(subst_var(c,nm,repl), subst_var(t,nm,repl), subst_var(el2,nm,repl));
+    Try(x)             => Try(subst_var(x,nm,repl));
+    Lambda(ps,pts,b,id)    => Lambda(ps, pts, subst_var(b,nm,repl), id);
+    Num(v)             => e;
+    Flt(fs)            => e;
+    Str(s)             => e;
+    Bad                => e;
+  }
+}
+fn parse_arm_cond(p:*P, scruts:[Expr], is_tuple:bool, bnd:*Binds) -> Expr {
+  if is_tuple {
+    if ckind(p) == TK_LPAREN() {
+      adv(p)
+      mu cond := Bad
+      mu j := 0
+      lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+        if ckind(p) == TK_IDENT() && ctext(p) == "_" { adv(p) }
+        el if ckind(p) == TK_IDENT() && is_lower_ident(ctext(p)) && ctext(p) != "true" && ctext(p) != "false" {
+          // a lowercase ident → binding: no condition, bind it to this component
+          if j < len(scruts) { bnd.names = push(bnd.names, ctext(p)); bnd.vals = push(bnd.vals, scruts[j]) }
+          adv(p)
+        }
+        el {
+          if j >= len(scruts) { report_at(p.src, p.toks[p.pos].pos, "match arm has more components than the tuple scrutinee") }
+          c := Bin(OP_EQ(), scruts[j], parse_primary(p))
+          if is_bad(cond) { cond = c } el { cond = Bin(OP_AND(), cond, c) }
+        }
+        j += 1
+        if ckind(p) == TK_COMMA() { adv(p) }
+      }
+      eat(p, TK_RPAREN())
+      if j < len(scruts) { report_at(p.src, p.toks[p.pos].pos, "match arm has fewer components than the tuple scrutinee") }
+      rt cond                       // Bad ⇒ all components `_` (catch-all)
+    }
+    if ckind(p) == TK_IDENT() && ctext(p) == "_" { adv(p) }   // bare `_` catch-all
+    rt Bad
+  }
+  if ckind(p) == TK_IDENT() && ctext(p) == "_" { adv(p); rt Bad }   // scalar wildcard
+  Bin(OP_EQ(), scruts[0], parse_primary(p))                          // scalar literal
+}
+fn build_if_chain(conds:[Expr], bodies:[Expr]) -> Expr {
+  mu acc := Bad                     // no-arm-matched fallthrough
+  mu i := len(conds) - 1
+  lp i >= 0 {
+    if is_bad(conds[i]) { acc = bodies[i] }              // catch-all → trailing else
+    el { acc = IfE(conds[i], bodies[i], acc) }
+    i = i - 1
+  }
+  acc
+}
+fn parse_match_desugar(p:*P, scruts:[Expr], is_tuple:bool) -> Expr {
+  mu conds:[Expr] := []
+  mu bodies:[Expr] := []
+  lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+    mu bnd := Binds(empty_strs(), no_exprs())
+    cond := parse_arm_cond(p, scruts, is_tuple, &bnd)
+    if ckind(p) == TK_ASSIGN() { adv(p) }   // `=>`
+    if ckind(p) == TK_GT() { adv(p) }
+    conds = push(conds, cond)
+    mu body := parse_expr(p)
+    mu bi := 0                              // bind each pattern var → its scrutinee component
+    lp bi < len(bnd.names) { body = subst_var(body, bnd.names[bi], bnd.vals[bi]); bi += 1 }
+    bodies = push(bodies, body)
+    if ckind(p) == TK_SEMI() { adv(p) }     // arm separator
+  }
+  eat(p, TK_RBRACE())
+  build_if_chain(conds, bodies)
+}
+// Field names of struct `name`, in DECLARED order, by scanning the token stream
+// for `st name { … }`. Returns [] when `name` isn't a declared struct — which is
+// how a brace literal `Name{…}` is told apart from a loop body like `xs {…}`.
+// Brace-depth tracked so a map-typed field (`m: {str:str}`) doesn't leak its
+// inner `:`-names as fields.
+fn struct_field_names(toks:[Token], name:str) -> [str] {
+  mu out:[str] := []
+  mu i := 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "st" && i + 2 < len(toks) && toks[i + 1].text == name {
+      mu depth := 1
+      mu j := i + 3                       // past `st Name {`
+      lp depth > 0 && j < len(toks) && toks[j].kind != TK_EOF() {
+        kk := toks[j].kind
+        if kk == TK_LBRACE() { depth += 1 }
+        el if kk == TK_RBRACE() { depth = depth - 1 }   // bootstrap has no `-=`
+        el if depth == 1 && kk == TK_IDENT() && j + 1 < len(toks) && toks[j + 1].kind == TK_COLON() {
+          out = push(out, toks[j].text)
+        }
+        j += 1
+      }
+      rt out
+    }
+    i += 1
+  }
+  out
+}
+// Disambiguate a `{` in expression position: a BLOCK `{ a:=3; b:=4; a*b }` vs a
+// MAP literal `{}` / `{k:v,…}`. Scan to the matching `}` (depth-tracked over all
+// bracket kinds); at depth 1 a `:=` or `;` means block, a `:` means map. An empty
+// `{}` is a map; a brace with tokens but no `:`/`;`/`:=` (a bare tail expr) is a block.
+fn brace_is_block(p:*P) -> bool {
+  mu i := p.pos + 1
+  mu depth := 1
+  mu saw := false
+  lp i < len(p.toks) {
+    kk := p.toks[i].kind
+    if kk == TK_RBRACE() && depth == 1 { br }     // matching close
+    saw = true
+    if kk == TK_LBRACE() || kk == TK_LBRACK() || kk == TK_LPAREN() { depth += 1 }
+    el if kk == TK_RBRACE() || kk == TK_RBRACK() || kk == TK_RPAREN() { depth = depth - 1 }
+    el if depth == 1 {
+      if kk == TK_WALRUS() rt true               // a decl ⇒ block
+      if kk == TK_SEMI() rt true                 // a separator ⇒ block
+      if kk == TK_COLON() rt false               // a k:v pair ⇒ map
+    }
+    i = i + 1
+  }
+  saw                                            // bare expr ⇒ block; empty {} ⇒ map
+}
+fn parse_primary(p:*P) -> Expr {
+  k := ckind(p)
+  if k == TK_INT() {
+    v := str_to_int(ctext(p)); adv(p); rt Num(v)
+  }
+  if k == TK_FLOAT() {
+    s := ctext(p); adv(p); rt Flt(s)
+  }
+  if k == TK_CHAR() {
+    c := char_code(ctext(p)); adv(p); rt Num(c)
+  }
+  if k == TK_STR() {
+    s := ctext(p); adv(p)
+    if str_has_interp(s) { rt parse_interp(s) }
+    rt Str(s)
+  }
+  // `fn(a, b) expr` — a lambda. As a map/filter/reduce arg it's inlined (params
+  // typed from the array elem); elsewhere it's a first-class closure value lifted
+  // to `__lam_<id>` (params default i64). `id` = the `fn` token's position — a
+  // stable unique tag (one P parses the whole file, so positions don't collide).
+  if k == TK_IDENT() && ctext(p) == "fn" {
+    id := p.pos                         // tag from the `fn` token, before adv
+    adv(p)                              // fn
+    eat(p, TK_LPAREN())
+    mu params:[str] := []
+    mu ptypes:[str] := []
+    lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+      if ckind(p) == TK_IDENT() {
+        params = push(params, ctext(p)); adv(p)
+        if ckind(p) == TK_COLON() { adv(p); ptypes = push(ptypes, parse_type(p)) }   // `: Type`
+        el { ptypes = push(ptypes, "i64") }                  // unannotated param → i64
+      } el if ckind(p) == TK_COMMA() {
+        adv(p)
+      } el {
+        adv(p)                                                // defensive: a stray token must never spin this loop
+      }
+    }
+    eat(p, TK_RPAREN())
+    rt Lambda(params, ptypes, parse_expr(p), id)
+  }
+  // `mt scrut { Variant(b…) => body; … }` — match expression
+  if k == TK_IDENT() && ctext(p) == "mt" {
+    adv(p)                              // mt
+    mu scruts:[Expr] := []
+    mu is_tuple := false
+    if ckind(p) == TK_LPAREN() {        // `mt (e0, e1, …)` — tuple scrutinee
+      adv(p)
+      scruts = push(scruts, parse_expr(p))
+      lp ckind(p) == TK_COMMA() { adv(p); scruts = push(scruts, parse_expr(p)); is_tuple = true }
+      eat(p, TK_RPAREN())
+    } el {
+      scruts = push(scruts, parse_expr(p))
+    }
+    eat(p, TK_LBRACE())
+    // literal / wildcard / tuple patterns → desugar to an if-chain (no Match AST);
+    // capitalized Variant patterns stay on the existing Match path below.
+    fk := ckind(p)
+    if is_tuple || fk == TK_INT() || fk == TK_STR() || fk == TK_CHAR() || (fk == TK_IDENT() && ctext(p) == "_") {
+      rt parse_match_desugar(p, scruts, is_tuple)
+    }
+    scrut := scruts[0]
+    mu vnames:[str] := []
+    mu vbinds:[str] := []
+    mu bodies:[Expr] := []
+    lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+      vname := ctext(p); adv(p)         // Variant name
+      mu binds:str := ""                 // ";"-joined binding names
+      if ckind(p) == TK_LPAREN() {
+        adv(p)
+        lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+          if len(binds) > 0 { binds = binds + ";" }
+          binds = binds + ctext(p); adv(p)
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RPAREN())
+      }
+      // `=>`  is lexed as `=` then `>` (no fat-arrow token)
+      if ckind(p) == TK_ASSIGN() { adv(p) }
+      if ckind(p) == TK_GT() { adv(p) }
+      body := parse_expr(p)
+      vnames = push(vnames, vname)
+      vbinds = push(vbinds, binds)
+      bodies = push(bodies, body)
+      if ckind(p) == TK_SEMI() { adv(p) }   // arm separator
+    }
+    eat(p, TK_RBRACE())
+    rt Match(scrut, vnames, vbinds, bodies)
+  }
+  // `if cond { e } el { e }` as an expression (branches are single expressions
+  // in the subset). Distinct from the statement `if` handled in parse_stmt.
+  if k == TK_IDENT() && ctext(p) == "if" {
+    adv(p)
+    cond := parse_expr(p)
+    then_e := parse_brace_expr(p)
+    mu els := Bad
+    if ckind(p) == TK_IDENT() && ctext(p) == "el" {
+      adv(p)
+      if ckind(p) == TK_IDENT() && ctext(p) == "if" {
+        els = parse_primary(p)        // `el if …` → nested if-expression (chain)
+      } el {
+        els = parse_brace_expr(p)
+      }
+    }
+    rt IfE(cond, then_e, els)
+  }
+  // array literal `[a, b, …]` (or empty `[]`)
+  if k == TK_LBRACK() {
+    adv(p)
+    mu elems:[Expr] := []
+    lp ckind(p) != TK_RBRACK() && ckind(p) != TK_EOF() {
+      elems = push(elems, parse_expr(p))
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_RBRACK())
+    rt Array(elems, "")
+  }
+  // block expression `{ s1; s2; …; tail }` — distinguished from a map literal
+  // by a `:=`/`;` (or a bare tail expr) inside the braces.
+  if k == TK_LBRACE() && brace_is_block(p) {
+    rt BlockE(parse_block(p))
+  }
+  // map literal `{}` or `{k: v, k: v, …}` (mirrors the array-literal loop)
+  if k == TK_LBRACE() {
+    adv(p)
+    mu mkeys:[Expr] := []
+    mu mvals:[Expr] := []
+    lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+      mkeys = push(mkeys, parse_expr(p))
+      eat(p, TK_COLON())
+      mvals = push(mvals, parse_expr(p))
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_RBRACE())
+    rt MapLit("", mkeys, mvals)
+  }
+  if k == TK_IDENT() {
+    name := ctext(p)
+    // bool literals lower to C ints (true→1, false→0)
+    // bool literals → a bool-typed node (a trivial comparison): direct use prints
+    // 1/0 (expr_is_cmp), but a variable typed from it prints true/false — exactly
+    // ailangc's _Generic behavior. Value is still 1/0.
+    if name == "true"  { adv(p); rt Bin(OP_EQ(), Num(1), Num(1)) }
+    if name == "false" { adv(p); rt Bin(OP_NE(), Num(1), Num(1)) }
+    adv(p)
+    if ckind(p) == TK_LPAREN() {        // a call / struct ctor: name(args)
+      adv(p)
+      mu args:[Expr] := []
+      lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+        args = push(args, parse_expr(p))
+        if ckind(p) == TK_COMMA() { adv(p) }
+      }
+      eat(p, TK_RPAREN())
+      rt Call(name, args)
+    }
+    if ckind(p) == TK_LBRACE() {        // brace struct literal: Name { f: v, … }
+      order := struct_field_names(p.toks, name)
+      if len(order) > 0 {               // a DECLARED struct (not a loop body `xs {…}`)
+        adv(p)                          // {
+        mu fnames:[str] := []
+        mu fvals:[Expr] := []
+        lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+          fnames = push(fnames, ctext(p)); adv(p)   // field name
+          eat(p, TK_COLON())
+          fvals = push(fvals, parse_expr(p))
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RBRACE())
+        // splice named values into declared field order → positional ctor,
+        // reusing the existing `Call`→`mk_Name` lowering. Order-independent.
+        mu cargs:[Expr] := []
+        mu oi := 0
+        lp oi < len(order) {
+          mu fi := 0
+          lp fi < len(fnames) { if fnames[fi] == order[oi] { cargs = push(cargs, fvals[fi]) } fi += 1 }
+          oi += 1
+        }
+        rt Call(name, cargs)
+      }
+    }
+    rt Var(name)
+  }
+  if k == TK_LPAREN() {
+    adv(p)
+    inner := parse_expr(p)
+    // `(a, b, …)` — a tuple literal (multi-return). A lone `(e)` stays a
+    // grouped expression (collapses to the inner expr, as before).
+    if ckind(p) == TK_COMMA() {
+      mu elems:[Expr] := [inner]
+      lp ckind(p) == TK_COMMA() {
+        adv(p)
+        if ckind(p) == TK_RPAREN() { br }   // tolerate a trailing comma
+        elems = push(elems, parse_expr(p))
+      }
+      eat(p, TK_RPAREN())
+      rt Tuple(elems)
+    }
+    eat(p, TK_RPAREN())
+    rt inner
+  }
+  // Unrecognized token: consume it so callers always make progress (a
+  // non-advancing Bad here would spin a parse loop into an unbounded push).
+  report_at(p.src, p.toks[p.pos].pos, "unexpected token '" + ctext(p) + "' in expression")
+  adv(p)
+  Bad
+}
+
+// ----- statements -----------------------------------------------------------
+// Parse a `{ stmts }` block, or a single statement, into a [Stmt].
+fn parse_block(p:*P) -> [Stmt] {
+  mu body:[Stmt] := []
+  if ckind(p) == TK_LBRACE() {
+    adv(p)
+    lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+      if ckind(p) == TK_SEMI() { adv(p); ct }   // skip `;` separators (one-liners)
+      body = push(body, parse_stmt(p))
+    }
+    eat(p, TK_RBRACE())
+  } el {
+    body = push(body, parse_stmt(p))
+  }
+  body
+}
+
+// Lookahead: does a statement start a tuple destructure `IDENT (, IDENT)+ :=`?
+// (the `+` — at least one comma — keeps a plain `name :=` on the SDecl path.)
+fn is_destructure_ahead(p:*P) -> bool {
+  if ckind(p) != TK_IDENT() { rt false }
+  mu i := p.pos + 1
+  if i >= len(p.toks) || p.toks[i].kind != TK_COMMA() { rt false }
+  lp i < len(p.toks) && p.toks[i].kind == TK_COMMA() {
+    i = i + 1
+    if i >= len(p.toks) || p.toks[i].kind != TK_IDENT() { rt false }
+    i = i + 1
+  }
+  i < len(p.toks) && p.toks[i].kind == TK_WALRUS()
+}
+// Parse `a, b, … := expr`. A name of "_" marks an ignored slot.
+fn parse_destructure(p:*P) -> Stmt {
+  mu names:[str] := []
+  lp ckind(p) == TK_IDENT() {
+    names = push(names, ctext(p))
+    adv(p)
+    if ckind(p) == TK_COMMA() { adv(p) } el { br }
+  }
+  eat(p, TK_WALRUS())               // :=
+  SDestructure(names, parse_expr(p))
+}
+
+fn parse_stmt(p:*P) -> Stmt {
+  k := ckind(p)
+  t := ctext(p)
+
+  if k == TK_IDENT() && t == "rt" {
+    adv(p)
+    rt SReturn(parse_expr(p))
+  }
+  if k == TK_IDENT() && t == "br" { adv(p); rt SBreak }
+  if k == TK_IDENT() && t == "ct" { adv(p); rt SContinue }
+  if k == TK_IDENT() && t == "if" {
+    adv(p)
+    cond := parse_expr(p)
+    body := parse_block(p)
+    // optional `el { … }`  or  `el if … { … }` (the latter nests as a single
+    // SIf inside the else-branch, which is just another [Stmt]).
+    mu else_b:[Stmt] := []
+    if ckind(p) == TK_IDENT() && ctext(p) == "el" {
+      adv(p)
+      if ckind(p) == TK_IDENT() && ctext(p) == "if" {
+        else_b = push(else_b, parse_stmt(p))   // re-enter: parses the `if …`
+      } el {
+        else_b = parse_block(p)
+      }
+    }
+    rt SIf(cond, body, else_b)
+  }
+  if k == TK_IDENT() && t == "lp" {
+    adv(p)
+    // `lp (k, v) in map { … }` — iterate map entries (key + value).
+    if ckind(p) == TK_LPAREN() {
+      adv(p)                         // (
+      kn := ctext(p); adv(p)         // k
+      eat(p, TK_COMMA())
+      vn := ctext(p); adv(p)         // v
+      eat(p, TK_RPAREN())
+      if ckind(p) == TK_IDENT() && ctext(p) == "in" { adv(p) }   // in
+      coll := parse_expr(p)
+      rt SLoopKV(kn, vn, coll, parse_block(p))
+    }
+    // `lp x in coll { … }` — iterate; vs `lp cond { … }` — while.
+    if ckind(p) == TK_IDENT() && p.toks[p.pos + 1].kind == TK_IDENT() && p.toks[p.pos + 1].text == "in" {
+      vnm := ctext(p); adv(p)       // x
+      adv(p)                         // in
+      coll := parse_expr(p)
+      // `lp i in lo..hi { … }` — counting range (parse_expr stops at `..`).
+      if ckind(p) == TK_DOTDOT() {
+        adv(p)                       // ..
+        mu incl := false
+        if ckind(p) == TK_ASSIGN() { adv(p); incl = true }   // ..=  (inclusive)
+        mu hi := parse_expr(p)
+        if incl { hi = Bin(OP_ADD(), hi, Num(1)) }           // lo..=hi  ≡  lo..(hi+1)
+        rt SLoopRange(vnm, coll, hi, parse_block(p))
+      }
+      rt SLoopIn(vnm, coll, parse_block(p))
+    }
+    cond := parse_expr(p)
+    rt SLoop(cond, parse_block(p))
+  }
+  if k == TK_IDENT() && t == "println" {
+    adv(p)
+    eat(p, TK_LPAREN())
+    e := parse_expr(p)
+    eat(p, TK_RPAREN())
+    rt SPrint(e)
+  }
+  // `mu name [:Type] := expr` — mutable declaration. The annotation pins an
+  // empty array literal's element type (`mu xs:[Token] := []`).
+  if k == TK_IDENT() && t == "mu" {
+    adv(p)
+    if is_destructure_ahead(p) { rt parse_destructure(p) }   // mu a, b := …
+    name := ctext(p)
+    adv(p)                          // name
+    mu ann := ""
+    if ckind(p) == TK_COLON() { adv(p); ann = parse_type(p) }
+    eat(p, TK_WALRUS())             // :=
+    rt SDecl(name, parse_decl_rhs(p, ann))
+  }
+  // `a, b := expr` — tuple destructure (must precede the single-name `name :=`).
+  if is_destructure_ahead(p) { rt parse_destructure(p) }
+  // `name : Type = expr` — typed immutable binding (the non-`mu` analogue of the
+  // `mu name : Type := …` form above). The annotation pins an empty array/map
+  // literal's element type, e.g. `m : {str:i64} = {}`. Accepts `=` or `:=` after
+  // the type so both `name : T = e` and `name : T := e` bind.
+  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_COLON() {
+    name := t
+    adv(p)                          // name
+    adv(p)                          // :
+    ann := parse_type(p)
+    if ckind(p) == TK_WALRUS() { adv(p) } el { eat(p, TK_ASSIGN()) }   // := or =
+    rt SDecl(name, parse_decl_rhs(p, ann))
+  }
+  // `name := expr` — new binding
+  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_WALRUS() {
+    name := t
+    adv(p); adv(p)                  // name :=
+    rt SDecl(name, parse_expr(p))
+  }
+  // `name = expr` — reassignment
+  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_ASSIGN() {
+    name := t
+    adv(p); adv(p)                  // name =
+    rt SAssign(name, parse_expr(p))
+  }
+  // `name += expr` — compound add-assign (lexed `+` then `=`); desugar to
+  // `name = name + expr`. The only compound op the subset needs.
+  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_PLUS() && p.toks[p.pos + 2].kind == TK_ASSIGN() {
+    name := t
+    adv(p); adv(p); adv(p)          // name + =
+    rt SAssign(name, Bin(OP_ADD(), Var(name), parse_expr(p)))
+  }
+  // `obj[idx] = expr` or `obj.field = expr` — l-value assignment. A statement
+  // starting `IDENT [` or `IDENT .` parses a factor first; if `=` follows, it's
+  // an l-value assignment (dispatched by the factor's shape), else a bare expr.
+  // An `IDENT.`/`IDENT[` only takes the l-value-assignment path when a lookahead
+  // confirms it ends at `=`/`+=`. Otherwise it begins a bare expression (e.g. a
+  // braceless fn body `p.x * p.x + …`) which must parse in FULL — parsing just the
+  // factor here dropped the rest and mis-reported the next operator.
+  if k == TK_IDENT() && (p.toks[p.pos + 1].kind == TK_LBRACK() || p.toks[p.pos + 1].kind == TK_DOT()) {
+    if is_lvalue_assign(p) {
+      lhs := parse_factor(p)          // the l-value chain (stops before `=`/`+`)
+      if ckind(p) == TK_ASSIGN() {
+        adv(p)
+        rt mk_lvalue_assign(lhs, parse_expr(p))
+      }
+      adv(p); adv(p)                  // `+` `=` — compound add-assign `lhs += expr`
+      rt mk_lvalue_assign(lhs, Bin(OP_ADD(), lhs, parse_expr(p)))
+    }
+  }
+  // bare expression statement
+  SExpr(parse_expr(p))
+}
+
+// Lookahead (no token consumption): does the upcoming `IDENT(.field|[idx])…`
+// chain end at an assignment operator (`=` or `+=`)? If not, that `IDENT.`/
+// `IDENT[` opens a bare expression (e.g. `p.x * p.x`) that must parse in full.
+fn is_lvalue_assign(p:*P) -> bool {
+  mu i := p.pos + 1                   // past the head IDENT
+  lp i < len(p.toks) {
+    kk := p.toks[i].kind
+    if kk == TK_DOT() && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_IDENT() {
+      i = i + 2
+    } el if kk == TK_LBRACK() {
+      mu d := 1
+      i = i + 1
+      lp i < len(p.toks) && d > 0 {
+        ik := p.toks[i].kind
+        if ik == TK_LBRACK() { d = d + 1 }
+        el if ik == TK_RBRACK() { d = d - 1 }
+        i = i + 1
+      }
+    } el {
+      br
+    }
+  }
+  if i >= len(p.toks) rt false
+  if p.toks[i].kind == TK_ASSIGN() rt true
+  if p.toks[i].kind == TK_PLUS() && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_ASSIGN() rt true
+  false
+}
+// Build the right assignment statement from an l-value: `obj[idx]` → SIdxAssign,
+// `obj.field` → SFieldAssign; anything else degrades to a bare expr statement
+// (match arms can't hold `rt`, so this dispatch lives in a helper).
+fn mk_lvalue_assign(lhs:Expr, rhs:Expr) -> Stmt {
+  mt lhs {
+    Index(obj, idx)  => SIdxAssign(obj, idx, rhs);
+    Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs);
+    Tuple(tes)       => SExpr(lhs);
+    BlockE(bb)       => SExpr(lhs);
+    Num(v)           => SExpr(lhs);
+    Flt(fs)          => SExpr(lhs);
+    Str(s)           => SExpr(lhs);
+    Var(n)           => SExpr(lhs);
+    Bin(o,a,b)       => SExpr(lhs);
+    Unary(o,x)       => SExpr(lhs);
+    Call(f,a)        => SExpr(lhs);
+    Array(es,et)     => SExpr(lhs);
+    MapLit(mlt,mks,mvs) => SExpr(lhs);
+    Addr(x)          => SExpr(lhs);
+    Match(sc,vn,vb,bd) => SExpr(lhs);
+    IfE(c,t,el2)     => SExpr(lhs);
+    Try(e2)          => SExpr(lhs);
+    Lambda(ps,pts,b,id)  => SExpr(lhs);
+    Bad              => SExpr(lhs);
+  }
+}
+
+// Parse a decl's RHS, stamping an annotation's type onto an empty aggregate
+// literal so codegen knows `mu xs:[Token] := []` is `[Token]` and
+// `mu m:{str:str} := {}` is that map type, not a bare `[]`/`{}`.
+fn parse_decl_rhs(p:*P, ann:str) -> Expr {
+  e := parse_expr(p)
+  if is_array_ann(ann) { rt stamp_array_ann(e, elem_of_ann(ann)) }
+  if is_map_ann(ann) { rt stamp_map_ann(e, ann) }
+  e
+}
+
+// If `e` is an empty array literal, re-stamp it with element type `ety`.
+fn stamp_array_ann(e:Expr, ety:str) -> Expr {
+  mt e {
+    Array(elems, old) => stamp_if_empty(elems, old, ety);
+    Tuple(tes)        => e;
+    BlockE(bb)        => e;
+    Num(v)            => e;
+    Flt(fs)           => e;
+    Str(s)            => e;
+    Var(n)            => e;
+    Bin(o,a,b)        => e;
+    Unary(o,x)        => e;
+    Call(f,a)         => e;
+    Field(o,f)        => e;
+    Index(o,i)        => e;
+    MapLit(mlt,mks,mvs) => e;
+    Addr(x)           => e;
+    Match(sc,vn,vb,bd) => e;
+    IfE(c,t,el2)      => e;
+    Try(e2)           => e;
+    Lambda(ps,pts,b,id)   => e;
+    Bad               => e;
+  }
+}
+
+// If `e` is an empty map literal, re-stamp it with map type `mty`.
+fn stamp_map_ann(e:Expr, mty:str) -> Expr {
+  mt e {
+    MapLit(old,mks,mvs) => MapLit(mty, mks, mvs);
+    Tuple(tes)        => e;
+    BlockE(bb)        => e;
+    Array(elems, old) => e;
+    Addr(x)           => e;
+    Match(sc,vn,vb,bd) => e;
+    Num(v)            => e;
+    Flt(fs)           => e;
+    Str(s)            => e;
+    Var(n)            => e;
+    Bin(o,a,b)        => e;
+    Unary(o,x)        => e;
+    Call(f,a)         => e;
+    Field(o,f)        => e;
+    Index(o,i)        => e;
+    IfE(c,t,el2)      => e;
+    Try(e2)           => e;
+    Lambda(ps,pts,b,id)   => e;
+    Bad               => e;
+  }
+}
+
+fn stamp_if_empty(elems:[Expr], old:str, ety:str) -> Expr {
+  if len(elems) == 0 { rt Array(elems, ety) }
+  Array(elems, old)
+}
+
+// ----- top-level: structs, functions, main statements ----------------------
+// `st Name { f1:T1; f2:T2 }` — collect parallel field-name/field-type arrays.
+fn parse_struct(p:*P) -> StructDef {
+  adv(p)                            // `st`
+  name := ctext(p); adv(p)          // Name
+  eat(p, TK_LBRACE())
+  mu fnames:[str] := []
+  mu ftypes:[str] := []
+  lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() {
+      fnames = push(fnames, ctext(p)); adv(p)   // field name
+      eat(p, TK_COLON())                         // :
+      ftypes = push(ftypes, parse_type(p))       // type name
+    } el {
+      adv(p)                                     // skip ; or stray
+    }
+  }
+  eat(p, TK_RBRACE())
+  StructDef(name, fnames, ftypes)
+}
+
+// `en Name { V0, V1(f:T, …), … }` — collect variant names + ";"-joined field
+// type lists (parallel arrays). A field whose type is the enclosing enum itself
+// is recorded as "@self" so codegen boxes it (heap pointer) to break the cycle.
+fn parse_enum(p:*P) -> EnumDef {
+  adv(p)                            // `en`
+  name := ctext(p); adv(p)          // Name
+  eat(p, TK_LBRACE())
+  mu vnames:[str] := []
+  mu vftypes:[str] := []
+  lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() {
+      vn := ctext(p); adv(p)        // Variant name
+      mu fts := ""
+      if ckind(p) == TK_LPAREN() {
+        adv(p)
+        mu first := true
+        lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+          // each field is `fname : Type`; we keep only the type
+          if ckind(p) == TK_IDENT() { adv(p) }   // field name
+          eat(p, TK_COLON())
+          ft := parse_type(p)
+          if ft == name { ft = "@self" }         // self-reference → box it
+          if first { fts = ft } el { fts = fts + ";" + ft }
+          first = false
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RPAREN())
+      }
+      vnames = push(vnames, vn)
+      vftypes = push(vftypes, fts)
+      if ckind(p) == TK_COMMA() { adv(p) }
+    } el {
+      adv(p)
+    }
+  }
+  eat(p, TK_RBRACE())
+  EnumDef(name, vnames, vftypes)
+}
+
+// ----- boxed enum fields (recursion-cycle breaking) -------------------------
+// A variant field is boxed (stored as a heap pointer) when storing it by value
+// would close a struct cycle: a self-reference ("@self") OR a bare field typed
+// as ANOTHER enum ("@box:<Enum>"). `is_boxed_ft` tests either; `boxed_enum`
+// returns the pointee enum name (the container for @self).
+fn is_boxed_ft(ft:str) -> bool {
+  if ft == "@self" rt true
+  len(ft) >= 5 && substring(ft, 0, 5) == "@box:"
+}
+fn boxed_enum(ft:str, selfname:str) -> str {
+  if ft == "@self" rt selfname
+  substring(ft, 5, len(ft))                 // strip "@box:"
+}
+fn is_enum_name(enums:[EnumDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(enums) { if enums[i].name == nm rt true   i += 1 }
+  false
+}
+fn is_struct_name(structs:[StructDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(structs) { if structs[i].name == nm rt true   i += 1 }
+  false
+}
+fn is_prim_name(nm:str) -> bool {
+  nm == "i64" || nm == "i32" || nm == "u32" || nm == "f64" || nm == "bool" || nm == "str" || nm == "bytes" || nm == "i8" || nm == "i16" || nm == "u8" || nm == "u16" || nm == "u64" || nm == "f32" || nm == "void"
+}
+// Mark a bare unknown name (not a primitive, has no type prefix, and isn't a
+// declared struct/enum) as a C header type "@c:<name>" so it spells raw.
+fn mark_ctype(ty:str, structs:[StructDef], enums:[EnumDef]) -> str {
+  if len(ty) == 0 rt ty
+  c := ty[0]
+  // a type prefix ([ { * ! @ ( ) means it's already a known shape
+  if c == 91 || c == 123 || c == 42 || c == 33 || c == 64 || c == 40 rt ty
+  if is_prim_name(ty) rt ty
+  if is_struct_name(structs, ty) rt ty
+  if is_enum_name(enums, ty) rt ty
+  "@c:" + ty
+}
+// Post-pass: once all user structs/enums are known, mark each extern's return
+// type that names a C-header type (e.g. `ex fn div(...) -> div_t`). The return
+// flows into the call's value type, so the `r := div(...)` local spells `div_t`
+// (not `s_div_t`). Params left as-is (header-type params are rare).
+fn mark_extern_ctypes(externs:[Func], structs:[StructDef], enums:[EnumDef]) -> [Func] {
+  mu out:[Func] := []
+  mu i := 0
+  lp i < len(externs) {
+    f := externs[i]
+    nr := mark_ctype(f.ret, structs, enums)
+    out = push(out, Func(f.name, f.params, f.ptypes, nr, f.lib, f.tparams, f.body))
+    i += 1
+  }
+  out
+}
+// Post-pass (after ALL enums are known, so forward refs resolve): mark every
+// bare field typed as a different enum "@box:<Enum>" so two enums can reference
+// each other (mutual recursion). Self-refs are already "@self"; arrays `[Enum]`
+// stay by-name (they're heap-backed `arr_<Enum>`), so only bare enum fields box.
+fn box_cross_enums(enums:[EnumDef]) -> [EnumDef] {
+  mu out:[EnumDef] := []
+  mu i := 0
+  lp i < len(enums) {
+    ed := enums[i]
+    mu newvft:[str] := []
+    mu vi := 0
+    lp vi < len(ed.vftypes) {
+      raw := ed.vftypes[vi]
+      if len(raw) == 0 {
+        newvft = push(newvft, "")           // unit variant — no fields
+      } el {
+        fts := split_semi(raw)
+        mu nf := ""
+        mu fi := 0
+        lp fi < len(fts) {
+          ft := fts[fi]
+          if ft != "@self" && is_enum_name(enums, ft) { ft = "@box:" + ft }
+          if fi == 0 { nf = ft } el { nf = nf + ";" + ft }
+          fi += 1
+        }
+        newvft = push(newvft, nf)
+      }
+      vi += 1
+    }
+    out = push(out, EnumDef(ed.name, ed.vnames, newvft))
+    i += 1
+  }
+  out
+}
+
+// A type name: `i64`/`str`/StructName, an array `[T]`, a map `{K:V}`, or a
+// pointer `*T`. Returned as a literal string ("[i64]", "{str:str}", "*P", …) —
+// a leading '[' / '{' / '*' tells codegen which kind it is.
+fn parse_type(p:*P) -> str {
+  if ckind(p) == TK_NOT() {           // `!T` — a result type (ok T | err str)
+    adv(p)                            // !
+    rt "!" + parse_type(p)
+  }
+  if ckind(p) == TK_STAR() {
+    adv(p)                            // *
+    rt "*" + parse_type(p)
+  }
+  if ckind(p) == TK_LBRACK() {
+    adv(p)                            // [
+    inner := parse_type(p)
+    eat(p, TK_RBRACK())               // ]
+    rt "[" + inner + "]"
+  }
+  if ckind(p) == TK_LBRACE() {
+    adv(p)                            // {
+    kt := parse_type(p)               // key type
+    eat(p, TK_COLON())                // :
+    vt := parse_type(p)               // value type
+    eat(p, TK_RBRACE())               // }
+    rt "{" + kt + ":" + vt + "}"
+  }
+  // `(T1, T2, …)` — a tuple type (multi-return). Encoded "(T1;T2;…)". A single
+  // `(T)` with no comma collapses to the inner type.
+  if ckind(p) == TK_LPAREN() {
+    adv(p)                            // (
+    mu inner := "("
+    mu n := 0
+    lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+      if n > 0 { inner = inner + ";" }
+      inner = inner + parse_type(p)
+      n += 1
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_RPAREN())               // )
+    if n == 1 { rt substring(inner, 1, len(inner)) }   // (T) → T
+    rt inner + ")"
+  }
+  // `fn(T,...) -> R` — a function/closure type. Encoded compactly as
+  // "@fn(<pty>,...)<ret>" (e.g. "@fn()i64", "@fn(i64)i64"); `cty` maps it to
+  // closure_t. Must precede the bare-IDENT branch so `fn` isn't read as a type
+  // name. (main.ail has no fn-type annotations, so this is dead when self-hosting.)
+  if ckind(p) == TK_IDENT() && ctext(p) == "fn" {
+    adv(p)                            // fn
+    eat(p, TK_LPAREN())               // (
+    mu sig := "@fn("
+    mu first := true
+    lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+      if first == false { sig = sig + "," }
+      sig = sig + parse_type(p)
+      first = false
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_RPAREN())               // )
+    mu ret := "i64"
+    if ckind(p) == TK_MINUS() { adv(p) }                     // (no `->` token)
+    if ckind(p) == TK_GT() { adv(p); ret = parse_type(p) }   // > RetType
+    rt sig + ")" + ret
+  }
+  if ckind(p) == TK_IDENT() {
+    t := ctext(p); adv(p); rt t
+  }
+  "i64"
+}
+
+// Type-name helpers: an array type name starts with '[', a map type name with
+// '{'. `elem_of_ann("[i64]")` → "i64"; `arr_suffix("i64")` → "i64" (a struct
+// keeps its name) — used to build the monomorphic C `arr_<suffix>` helper names.
+fn is_array_ann(ty:str) -> bool { len(ty) > 0 && ty[0] == 91 }   // '['
+fn elem_of_ann(ty:str) -> str { substring(ty, 1, len(ty) - 1) }   // strip [ ]
+fn is_map_ann(ty:str) -> bool { len(ty) > 0 && ty[0] == 123 }    // '{'
+fn is_ptr_ann(ty:str) -> bool { len(ty) > 0 && ty[0] == 42 }     // '*'
+fn deref_ann(ty:str) -> str { substring(ty, 1, len(ty)) }         // strip leading '*'
+fn is_result_ann(ty:str) -> bool { len(ty) > 0 && ty[0] == 33 }  // '!' — `!T`
+fn result_inner(ty:str) -> str { substring(ty, 1, len(ty)) }      // strip leading '!'
+// Function/closure type "@fn(<pty>,...)<ret>": `is_fn_ann` tests the "@fn"
+// prefix; `fn_ret_of` returns the return type (everything after the ')');
+// `fn_type_of` builds the annotation for a lambda of `np` i64 params → `ret`.
+fn is_fn_ann(ty:str) -> bool { len(ty) >= 3 && ty[0] == 64 && ty[1] == 102 && ty[2] == 110 }  // "@fn"
+fn fn_ret_of(sig:str) -> str {
+  mu i := 0
+  lp i < len(sig) { if sig[i] == 41 { rt substring(sig, i + 1, len(sig)) }   i += 1 }   // after ')'
+  "i64"
+}
+fn fn_type_of(np:i64, ret:str) -> str {
+  mu s := "@fn("
+  mu k := 0
+  lp k < np { if k > 0 { s = s + "," }   s = s + "i64"; k += 1 }
+  s + ")" + ret
+}
+// A lambda's closure type "@fn(<pts>)<ret>": seed the params with their declared
+// types first so the body's return type infers correctly (`fn(name:str) greeting
+// + name` returns str, not i64). Mirrors register_lam's seeding.
+fn lambda_type(sy:*Syms, ps:[str], pts:[str], b:Expr) -> str {
+  mu i := 0
+  lp i < len(ps) { if i < len(pts) { set_ty(sy, ps[i], pts[i]) }   i += 1 }
+  fn_type_of_pts(pts, type_of_expr(sy, b))
+}
+// Like fn_type_of but with the real (possibly annotated) param types.
+fn fn_type_of_pts(pts:[str], ret:str) -> str {
+  mu s := "@fn("
+  mu k := 0
+  lp k < len(pts) { if k > 0 { s = s + "," }   s = s + pts[k]; k += 1 }
+  s + ")" + ret
+}
+// The param type list of a closure type "@fn(<pts>)<ret>". Splits on a top-level
+// ',' (depth-tracked over nested parens). MVP: simple param types (str/i64/…).
+fn fn_params_of(sig:str) -> [str] {
+  mu out:[str] := []
+  mu i := 4                                  // skip "@fn("
+  mu depth := 0
+  mu cur := ""
+  lp i < len(sig) {
+    c := sig[i]
+    if c == 40 { depth += 1; cur = cur + "(" }                        // '('
+    el if c == 41 { if depth == 0 { br }   depth = depth - 1; cur = cur + ")" }   // ')'
+    el if c == 44 && depth == 0 { out = push(out, cur); cur = "" }    // ',' separator
+    el { cur = cur + substring(sig, i, i + 1) }
+    i += 1
+  }
+  if len(cur) > 0 { out = push(out, cur) }
+  out
+}
+// The pointee type of `ty` if it's a pointer, else `ty` unchanged. Used so
+// `p.field` / `p[i]` on a `*T` looks through to T's fields/elements.
+fn under_ptr(ty:str) -> str { if is_ptr_ann(ty) { deref_ann(ty) } el { ty } }
+
+// Tuple type "(T1;T2;…)": paren-prefixed, ';'-joined element type names — a new
+// prefix distinct from '[' '{' '*' '!' '@' and idents. Used for multi-return.
+// MVP: elements are flat (no nested tuples), so a flat ';' split is exact.
+fn is_tuple_ann(ty:str) -> bool { len(ty) >= 2 && ty[0] == 40 }   // '('
+fn tuple_elems(ty:str) -> [str] {
+  mu out:[str] := []
+  mu cur := ""
+  mu i := 1
+  lp i < len(ty) - 1 {                 // between the outer '(' and ')'
+    if ty[i] == 59 {                    // ';' — element separator
+      out = push(out, cur)
+      cur = ""
+    } el {
+      cur = cur + substring(ty, i, i + 1)
+    }
+    i += 1
+  }
+  out = push(out, cur)
+  out
+}
+// The C struct suffix for a tuple shape: arr_suffix of each element, joined by
+// '_' (e.g. "(i64;i64)" → "i64_i64", "(str;i64)" → "str_i64").
+fn tuple_suffix(ty:str) -> str {
+  es := tuple_elems(ty)
+  mu s := ""
+  mu i := 0
+  lp i < len(es) {
+    if i > 0 { s = s + "_" }
+    s = s + arr_suffix(es[i])
+    i += 1
+  }
+  s
+}
+
+fn parse_func(p:*P) -> Func {
+  adv(p)                            // `fn`
+  name := ctext(p); adv(p)          // name
+  // optional generic type params `<T, U>` (lexed `<` … `>`)
+  mu tparams:[str] := []
+  if ckind(p) == TK_LT() {
+    adv(p)
+    lp ckind(p) != TK_GT() && ckind(p) != TK_EOF() {
+      if ckind(p) == TK_IDENT() { tparams = push(tparams, ctext(p)); adv(p) }
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_GT())
+  }
+  eat(p, TK_LPAREN())
+  mu pnames:[str] := []
+  mu ptypes:[str] := []
+  lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() && ctext(p) == "mu" { adv(p) }   // optional `mu` — C params are mutable anyway
+    if ckind(p) == TK_IDENT() {
+      pnames = push(pnames, ctext(p)); adv(p)    // param name
+      if ckind(p) == TK_COLON() {
+        adv(p)
+        ptypes = push(ptypes, parse_type(p))     // : Type
+      } el {
+        ptypes = push(ptypes, "i64")             // unannotated → i64
+      }
+    }
+    if ckind(p) == TK_COMMA() { adv(p) }
+  }
+  eat(p, TK_RPAREN())
+  // optional `-> RetType`. We keep it: an explicit annotation is authoritative
+  // (needed for fns whose body is a tail `mt`/`if` expression with no `rt`, which
+  // body-inference would otherwise read as void). "" when absent → inferred.
+  mu ret := ""
+  if ckind(p) == TK_MINUS() { adv(p) }            // (no `->` token; '-' then '>')
+  if ckind(p) == TK_GT() { adv(p); ret = parse_type(p) }
+  Func(name, pnames, ptypes, ret, "", tparams, parse_block(p))
+}
+
+// `ex [\"lib\"] fn name(params) -> ret` — an external (C/libc) function, no body.
+// Parsed into a bodiless Func; codegen emits a thin `f_<name>` wrapper that calls
+// the real C symbol, so the normal `f_`-prefixed call path reaches it unchanged.
+// An optional `\"lib\"` before `fn` links `-llib` (recorded in the `lib` field).
+fn parse_extern(p:*P) -> Func {
+  adv(p)                            // `ex`
+  mu lib := ""
+  if ckind(p) == TK_STR() { lib = ctext(p); adv(p) }   // ex "lib" fn …
+  adv(p)                            // `fn`
+  name := ctext(p); adv(p)          // name
+  eat(p, TK_LPAREN())
+  mu pnames:[str] := []
+  mu ptypes:[str] := []
+  lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_DOTDOT() {         // `...` variadic marker (lexed as `..` + `.`)
+      adv(p)                             // ..
+      if ckind(p) == TK_DOT() { adv(p) } // the trailing .
+      pnames = push(pnames, "...")
+      ptypes = push(ptypes, "...")       // sentinel: gen_extern emits a macro alias
+    } el {
+      if ckind(p) == TK_IDENT() && ctext(p) == "mu" { adv(p) }   // optional `mu`
+      if ckind(p) == TK_IDENT() {
+        pnames = push(pnames, ctext(p)); adv(p)
+        if ckind(p) == TK_COLON() {
+          adv(p)
+          ptypes = push(ptypes, parse_type(p))
+        } el {
+          ptypes = push(ptypes, "i64")
+        }
+      }
+    }
+    if ckind(p) == TK_COMMA() { adv(p) }
+  }
+  eat(p, TK_RPAREN())
+  mu ret := ""
+  if ckind(p) == TK_MINUS() { adv(p) }
+  if ckind(p) == TK_GT() { adv(p); ret = parse_type(p) }
+  mu nobody:[Stmt] := []
+  mu notp:[str] := []
+  Func(name, pnames, ptypes, ret, lib, notp, nobody)
+}
+
+// Emit a wrapper `static <ret> f_<name>(<params>){ return (<ret>)<name>(args); }`
+// for an extern. The return type follows the declaration (`str`→`const char*`,
+// `i64`/`i32`/`bool`→`int64_t`); a void extern (empty ret) drops the `return`.
+// C type for an extern PROTOTYPE — narrow (libc-matching) types, unlike `cty`
+// which widens i32/u32→int64_t for the wrapper. So `extern double sqrt(double);`
+// / `extern int rand(void);` match libc exactly (compatible with <stdlib.h> etc).
+fn cty_proto(ty:str) -> str {
+  if is_c_type_ann(ty) rt c_type_name(ty)        // header type → raw
+  if ty == "i32" rt "int"
+  if ty == "u32" rt "unsigned int"
+  if ty == "f64" rt "double"
+  if ty == "i64" rt "int64_t"
+  if ty == "bool" rt "int"
+  if ty == "str" rt "const char*"
+  if ty == "bytes" rt "ailang_bytes"
+  if is_ptr_ann(ty) rt cty_proto(deref_ann(ty)) + "*"
+  ty                       // a header-defined C type (e.g. div_t) — emit it raw,
+}                          // NOT s_-prefixed: an extern signature is C, not AiLang.
+fn gen_extern(f:Func) -> str {
+  // Variadic extern (`ex fn printf(fmt, ...)`): a fixed-arity `f_<name>` wrapper
+  // can't forward C varargs, so don't emit one — alias the `f_<name>` call name
+  // straight to the real symbol with a macro and rely on the system header
+  // (<stdio.h> is always included) for the prototype. Matches ailangc, which
+  // likewise skips its own prototype for the printf family and binds the header.
+  if len(f.ptypes) > 0 && f.ptypes[len(f.ptypes) - 1] == "..." {
+    rt "#undef " + f.name + "\n#define f_" + f.name + " " + f.name + "\n"
+  }
+  rty := cty_ret(f.ret)
+  // Always declare the real symbol (C99 needs it for libc fns with no header).
+  // `#undef` first drops any function-like macro a cinc'd header defines for this
+  // name (e.g. <ctype.h>'s toupper) so the decl + calls bind to the real symbol;
+  // it's a no-op otherwise. A prototype that merely duplicates a header's own
+  // declaration is a compatible redeclaration, so emitting it unconditionally is
+  // safe — and cty_proto spells header types raw, so it won't clash.
+  mu out := "#undef " + f.name + "\n"
+  pr := if len(f.ret) == 0 { "void" } el { cty_proto(f.ret) }
+  out = out + "extern " + pr + " " + f.name + "("
+  mu pi := 0
+  lp pi < len(f.params) {
+    if pi > 0 { out = out + ", " }
+    out = out + cty_proto(f.ptypes[pi])
+    pi += 1
+  }
+  if len(f.params) == 0 { out = out + "void" }
+  out = out + ");\n"
+  out = out + "static " + rty + " f_" + f.name + "("
+  mu i := 0
+  lp i < len(f.params) {
+    if i > 0 { out = out + ", " }
+    out = out + cty(f.ptypes[i]) + " a" + int_to_str(i)
+    i += 1
+  }
+  if len(f.params) == 0 { out = out + "void" }
+  out = out + "){ "
+  if len(f.ret) > 0 { out = out + "return (" + rty + ")" }
+  out = out + f.name + "("
+  mu j := 0
+  lp j < len(f.params) {
+    if j > 0 { out = out + ", " }
+    out = out + "a" + int_to_str(j)
+    j += 1
+  }
+  out + "); }\n"
+}
+

@@ -23,10 +23,11 @@ A committed C snapshot — not a native binary — is deliberate: C is portable
 (any platform's clang builds it), reproducible, and reviewable in a diff; a
 checked-in binary would be macOS-arm64-only and opaque.
 
-## Regenerating after changing main.ail
+## Regenerating after changing the compiler
 
-The seed must be refreshed whenever `main.ail` changes, or `bootstrap.sh`'s
-fixpoint check will report a mismatch. With a working `ailc` (or via Rust):
+The seed must be refreshed whenever `main.ail` **or any `src/*.ail` module**
+changes (compiling `main.ail` `im`s them all), or `bootstrap.sh`'s fixpoint
+check will report a mismatch. With a working `ailc` (or via Rust):
 
 ```bash
 # from an already-bootstrapped ./selfhost/ailc:

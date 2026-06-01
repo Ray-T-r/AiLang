@@ -1,0 +1,125 @@
+// ===== AST ==================================================================
+// Operator tags (small ints) used by both codegen and precedence.
+fn OP_ADD() -> i64 { 1 }
+fn OP_SUB() -> i64 { 2 }
+fn OP_MUL() -> i64 { 3 }
+fn OP_DIV() -> i64 { 4 }
+fn OP_MOD() -> i64 { 14 }
+fn OP_LT() -> i64  { 5 }
+fn OP_GT() -> i64  { 6 }
+fn OP_LE() -> i64  { 7 }
+fn OP_GE() -> i64  { 8 }
+fn OP_EQ() -> i64  { 9 }
+fn OP_NE() -> i64  { 10 }
+fn OP_AND() -> i64 { 11 }
+fn OP_OR() -> i64  { 12 }
+fn OP_NOT() -> i64 { 13 }   // unary
+fn OP_SHL() -> i64  { 15 }   // <<
+fn OP_SHR() -> i64  { 16 }   // >>
+fn OP_BAND() -> i64 { 17 }   // &  (infix bitwise and)
+fn OP_BXOR() -> i64 { 18 }   // ^
+fn OP_BOR() -> i64  { 19 }   // |
+fn OP_CAT() -> i64  { 20 }   // ++ (string concat)
+fn OP_QQ() -> i64   { 21 }   // ?? (nil-coalesce / map get-or-default)
+
+en Expr {
+  Num(v:i64),
+  Flt(s:str),                    // f64 literal — kept as text, emitted verbatim
+  Str(s:str),                    // string literal (inner content, escapes raw)
+  Var(name:str),
+  Bin(op:i64, l:Expr, r:Expr),
+  Unary(op:i64, e:Expr),
+  Call(fname:str, args:[Expr]),
+  Field(obj:Expr, fname:str),    // obj.fname  — struct field access
+  Index(obj:Expr, idx:Expr),     // obj[idx]   — array indexing
+  Array(elems:[Expr], ety:str),  // [a, b, …]  — array literal (ety = annotated elem type, "" if inferred)
+  MapLit(mty:str, keys:[Expr], vals:[Expr]),   // {} or {k:v, …}; mty = annotation ("" if bare)
+  Addr(e:Expr),                  // &x         — address-of
+  // mt scrut { Variant(b…) => body; … } — arms as parallel arrays (avoids a
+  // `MArm` struct that would hold `Expr` by value and close a by-value cycle
+  // `Expr→MArm→Expr`; `[Expr]` bodies are heap-backed, breaking it). `vbinds[i]`
+  // is the i-th arm's ";"-joined binding names ("" for none).
+  Match(scrut:Expr, vnames:[str], vbinds:[str], bodies:[Expr]),
+  IfE(cond:Expr, then:Expr, els:Expr),   // if c { e } el { e } as an expression
+  Try(e:Expr),                           // e?  — propagate err to the enclosing fn
+  Lambda(params:[str], ptypes:[str], body:Expr, lamid:i64),   // fn(a:T,b) expr — HOF arg (inlined) OR first-class closure value (lifted); ptypes parallel to params ("i64" if unannotated); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
+  Tuple(elems:[Expr]),                   // (a, b, …) — tuple literal, for multi-return
+  BlockE(body:[Stmt]),                   // { s1; s2; …; tail } as a value — last stmt's expr is the value
+  Bad,
+}
+
+// A user struct: `st Name { f1:T1; f2:T2 }`. Field names and their type names
+// are kept in parallel arrays (a struct has no nested aggregate yet, so [str]
+// suffices). Type names are "i64" / "str" / another struct name.
+st StructDef { name:str; fnames:[str]; ftypes:[str] }
+
+// A user enum `en Name { V0, V1(f:T,…), … }`. For each variant we keep its name
+// and its field types as parallel arrays (`vnames[i]` ↔ `vftypes[i]` where the
+// latter is a ";"-joined list of field type names, "" for a unit variant). The
+// field *names* aren't needed (match binds positionally), only the count+types.
+st EnumDef { name:str; vnames:[str]; vftypes:[str] }
+
+en Stmt {
+  SDecl(name:str, e:Expr),       // name := expr  (or  mu name := expr)  — declares
+  SDestructure(names:[str], e:Expr),  // a, b := expr — destructure a tuple ("_" slot ignores)
+  SAssign(name:str, e:Expr),     // name = expr   — reassigns an existing binding
+  SIdxAssign(obj:Expr, idx:Expr, e:Expr),  // obj[idx] = expr
+  SFieldAssign(obj:Expr, fname:str, e:Expr), // obj.field = expr
+  SReturn(e:Expr),               // rt expr
+  SPrint(e:Expr),                // println(expr)
+  SIf(cond:Expr, body:[Stmt], else_b:[Stmt]),   // if cond {body} [el {else_b}]
+  SLoop(cond:Expr, body:[Stmt]),                // lp cond { body }
+  SLoopIn(vnm:str, coll:Expr, body:[Stmt]),     // lp x in coll { body }
+  SLoopKV(kn:str, vn:str, coll:Expr, body:[Stmt]),  // lp (k, v) in map { body }
+  SLoopRange(vnm:str, lo:Expr, hi:Expr, body:[Stmt]),  // lp i in lo..hi { body }
+  SBreak,                        // br  — break out of the enclosing loop
+  SContinue,                     // ct  — continue the enclosing loop
+  SExpr(e:Expr),                 // bare expression statement
+}
+
+st Func { name:str; params:[str]; ptypes:[str]; ret:str; lib:str; tparams:[str]; body:[Stmt] }
+
+// ===== parser state =========================================================
+st P { toks: [Token]; pos: i64; src: str }
+st Binds { names:[str]; vals:[Expr] }   // match-arm bindings: name → matched scrutinee component
+fn cur(p:*P) -> Token { p.toks[p.pos] }
+fn ckind(p:*P) -> i64 { p.toks[p.pos].kind }
+fn ctext(p:*P) -> str { p.toks[p.pos].text }
+fn adv(p:*P) { p.pos = p.pos + 1 }
+// ----- diagnostics: report a source-located error with a caret, then exit ----
+fn tok_name(k:i64) -> str {
+  if k == TK_RPAREN() rt "')'"
+  if k == TK_RBRACE() rt "'}'"
+  if k == TK_RBRACK() rt "']'"
+  if k == TK_LPAREN() rt "'('"
+  if k == TK_LBRACE() rt "'{'"
+  if k == TK_COLON() rt "':'"
+  if k == TK_COMMA() rt "','"
+  if k == TK_WALRUS() rt "':='"
+  if k == TK_ASSIGN() rt "'='"
+  if k == TK_GT() rt "'>'"
+  "the expected token"
+}
+fn report_at(src:str, pos:i64, msg:str) {
+  mu line := 1
+  mu lstart := 0
+  mu i := 0
+  lp i < pos && i < len(src) {
+    if src[i] == 10 { line = line + 1; lstart = i + 1 }
+    i += 1
+  }
+  mu lend := lstart
+  lp lend < len(src) { if src[lend] == 10 { br } lend += 1 }
+  println("error " + int_to_str(line) + ":" + int_to_str(pos - lstart + 1) + ": " + msg)
+  println("  " + substring(src, lstart, lend))
+  mu caret := "  "
+  mu k := lstart
+  lp k < pos { caret = caret + " "; k += 1 }
+  println(caret + "^")
+  exit(1)
+}
+fn eat(p:*P, k:i64) {
+  if ckind(p) == k { adv(p) }
+  el { report_at(p.src, p.toks[p.pos].pos, "expected " + tok_name(k) + ", got '" + ctext(p) + "'") }
+}
+

@@ -1,0 +1,802 @@
+// ===== driver ===============================================================
+ex fn system(cmd:str) -> i32
+
+// True if `sub` occurs anywhere in `s` — reuses the `index_of` builtin (a
+// strstr-based substring search). Gates the optional native sections
+// (sockets/time/regex/process) on source usage so a program that uses none
+// emits byte-identical C without pulling in the heavy headers.
+fn has_sub(s:str, sub:str) -> bool {
+  index_of(s, sub) >= 0
+}
+
+// ----- empty `{}` usage inference -------------------------------------------
+// An un-annotated `m := {}` has no (K,V) until used. Before hoist/codegen we
+// scan the function body for the first `m[k]=v` and stamp the MapLit with
+// `{type(k):type(v)}`, so the existing MapLit-type machinery carries it.
+// (ailangc does this in sema; selfhost has no sema, hence this transform.)
+fn var_name(e:Expr) -> str {
+  mt e {
+    Var(n)             => n;
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Call(f,a)          => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Array(es,et)       => "";
+    MapLit(ml,mks,mvs) => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,pts,b,id)    => "";
+    Bad                => "";
+  }
+}
+fn is_empty_maplit(e:Expr) -> bool {
+  mt e {
+    MapLit(ml,mks,mvs) => len(mks) == 0;
+    Tuple(tes)         => false;
+    BlockE(bb)         => false;
+    Var(n)             => false;
+    Num(v)             => false;
+    Flt(fs)            => false;
+    Str(s)             => false;
+    Bin(o,a,b)         => false;
+    Unary(o,x)         => false;
+    Call(f,a)          => false;
+    Field(o,f)         => false;
+    Index(o,ix)        => false;
+    Array(es,et)       => false;
+    Addr(x)            => false;
+    Match(sc,vn,vb,bd) => false;
+    IfE(c,t,el2)       => false;
+    Try(e2)            => false;
+    Lambda(ps,pts,b,id)    => false;
+    Bad                => false;
+  }
+}
+// First `m[k]=v` (recursing into nested blocks, typing loop vars en route) →
+// "{type(k):type(v)}", or "" if none.
+fn map_assign_type(sy:*Syms, body:[Stmt], m:str) -> str {
+  mu i := 0
+  lp i < len(body) {
+    t := map_assign_type_s(sy, body[i], m)
+    if len(t) > 0 rt t
+    i += 1
+  }
+  ""
+}
+fn scan_loopin(sy:*Syms, vnm:str, coll:Expr, b:[Stmt], m:str) -> str {
+  set_ty(sy, vnm, coll_elem_type(sy, coll))
+  map_assign_type(sy, b, m)
+}
+fn scan_loopkv(sy:*Syms, kn:str, vn:str, coll:Expr, b:[Stmt], m:str) -> str {
+  t := type_of_expr(sy, coll)
+  set_ty(sy, kn, map_ktype(t))
+  set_ty(sy, vn, map_vtype(t))
+  map_assign_type(sy, b, m)
+}
+fn scan_range(sy:*Syms, v:str, b:[Stmt], m:str) -> str {
+  set_ty(sy, v, "i64")
+  map_assign_type(sy, b, m)
+}
+fn scan_either(sy:*Syms, b:[Stmt], eb:[Stmt], m:str) -> str {
+  t := map_assign_type(sy, b, m)
+  if len(t) > 0 rt t
+  map_assign_type(sy, eb, m)
+}
+fn idx_assign_type(sy:*Syms, o:Expr, idx:Expr, e:Expr, m:str) -> str {
+  if var_name(o) == m rt "{" + type_of_expr(sy, idx) + ":" + type_of_expr(sy, e) + "}"
+  ""
+}
+fn map_assign_type_s(sy:*Syms, s:Stmt, m:str) -> str {
+  mt s {
+    SIdxAssign(o,idx,e)   => idx_assign_type(sy, o, idx, e, m);
+    SDestructure(names,e) => "";
+    SIf(c,b,eb)           => scan_either(sy, b, eb, m);
+    SLoop(c,b)            => map_assign_type(sy, b, m);
+    SLoopIn(vnm,coll,b)   => scan_loopin(sy, vnm, coll, b, m);
+    SLoopKV(kn,vn,coll,b) => scan_loopkv(sy, kn, vn, coll, b, m);
+    SLoopRange(v,lo,hi,b) => scan_range(sy, v, b, m);
+    SDecl(name,e)         => "";
+    SAssign(name,e)       => "";
+    SFieldAssign(o,f,e)   => "";
+    SReturn(e)            => "";
+    SPrint(e)             => "";
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
+// Top-level transform: stamp each un-annotated `m := {}` with its inferred type;
+// type regular decls so later `lp x in coll` / index types resolve.
+// Empty INFERRED array `mu x := []` (no annotation): pin its element type from
+// the first top-level `x = push(x, E)`, mirroring the empty-`{}` map back-prop.
+fn is_empty_array(e:Expr) -> bool {
+  mt e {
+    Array(es,et)       => len(es) == 0 && et == "";
+    Tuple(tes)         => false;
+    BlockE(bb)         => false;
+    MapLit(ml,mks,mvs) => false;
+    Var(n)             => false;
+    Num(v)             => false;
+    Flt(fs)            => false;
+    Str(s)             => false;
+    Bin(o,a,b)         => false;
+    Unary(o,x)         => false;
+    Call(f,a)          => false;
+    Field(o,f)         => false;
+    Index(o,ix)        => false;
+    Addr(x)            => false;
+    Match(sc,vn,vb,bd) => false;
+    IfE(c,t,el2)       => false;
+    Try(e2)            => false;
+    Lambda(ps,pts,b,id)    => false;
+    Bad                => false;
+  }
+}
+fn push_args_elem(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if fname == "push" && len(args) == 2 rt type_of_expr(sy, args[1])
+  ""
+}
+fn push_call_elem(sy:*Syms, e:Expr) -> str {
+  mt e {
+    Call(fname, args)  => push_args_elem(sy, fname, args);
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
+    Array(es,et)       => "";
+    MapLit(ml,mks,mvs) => "";
+    Var(n)             => "";
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,pts,b,id)    => "";
+    Bad                => "";
+  }
+}
+fn same_name_push(sy:*Syms, name:str, e:Expr, a:str) -> str {
+  if name != a rt ""
+  push_call_elem(sy, e)
+}
+fn push_assign_elem(sy:*Syms, s:Stmt, a:str) -> str {
+  mt s {
+    SAssign(name, e)      => same_name_push(sy, name, e, a);
+    SDestructure(names,e) => "";
+    SDecl(name,e)         => "";
+    SIdxAssign(o,ix,e)    => "";
+    SFieldAssign(o,f,e)   => "";
+    SReturn(e)            => "";
+    SPrint(e)             => "";
+    SIf(c,b,eb)           => "";
+    SLoop(c,b)            => "";
+    SLoopIn(vnm,coll,b)   => "";
+    SLoopKV(kn,vn,coll,b) => "";
+    SLoopRange(v,lo,hi,b) => "";
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
+fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
+  mu i := 0
+  lp i < len(body) {
+    t := push_assign_elem(sy, body[i], a)
+    if len(t) > 0 rt t
+    i += 1
+  }
+  ""
+}
+fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
+  if is_empty_maplit(e) {
+    t := map_assign_type(sy, body, name)
+    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()))   // typing handled by pass-1 + hoist
+  }
+  if is_empty_array(e) {
+    et := array_elem_from_push(sy, body, name)
+    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et))              // pin elem type from first push
+  }
+  SDecl(name, e)
+}
+fn stamp_decl(sy:*Syms, body:[Stmt], s:Stmt) -> Stmt {
+  mt s {
+    SDecl(name,e)         => stamp_decl_e(sy, body, name, e);
+    SDestructure(names,e) => s;
+    SAssign(name,e)       => s;
+    SIdxAssign(o,ix,e)    => s;
+    SFieldAssign(o,f,e)   => s;
+    SReturn(e)            => s;
+    SPrint(e)             => s;
+    SIf(c,b,eb)           => s;
+    SLoop(c,b)            => s;
+    SLoopIn(vnm,coll,b)   => s;
+    SLoopKV(kn,vn,coll,b) => s;
+    SLoopRange(v,lo,hi,b) => s;
+    SBreak                => s;
+    SContinue             => s;
+    SExpr(e)              => s;
+  }
+}
+// pass 1: type every top-level decl so inference resolves feed-arrays regardless
+// of decl order (e.g. `counts := {}` declared BEFORE `words := split(...)`).
+fn seed_one(sy:*Syms, name:str, e:Expr) -> i64 { set_ty(sy, name, type_of_expr(sy, e)); 0 }
+fn seed_decl_s(sy:*Syms, s:Stmt) -> i64 {
+  mt s {
+    SDecl(name,e)         => seed_one(sy, name, e);
+    SDestructure(names,e) => 0;
+    SAssign(name,e)       => 0;
+    SIdxAssign(o,ix,e)    => 0;
+    SFieldAssign(o,f,e)   => 0;
+    SReturn(e)            => 0;
+    SPrint(e)             => 0;
+    SIf(c,b,eb)           => 0;
+    SLoop(c,b)            => 0;
+    SLoopIn(vnm,coll,b)   => 0;
+    SLoopKV(kn,vn,coll,b) => 0;
+    SLoopRange(v,lo,hi,b) => 0;
+    SBreak                => 0;
+    SContinue             => 0;
+    SExpr(e)              => 0;
+  }
+}
+fn stamp_empty_maps(sy:*Syms, body:[Stmt]) -> [Stmt] {
+  mu si := 0
+  lp si < len(body) { seed_decl_s(sy, body[si]); si += 1 }   // pass 1: type decls
+  mu out:[Stmt] := []
+  mu i := 0
+  lp i < len(body) {                                          // pass 2: stamp `{}`
+    out = push(out, stamp_decl(sy, body, body[i]))
+    i += 1
+  }
+  out
+}
+
+fn compile_to_c(src:str) -> str {
+  toks := lex(src)
+  mu p := P(toks, 0, src)
+
+  mu structs:[StructDef] := []
+  mu enums:[EnumDef] := []
+  mu funcs:[Func] := []
+  mu externs:[Func] := []
+  mu cincs:[str] := []
+  mu mains:[Stmt] := []
+
+  lp ckind(&p) != TK_EOF() {
+    if ckind(&p) == TK_SEMI() { adv(&p); ct }   // skip stray `;` separators
+    if ckind(&p) == TK_IDENT() && ctext(&p) == "st" {
+      structs = push(structs, parse_struct(&p))
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "en" {
+      enums = push(enums, parse_enum(&p))
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cinc" {
+      adv(&p); cincs = push(cincs, ctext(&p)); adv(&p)   // cinc "header.h"
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "ex" {
+      externs = push(externs, parse_extern(&p))
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "fn" {
+      funcs = push(funcs, parse_func(&p))
+    } el {
+      mains = push(mains, parse_stmt(&p))
+    }
+  }
+
+  // Split generic functions (`fn id<T>(…)`) out — inlined at call sites, not
+  // emitted as C functions. Regular fns emit normally.
+  mu gfuncs:[Func] := []
+  mu rfuncs:[Func] := []
+  mu gi := 0
+  lp gi < len(funcs) {
+    if len(funcs[gi].tparams) > 0 { gfuncs = push(gfuncs, funcs[gi]) } el { rfuncs = push(rfuncs, funcs[gi]) }
+    gi += 1
+  }
+  funcs = rfuncs
+
+  // Build the shared type context: struct ctors + field-type map + enum tables.
+  mu nolams:[Func] := []
+  mu base := Syms({}, {}, {}, {}, {}, {}, gfuncs, nolams)
+  mu si := 0
+  lp si < len(structs) {
+    sd := structs[si]
+    base.ctors[sd.name] = "1"
+    mu fi := 0
+    lp fi < len(sd.fnames) { base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]; fi += 1 }
+    si += 1
+  }
+  // Box bare cross-enum fields now that ALL enums are known (mutual recursion),
+  // BEFORE the registry/codegen read their field types.
+  enums = box_cross_enums(enums)
+  // Mark extern return types that name a C-header type (`-> div_t`) so they spell
+  // raw, now that all user structs/enums are known.
+  externs = mark_extern_ctypes(externs, structs, enums)
+  // Enum registry: each variant → its enum + ";"-joined field types; plus a
+  // per-enum "@order.<Enum>" → ";"-joined variant list (for tag indices).
+  mu ei := 0
+  lp ei < len(enums) {
+    ed := enums[ei]
+    mu order := ""
+    mu vi := 0
+    lp vi < len(ed.vnames) {
+      vn := ed.vnames[vi]
+      base.evar[vn] = ed.name
+      base.vft[vn] = ed.vftypes[vi]
+      if vi == 0 { order = vn } el { order = order + ";" + vn }
+      vi += 1
+    }
+    base.evar["@order." + ed.name] = order
+    ei += 1
+  }
+  // Externs FIRST: register each declared return type before fn inference, so a
+  // fn whose tail is an extern call (`fn parse_int(s) { atoi(s) }`) infers that
+  // extern's return type instead of defaulting to void. (i32/i64 both lower to
+  // int64_t via cty, so this is fixpoint-stable.)
+  mu xi := 0
+  lp xi < len(externs) {
+    if len(externs[xi].ret) > 0 { base.frets[externs[xi].name] = externs[xi].ret }
+    xi += 1
+  }
+  // Infer + record each fn's return type (so calls type their results).
+  mu fi2 := 0
+  lp fi2 < len(funcs) {
+    f := funcs[fi2]
+    base.frets[f.name] = infer_ret(f, base)
+    fi2 += 1
+  }
+  // Mark generic fn names so calls are recognized + inlined (see gen_call).
+  mu gj := 0
+  lp gj < len(gfuncs) {
+    base.evar["@generic." + gfuncs[gj].name] = "1"
+    gj += 1
+  }
+
+  // Closure collection pass: discover every first-class lambda (each user fn's
+  // body, then `main`), recording its captures + a lifted Func on `base`. Seeds
+  // each Syms exactly as the body-emit loop does (seed_fn / fresh-vty + hoist),
+  // so capture types match. `main.ail` itself has no first-class lambdas ⇒
+  // `base.lams` stays empty ⇒ the gated emission below is skipped ⇒ fixpoint safe.
+  mu cf := 0
+  lp cf < len(funcs) {
+    mu csy := seed_fn(&base, funcs[cf])
+    cdecls := hoist_decls(&csy, funcs[cf].body, "    ")
+    collect_lams(&base, &csy, funcs[cf].body)
+    cf += 1
+  }
+  mu csm := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  csm.vty = {}
+  cmdecls := hoist_decls(&csm, mains, "    ")
+  collect_lams(&base, &csm, mains)
+
+  // Link-flag marker: one comment line listing the libs from `ex "lib"` decls,
+  // read back by the driver to append `-l<lib>` to clang. Absent when nothing
+  // needs linking (e.g. main.ail itself), so its own emitted C is unchanged.
+  mu out := ""
+  mu lk := 0
+  mu libline := ""
+  lp lk < len(externs) {
+    if len(externs[lk].lib) > 0 { libline = libline + " " + externs[lk].lib }
+    lk += 1
+  }
+  if len(libline) > 0 { out = "// @links:" + libline + "\n" }
+
+  // C prelude: headers (system, then `cinc` headers) + string/runtime helpers.
+  // Runtime allocates via Boehm GC (`GC_MALLOC` + `<gc.h>`, linked `-lgc`) to
+  // match the Rust reference — there is no `free`; the collector reclaims, so
+  // long-running programs (servers) no longer leak.
+  // Optional native sections, gated on source usage. main.ail mentions every
+  // name (in codegen strings) so it pulls them all — harmless (libc-only, no
+  // link flags; unused statics are stripped) and fixpoint-safe (stage2==stage3).
+  needs_time := has_sub(src, "now_ms") || has_sub(src, "now_us") || has_sub(src, "mono_ms") || has_sub(src, "sleep_ms") || has_sub(src, "time_iso")
+  needs_sock := has_sub(src, "tcp_listen") || has_sub(src, "tcp_connect") || has_sub(src, "tcp_accept") || has_sub(src, "sock_send") || has_sub(src, "sock_recv") || has_sub(src, "sock_close")
+  needs_proc := has_sub(src, "proc_fork") || has_sub(src, "proc_getpid") || has_sub(src, "proc_no_zombies") || has_sub(src, "proc_reap")
+  needs_regex := has_sub(src, "regex_match") || has_sub(src, "regex_find")
+  // TLS (OpenSSL) + Postgres (libpq) — unlike the libc sections above these need
+  // external libs, so the clang cmd in main() adds -lssl/-lcrypto / -lpq when the
+  // emitted C uses them. main.ail mentions these names so its self-compile pulls
+  // them in (needs both libs installed — fixpoint-safe: stage2==stage3).
+  needs_tls := has_sub(src, "tls_") || has_sub(src, "sha1")
+  needs_pg := has_sub(src, "pg_")
+  out = out + "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n"
+  if needs_time { out = out + "#include <time.h>\n" }
+  if needs_sock { out = out + "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n" }
+  if needs_proc { out = out + "#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n" }
+  if needs_regex { out = out + "#include <regex.h>\n" }
+  if needs_tls { out = out + "#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n" }
+  if needs_pg { out = out + "#include <libpq-fe.h>\n" }
+  mu ci := 0
+  lp ci < len(cincs) { out = out + "#include \"" + cincs[ci] + "\"\n"; ci += 1 }
+  out = out + "static const char* scat(const char* a, const char* b){ size_t la=strlen(a), lb=strlen(b); char* r=(char*)GC_MALLOC(la+lb+1); memcpy(r,a,la); memcpy(r+la,b,lb); r[la+lb]=0; return r; }\n"
+  out = out + "static const char* i2s(long long v){ char* r=(char*)GC_MALLOC(24); snprintf(r,24,\"%lld\",v); return r; }\n"
+  // substring is [a, b) end-exclusive (matches AiLang); str_to_int via strtoll.
+  out = out + "static const char* substr(const char* s, int64_t a, int64_t b){ int64_t n=(int64_t)strlen(s); if(a<0)a=0; if(b>n)b=n; if(b<a)b=a; int64_t L=b-a; char* r=(char*)GC_MALLOC(L+1); memcpy(r,s+a,L); r[L]=0; return r; }\n"
+  out = out + "static int64_t s2i(const char* s){ return (int64_t)strtoll(s,0,10); }\n"
+  // f64 <-> str: %g formatting (matches AiLang's float print) / strtod parse.
+  out = out + "static const char* f2s(double v){ char* r=(char*)GC_MALLOC(32); snprintf(r,32,\"%g\",v); return r; }\n"
+  out = out + "static double s2f(const char* s){ return strtod(s,0); }\n"
+  out = out + "static const char* read_file_c(const char* path){ FILE* f=fopen(path,\"rb\"); if(!f) return \"\"; fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET); char* b=(char*)GC_MALLOC(n+1); if(n>0) fread(b,1,n,f); b[n]=0; fclose(f); return b; }\n"
+  out = out + "static int64_t write_file_c(const char* path, const char* content){ FILE* f=fopen(path,\"wb\"); if(!f) return 0; fwrite(content,1,strlen(content),f); fclose(f); return 1; }\n"
+  // bytes — a binary buffer {len, data} distinct from str (may hold embedded \0).
+  out = out + "typedef struct { int64_t len; const uint8_t* data; } ailang_bytes;\n"
+  out = out + "static ailang_bytes str_to_bytes(const char* s){ ailang_bytes r; if(!s){ r.len=0; r.data=(const uint8_t*)\"\"; return r; } size_t n=strlen(s); r.len=(int64_t)n; r.data=(const uint8_t*)s; return r; }\n"
+  out = out + "static const char* bytes_to_str(ailang_bytes b){ char* buf=(char*)GC_MALLOC((size_t)b.len+1); if(b.len>0) memcpy(buf,b.data,(size_t)b.len); buf[b.len]=0; return buf; }\n"
+  out = out + "static int64_t bytes_at(ailang_bytes b, int64_t i){ if(i<0||i>=b.len) return 0; return (int64_t)b.data[i]; }\n"
+  out = out + "static ailang_bytes bytes_slice(ailang_bytes b, int64_t lo, int64_t hi){ if(lo<0) lo=0; if(hi>b.len) hi=b.len; if(lo>hi) lo=hi; int64_t n=hi-lo; ailang_bytes r; r.len=n; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)(n>0?n:1)); if(n>0) memcpy(buf,b.data+lo,(size_t)n); r.data=buf; return r; }\n"
+  out = out + "static ailang_bytes read_file_bytes(const char* path){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; FILE* f=fopen(path,\"rb\"); if(!f) return r; if(fseek(f,0,SEEK_END)!=0){ fclose(f); return r; } long sz=ftell(f); if(sz<0){ fclose(f); return r; } fseek(f,0,SEEK_SET); uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)(sz>0?sz:1)); size_t got=fread(buf,1,(size_t)sz,f); fclose(f); r.len=(int64_t)got; r.data=buf; return r; }\n"
+  out = out + "static int64_t write_file_bytes(const char* path, ailang_bytes b){ FILE* f=fopen(path,\"wb\"); if(!f) return 0; size_t want=(size_t)b.len; size_t got=b.len>0?fwrite(b.data,1,want,f):0; int closed=fclose(f); return (closed==0 && got==want)?1:0; }\n"
+  out = out + "static void print_bytes(ailang_bytes b){ putchar(98); putchar(34); for(int64_t i=0;i<b.len;i++){ unsigned c=b.data[i]; if(c==34){ putchar(92); putchar(34); } else if(c==92){ putchar(92); putchar(92); } else if(c==10){ putchar(92); putchar(110); } else if(c==13){ putchar(92); putchar(114); } else if(c==9){ putchar(92); putchar(116); } else if(c>=32 && c<127){ putchar((int)c); } else { putchar(92); putchar(120); printf(\"%02x\", c); } } putchar(34); }\n"
+  // ===== Phase 1 builtins: string / numeric / io (ported from the Rust =======
+  // prelude; behaviour matches `ailangc` so sample output is identical). Bool
+  // is i64 (0/1) per AiLang's model; `=0` terminates (no `'\0'` escaping).
+  out = out + "static int64_t str_contains(const char* h, const char* n){ if(!h||!n) return 0; return strstr(h,n)!=0; }\n"
+  out = out + "static int64_t starts_with(const char* s, const char* p){ if(!s||!p) return 0; size_t lp=strlen(p); return strncmp(s,p,lp)==0; }\n"
+  out = out + "static int64_t ends_with(const char* s, const char* su){ if(!s||!su) return 0; size_t ls=strlen(s),lu=strlen(su); if(lu>ls) return 0; return memcmp(s+ls-lu,su,lu)==0; }\n"
+  out = out + "static int64_t str_index_of(const char* h, const char* n){ if(!h||!n) return -1; const char* p=strstr(h,n); return p?(int64_t)(p-h):(int64_t)-1; }\n"
+  out = out + "static const char* to_upper(const char* s){ if(!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n+1); for(size_t i=0;i<n;i++){ unsigned char c=(unsigned char)s[i]; o[i]=(c>=97&&c<=122)?(char)(c-32):(char)c; } o[n]=0; return o; }\n"
+  out = out + "static const char* to_lower(const char* s){ if(!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n+1); for(size_t i=0;i<n;i++){ unsigned char c=(unsigned char)s[i]; o[i]=(c>=65&&c<=90)?(char)(c+32):(char)c; } o[n]=0; return o; }\n"
+  out = out + "static const char* trim(const char* s){ if(!s) return \"\"; const char* p=s; while(*p==32||*p==9||*p==10||*p==13) p++; const char* e=s+strlen(s); while(e>p){ char c=e[-1]; if(c!=32&&c!=9&&c!=10&&c!=13) break; e--; } size_t n=(size_t)(e-p); char* o=(char*)GC_MALLOC(n+1); memcpy(o,p,n); o[n]=0; return o; }\n"
+  out = out + "static const char* str_replace(const char* s, const char* a, const char* b){ if(!s||!a||!*a) return s?s:\"\"; if(!b) b=\"\"; size_t la=strlen(a),lb=strlen(b); size_t cnt=0; const char* p=s; while((p=strstr(p,a))!=0){ cnt++; p+=la; } size_t ls=strlen(s); size_t ol=ls+cnt*(lb>=la?lb-la:0)-cnt*(la>lb?la-lb:0); char* o=(char*)GC_MALLOC(ol+1); char* w=o; const char* r=s; while((p=strstr(r,a))!=0){ size_t bf=(size_t)(p-r); memcpy(w,r,bf); w+=bf; memcpy(w,b,lb); w+=lb; r=p+la; } size_t tl=strlen(r); memcpy(w,r,tl); w+=tl; *w=0; return o; }\n"
+  out = out + "static const char* repeat(const char* s, int64_t n){ if(!s||n<=0) return \"\"; size_t one=strlen(s); size_t tot=one*(size_t)n; char* o=(char*)GC_MALLOC(tot+1); for(int64_t i=0;i<n;i++) memcpy(o+(size_t)i*one,s,one); o[tot]=0; return o; }\n"
+  out = out + "static const char* pad_left(const char* s, int64_t w, const char* pad){ if(!s) s=\"\"; if(!pad||!*pad) pad=\" \"; size_t sl=strlen(s); if((int64_t)sl>=w){ char* o=(char*)GC_MALLOC(sl+1); memcpy(o,s,sl+1); return o; } size_t pl=strlen(pad); size_t need=(size_t)w-sl; char* o=(char*)GC_MALLOC((size_t)w+1); size_t i=0; while(i<need){ o[i]=pad[i%pl]; i++; } memcpy(o+need,s,sl); o[w]=0; return o; }\n"
+  out = out + "static const char* pad_right(const char* s, int64_t w, const char* pad){ if(!s) s=\"\"; if(!pad||!*pad) pad=\" \"; size_t sl=strlen(s); if((int64_t)sl>=w){ char* o=(char*)GC_MALLOC(sl+1); memcpy(o,s,sl+1); return o; } size_t pl=strlen(pad); char* o=(char*)GC_MALLOC((size_t)w+1); memcpy(o,s,sl); size_t i=sl; while(i<(size_t)w){ o[i]=pad[(i-sl)%pl]; i++; } o[w]=0; return o; }\n"
+  out = out + "static const char* chr(int64_t i){ char* o=(char*)GC_MALLOC(2); o[0]=(char)(i&255); o[1]=0; return o; }\n"
+  out = out + "static int64_t ord(const char* s){ return (s&&*s)?(int64_t)(unsigned char)s[0]:0; }\n"
+  out = out + "static int64_t str_to_bool(const char* s){ if(!s) return 0; if(strcmp(s,\"true\")==0) return 1; if(strcmp(s,\"True\")==0) return 1; if(strcmp(s,\"TRUE\")==0) return 1; if(strcmp(s,\"1\")==0) return 1; if(strcmp(s,\"yes\")==0) return 1; return 0; }\n"
+  out = out + "static int64_t abs_i64(int64_t n){ return n<0?-n:n; }\n"
+  out = out + "static double abs_f64(double x){ return x<0?-x:x; }\n"
+  out = out + "static int64_t sign(int64_t n){ return (n>0)-(n<0); }\n"
+  out = out + "static int64_t clamp(int64_t n, int64_t lo, int64_t hi){ if(n<lo) return lo; if(n>hi) return hi; return n; }\n"
+  out = out + "static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return \"\"; return b; }\n"
+  out = out + "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n"
+  out = out + "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n"
+  // ===== Phase 2 optional native sections (gated; ported from prelude.c) =====
+  if needs_time {
+    out = out + "static int64_t now_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n"
+    out = out + "static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }\n"
+    out = out + "static int64_t mono_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n"
+    out = out + "static void sleep_ms(int64_t ms){ if(ms<=0) return; struct timespec ts; ts.tv_sec=(time_t)(ms/1000); ts.tv_nsec=(long)((ms%1000)*1000000); while(nanosleep(&ts,&ts)==-1){} }\n"
+    out = out + "static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv; if(!gmtime_r(&sec,&tmv)) return \"\"; char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,\"%Y-%m-%dT%H:%M:%SZ\",&tmv); if(n==0){ buf[0]=0; } return buf; }\n"
+  }
+  if needs_sock {
+    out = out + "static int64_t tcp_listen(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; int yes=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)); struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(host[0]==0||strcmp(host,\"0.0.0.0\")==0){ addr.sin_addr.s_addr=htonl(INADDR_ANY); } else if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ close(fd); return -1; } if(bind(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } if(listen(fd,128)<0){ close(fd); return -1; } return (int64_t)fd; }\n"
+    out = out + "static int64_t tcp_accept(int64_t fd){ struct sockaddr_in addr; socklen_t len=sizeof(addr); int client=accept((int)fd,(struct sockaddr*)&addr,&len); if(client<0) return -1; return (int64_t)client; }\n"
+    out = out + "static int64_t tcp_connect(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ struct addrinfo hints; memset(&hints,0,sizeof(hints)); hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM; struct addrinfo* res=0; if(getaddrinfo(host,0,&hints,&res)!=0||!res){ close(fd); return -1; } addr.sin_addr=((struct sockaddr_in*)res->ai_addr)->sin_addr; freeaddrinfo(res); } if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } return (int64_t)fd; }\n"
+    out = out + "static int64_t sock_send(int64_t fd, ailang_bytes b){ if(fd<0) return -1; if(b.len==0) return 0; ssize_t n=send((int)fd,b.data,(size_t)b.len,0); return (int64_t)n; }\n"
+    out = out + "static int64_t sock_send_str(int64_t fd, const char* s){ if(fd<0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; ssize_t n=send((int)fd,s,len,0); return (int64_t)n; }\n"
+    out = out + "static ailang_bytes sock_recv(int64_t fd, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(fd<0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); ssize_t n=recv((int)fd,buf,(size_t)max,0); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n"
+    out = out + "static int64_t sock_close(int64_t fd){ if(fd<0) return 0; return (int64_t)close((int)fd); }\n"
+  }
+  if needs_proc {
+    out = out + "static int64_t proc_fork(void){ pid_t p=fork(); return (int64_t)p; }\n"
+    out = out + "static int64_t proc_getpid(void){ return (int64_t)getpid(); }\n"
+    out = out + "static void proc_no_zombies(void){ struct sigaction sa; memset(&sa,0,sizeof(sa)); sa.sa_handler=SIG_IGN; sigemptyset(&sa.sa_mask); sa.sa_flags=SA_NOCLDWAIT; sigaction(SIGCHLD,&sa,0); }\n"
+    out = out + "static int64_t proc_reap(void){ int64_t n=0; while(waitpid(-1,0,WNOHANG)>0) n++; return n; }\n"
+  }
+  if needs_regex {
+    out = out + "static int64_t regex_match(const char* pat, const char* text){ if(!pat||!text) return 0; regex_t re; if(regcomp(&re,pat,REG_EXTENDED|REG_NOSUB)!=0) return 0; int rc=regexec(&re,text,0,0,0); regfree(&re); return rc==0; }\n"
+    out = out + "static const char* regex_find(const char* pat, const char* text){ if(!pat||!text) return \"\"; regex_t re; if(regcomp(&re,pat,REG_EXTENDED)!=0) return \"\"; regmatch_t m; int rc=regexec(&re,text,1,&m,0); regfree(&re); if(rc!=0||m.rm_so<0) return \"\"; size_t len=(size_t)(m.rm_eo-m.rm_so); char* o=(char*)GC_MALLOC(len+1); memcpy(o,text+m.rm_so,len); o[len]=0; return o; }\n"
+  }
+  // ===== Phase 3 optional native sections: TLS (OpenSSL) + Postgres (libpq) =====
+  if needs_tls {
+    out = out + "static int ailang_tls_init_done_=0;\n"
+    out = out + "static void ailang_tls_init_(void){ if(ailang_tls_init_done_) return; SSL_library_init(); SSL_load_error_strings(); OpenSSL_add_ssl_algorithms(); ailang_tls_init_done_=1; }\n"
+    out = out + "static int64_t tls_server_ctx(const char* cert, const char* key){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_new(TLS_server_method()); if(!ctx) return -1; if(!cert||SSL_CTX_use_certificate_file(ctx,cert,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } if(!key||SSL_CTX_use_PrivateKey_file(ctx,key,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } return (int64_t)(intptr_t)ctx; }\n"
+    out = out + "static int64_t tls_client_ctx(void){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_new(TLS_client_method()); if(!ctx) return -1; return (int64_t)(intptr_t)ctx; }\n"
+    out = out + "static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }\n"
+    out = out + "static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
+    out = out + "static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
+    out = out + "static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }\n"
+    out = out + "static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }\n"
+    out = out + "static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n"
+    out = out + "static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }\n"
+    out = out + "static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return \"\"; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }\n"
+    out = out + "static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:\"\"), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }\n"
+  }
+  if needs_pg {
+    out = out + "static int64_t pg_connect(const char* conninfo){ PGconn* c=PQconnectdb(conninfo?conninfo:\"\"); return (int64_t)(intptr_t)c; }\n"
+    out = out + "static int64_t pg_status(int64_t conn){ if(conn==0) return -1; return (int64_t)PQstatus((PGconn*)(intptr_t)conn); }\n"
+    out = out + "static const char* pg_error(int64_t conn){ if(conn==0) return \"(null connection)\"; const char* msg=PQerrorMessage((PGconn*)(intptr_t)conn); return msg?msg:\"\"; }\n"
+    out = out + "static void pg_close(int64_t conn){ if(conn!=0) PQfinish((PGconn*)(intptr_t)conn); }\n"
+    out = out + "static int64_t pg_exec(int64_t conn, const char* sql){ if(conn==0||!sql) return 0; PGresult* r=PQexec((PGconn*)(intptr_t)conn,sql); return (int64_t)(intptr_t)r; }\n"
+    out = out + "static int64_t pg_ok(int64_t res){ if(res==0) return 0; int s=PQresultStatus((PGresult*)(intptr_t)res); return s==PGRES_COMMAND_OK||s==PGRES_TUPLES_OK; }\n"
+    out = out + "static const char* pg_result_error(int64_t res){ if(res==0) return \"(null result)\"; const char* m=PQresultErrorMessage((PGresult*)(intptr_t)res); return m?m:\"\"; }\n"
+    out = out + "static void pg_clear(int64_t res){ if(res!=0) PQclear((PGresult*)(intptr_t)res); }\n"
+    out = out + "static int64_t pg_nrows(int64_t res){ if(res==0) return 0; return (int64_t)PQntuples((PGresult*)(intptr_t)res); }\n"
+    out = out + "static int64_t pg_ncols(int64_t res){ if(res==0) return 0; return (int64_t)PQnfields((PGresult*)(intptr_t)res); }\n"
+    out = out + "static const char* pg_value(int64_t res, int64_t row, int64_t col){ if(res==0) return \"\"; const char* v=PQgetvalue((PGresult*)(intptr_t)res,(int)row,(int)col); if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n"
+    out = out + "static int64_t pg_isnull(int64_t res, int64_t row, int64_t col){ if(res==0) return 0; return PQgetisnull((PGresult*)(intptr_t)res,(int)row,(int)col)!=0; }\n"
+    out = out + "static const char* pg_col_name(int64_t res, int64_t col){ if(res==0) return \"\"; const char* nm=PQfname((PGresult*)(intptr_t)res,(int)col); if(!nm) return \"\"; size_t l=strlen(nm); char* o=(char*)GC_MALLOC(l+1); memcpy(o,nm,l+1); return o; }\n"
+    out = out + "static int64_t pg_affected(int64_t res){ if(res==0) return 0; const char* s=PQcmdTuples((PGresult*)(intptr_t)res); if(!s||!*s) return 0; return (int64_t)atoll(s); }\n"
+    out = out + "static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return \"''\"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return \"''\"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }\n"
+  }
+  out = out + "static int g_argc=0; static char** g_argv=0;\n"
+  // Closure value type — only when the program actually has first-class lambdas,
+  // so the existing samples + main.ail emit byte-identical C (fixpoint safe).
+  if len(base.lams) > 0 { out = out + "typedef struct { void* fn; void* env; } closure_t;\n" }
+  out = out + "\n"
+
+  // ===== 4-phase aggregate emission (order matters for incomplete types) =====
+  // Phase 1: forward declarations of every aggregate (struct + enum), so an
+  // array/map typedef below can hold a pointer to any of them.
+  si = 0
+  lp si < len(structs) { out = out + gen_struct_fwd(structs[si]); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_enum_fwd(enums[ei]); ei += 1 }
+  out = out + "\n"
+
+  // Phase 2: array/map typedefs (they hold `T*`, so a fwd decl suffices). One
+  // array runtime per element type: i64, str, each struct, each enum.
+  out = out + gen_arr_typedef("i64", "int64_t")
+  out = out + gen_arr_typedef("str", "const char*")
+  out = out + gen_arr_typedef("f64", "double")
+  si = 0
+  lp si < len(structs) { out = out + gen_arr_typedef(structs[si].name, "s_" + structs[si].name); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_arr_typedef(enums[ei].name, "s_" + enums[ei].name); ei += 1 }
+  // Map runtime universe: scalar keys × (scalar ∪ struct ∪ enum) values, mirroring
+  // arr_<T>'s per-type emission. Built once here, reused in phases 3 and 4.
+  mu mapkeys:[str] := ["str", "i64", "f64"]
+  mu mapvals:[str] := ["i64", "str", "f64"]
+  mu mvs := 0
+  lp mvs < len(structs) { mapvals = push(mapvals, structs[mvs].name); mvs += 1 }
+  mu mve := 0
+  lp mve < len(enums) { mapvals = push(mapvals, enums[mve].name); mve += 1 }
+  out = out + gen_map_fwds_all(mapkeys, mapvals)
+  out = out + "\n"
+
+  // Phase 3: aggregate bodies (now an enum/struct body may embed `arr_<T>` by
+  // value and box self-references).
+  si = 0
+  lp si < len(structs) { out = out + gen_struct_body(structs[si]); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_enum_body(enums[ei]); ei += 1 }
+  // map node bodies (hold the value by value, so they need the aggregates above).
+  out = out + gen_map_nodes_all(mapkeys, mapvals)
+  out = out + "\n"
+
+  // Phase 4: array/map helpers (need complete element types) + aggregate ctors.
+  out = out + gen_arr_helpers("i64", "int64_t")
+  out = out + gen_arr_helpers("str", "const char*")
+  out = out + gen_arr_helpers("f64", "double")
+  // array pretty-printers (match ailangc: i64 raw, str quoted via putchar(34) to
+  // dodge AiLang→C quote-escaping; `, ` separator; empty → `[]`).
+  out = out + "static void print_arr_i64(arr_i64 a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); printf(\"%lld\",(long long)a.data[i]); } printf(\"]\"); }\n"
+  out = out + "static void print_arr_str(arr_str a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); putchar(34); printf(\"%s\", a.data[i] ? a.data[i] : \"\"); putchar(34); } printf(\"]\"); }\n"
+  // `args()` → argv[1..] as [str] (depends on arr_str helpers just emitted).
+  out = out + "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n"
+  // split(s, sep) → [str]; empty sep → [s]; uses arr_str runtime just emitted.
+  out = out + "static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=\"\"; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }\n"
+  si = 0
+  lp si < len(structs) { out = out + gen_arr_helpers(structs[si].name, "s_" + structs[si].name); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_arr_helpers(enums[ei].name, "s_" + enums[ei].name); ei += 1 }
+  out = out + gen_map_helpers_all(mapkeys, mapvals)
+  // `!T` result runtimes: scalar `res_i64`/`res_str` + one per struct.
+  out = out + gen_res("i64", "int64_t")
+  out = out + gen_res("str", "const char*")
+  si = 0
+  lp si < len(structs) { out = out + gen_res(structs[si].name, "s_" + structs[si].name); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_res(enums[ei].name, "s_" + enums[ei].name); ei += 1 }   // !Enum too
+  si = 0
+  lp si < len(structs) { out = out + gen_struct_ctor(structs[si]); si += 1 }
+  si = 0
+  lp si < len(structs) { out = out + gen_struct_printer(structs[si]); si += 1 }
+  ei = 0
+  lp ei < len(enums) { out = out + gen_enum_ctors(enums[ei]); ei += 1 }
+  out = out + "\n"
+
+  // On-demand tuple structs: one `tup_<suffix>` per distinct tuple-typed fn
+  // return — the MVP producer (a `-> (T,U)` fn, consumed by `a, b := f()`).
+  // Emitted before fn signatures (which reference `tup_*` by value). main.ail
+  // itself returns no tuples, so nothing is emitted → fixpoint-safe.
+  mu tup_seen:[str] := []
+  mu ti := 0
+  lp ti < len(funcs) {
+    rt2 := base.frets[funcs[ti].name]
+    if is_tuple_ann(rt2) {
+      suf := tuple_suffix(rt2)
+      mu found := false
+      mu tk := 0
+      lp tk < len(tup_seen) { if tup_seen[tk] == suf { found = true } tk += 1 }
+      if found == false {
+        tup_seen = push(tup_seen, suf)
+        out = out + gen_tuple_typedef(rt2)
+      }
+    }
+    ti += 1
+  }
+
+  // extern wrappers (libc passthrough), then fn forward declarations.
+  mu xj := 0
+  lp xj < len(externs) { out = out + gen_extern(externs[xj]); xj += 1 }
+  if len(externs) > 0 { out = out + "\n" }
+  mu i := 0
+  lp i < len(funcs) { out = out + gen_sig(funcs[i], base.frets[funcs[i].name]) + ";\n"; i += 1 }
+  out = out + "\n"
+
+  // Lifted lambdas (gated): env structs (fields use fully-defined phase-4
+  // aggregates), then `__lam_<id>` fwd decls, then bodies. Driven by the ordered
+  // `base.lams` so emission is deterministic (no map iteration).
+  if len(base.lams) > 0 {
+    mu lm := 0
+    lp lm < len(base.lams) { out = out + gen_env_struct(&base, base.lams[lm]); lm += 1 }
+    lm = 0
+    lp lm < len(base.lams) { out = out + gen_lam_sig(base.lams[lm]) + ";\n"; lm += 1 }
+    lm = 0
+    lp lm < len(base.lams) { out = out + gen_lifted_body(&base, base.lams[lm]); lm += 1 }
+    out = out + "\n"
+  }
+
+  // function bodies — each gets a fresh Syms sharing the base struct/ctor/fret
+  // maps, then its own params seeded.
+  i = 0
+  lp i < len(funcs) {
+    f := funcs[i]
+    // seed_fn: fresh per-fn var map + params + `@ret`. Shared with the closure
+    // collection pass so a lambda's capture types match what the body emits.
+    mu sy := seed_fn(&base, f)
+    fb := stamp_empty_maps(&sy, f.body)          // infer un-annotated `m := {}`
+    sy = seed_fn(&base, f)                        // discard inference's scratch typing
+    decls := hoist_decls(&sy, fb, "    ")
+    out = out + gen_sig(f, base.frets[f.name]) + " {\n" + decls + gen_fn_body(&sy, fb, base.frets[f.name], "    ") + "}\n\n"
+    i += 1
+  }
+
+  // main() — capture argv so `args()` can return argv[1..].
+  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mmains := stamp_empty_maps(&msy, mains)        // infer un-annotated `m := {}`
+  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mdecls := hoist_decls(&msy, mmains, "    ")
+  // A user `fn main()` is a normal function (emitted `f_main`), not a top-level
+  // stmt, so it'd never run. Call it after any top-level stmts. Nullary only;
+  // main.ail uses top-level stmts (no `fn main`) so this stays "" → fixpoint-safe.
+  mu maincall := ""
+  mu mk := 0
+  lp mk < len(funcs) { if funcs[mk].name == "main" && len(funcs[mk].params) == 0 { maincall = "    f_main();\n" } mk += 1 }
+  out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+  out
+}
+
+// Read the `// @links:` marker (if any) from the head of the generated C and
+// turn its space-separated lib list into clang `-l<lib>` flags. "" when absent.
+fn link_flags(cprog:str) -> str {
+  pre := "// @links:"
+  np := len(pre)
+  if len(cprog) < np rt ""
+  if substring(cprog, 0, np) != pre rt ""
+  mu e := np
+  lp e < len(cprog) { if cprog[e] == 10 { br } e += 1 }   // first line ends here
+  libs := substring(cprog, np, e)                          // " z m"
+  mu out := ""
+  mu start := 0 - 1
+  mu i := 0
+  lp i < len(libs) {
+    if libs[i] == 32 {
+      if start >= 0 { out = out + " -l" + substring(libs, start, i); start = 0 - 1 }
+    } el {
+      if start < 0 { start = i }
+    }
+    i += 1
+  }
+  if start >= 0 { out = out + " -l" + substring(libs, start, len(libs)) }
+  out
+}
+
+// The directory prefix of a path (through the last '/'), or "" if none — used
+// to resolve `im` paths relative to the importing file.
+fn dirname(path:str) -> str {
+  mu last := 0 - 1
+  mu i := 0
+  lp i < len(path) { if path[i] == 47 { last = i } i += 1 }   // '/'
+  if last < 0 rt ""
+  substring(path, 0, last + 1)
+}
+
+// If `line` is `im "path"` (leading spaces allowed), return the path; else "".
+fn import_path(line:str) -> str {
+  mu i := 0
+  lp i < len(line) { if line[i] != 32 { br } i += 1 }   // skip spaces
+  if i + 3 > len(line) rt ""
+  if line[i] != 105 rt ""              // 'i'
+  if line[i + 1] != 109 rt ""          // 'm'
+  if line[i + 2] != 32 rt ""           // ' '
+  mu j := i + 3
+  lp j < len(line) { if line[j] == 34 { br } j += 1 }   // opening '"'
+  if j >= len(line) rt ""
+  mu k := j + 1
+  lp k < len(line) { if line[k] == 34 { br } k += 1 }   // closing '"'
+  if k >= len(line) rt ""
+  substring(line, j + 1, k)
+}
+
+// True if any line of `src` is an `im "..."` import. Allocation-free (a plain
+// char scan, no substring) so the no-import fast path adds zero heap pressure.
+fn has_import(src:str) -> bool {
+  mu i := 0
+  mu atstart := true
+  lp i < len(src) {
+    c := src[i]
+    if c == 10 { atstart = true; i += 1; ct }
+    if atstart && c == 32 { i += 1; ct }     // leading spaces stay at line start
+    if atstart {
+      if c == 105 && i + 2 < len(src) && src[i + 1] == 109 && src[i + 2] == 32 { rt true }
+      atstart = false
+    }
+    i += 1
+  }
+  false
+}
+
+// Inline every `im "path"` by splicing the (recursively import-resolved) source
+// of the imported file in its place, so imported decls precede their uses. A
+// `seen` set blocks re-imports and cycles. Paths resolve relative to `dir`.
+// Fast path: a source with no imports is returned verbatim (no reconstruction),
+// so the overwhelmingly common single-file case is byte-for-byte unchanged.
+fn is_math_export(nm:str) -> bool {
+  if nm == "sqrt" || nm == "pow" || nm == "sin" || nm == "cos" || nm == "tan" rt true
+  if nm == "log" || nm == "log2" || nm == "log10" || nm == "exp" rt true
+  if nm == "floor" || nm == "ceil" || nm == "rand" || nm == "srand" rt true
+  if nm == "min" || nm == "max" || nm == "ipow" || nm == "gcd" rt true
+  false
+}
+// Auto-import: prepend `im "std/…"` for std exports referenced-but-not-defined
+// (mirrors ailangc's driver, scaled to math+sock — the only modules the corpus
+// auto-imports). Token-based, so names inside strings/comments don't trigger
+// (main.ail mentions `max`/`sqrt` only in C-string literals → no IDENT match →
+// returns "" → fixpoint-safe).
+fn auto_imports(src:str) -> str {
+  toks := lex(src)
+  mu defined:{str:str} := {}
+  mu i := 0
+  lp i + 1 < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "fn" && toks[i + 1].kind == TK_IDENT() { defined[toks[i + 1].text] = "1" }
+    i += 1
+  }
+  mu need_math := false
+  mu need_sock := false
+  i = 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && has(defined, toks[i].text) == false {
+      nm := toks[i].text
+      if is_math_export(nm) { need_math = true }
+      if nm == "env_int" { need_sock = true }
+    }
+    i += 1
+  }
+  mu out := ""
+  if need_math { out = out + "im \"std/math.ail\"\n" }
+  if need_sock { out = out + "im \"std/sock.ail\"\n" }
+  out
+}
+fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
+  if has_import(src) == false rt src
+  mu out := ""
+  mu i := 0
+  mu lstart := 0
+  lp i <= len(src) {
+    if i == len(src) || src[i] == 10 {     // end of a line
+      line := substring(src, lstart, i)
+      imp := import_path(line)
+      if len(imp) > 0 {
+        full := dir + imp
+        if has(seen, full) == false {
+          seen[full] = "1"
+          out = out + resolve_imports(read_file(full), dirname(full), seen) + "\n"
+        }
+      } el {
+        out = out + line + "\n"
+      }
+      lstart = i + 1
+    }
+    i += 1
+  }
+  out
+}
+

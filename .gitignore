@@ -29,3 +29,8 @@ CLAUDE.md
 !/examples-selfhost/expected/*
 
 # selfhost/ bootstrap build outputs are covered by selfhost/.gitignore
+
+# ---- root scratch (not part of the compiler) ----
+/test
+/test.ail
+/selfhost/bar1.sh

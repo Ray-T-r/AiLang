@@ -1,0 +1,1916 @@
+// ===== expression codegen ====================================================
+fn gen_args(sy:*Syms, args:[Expr]) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(args) {
+    if i > 0 { out = out + ", " }
+    out = out + gen_expr(sy, args[i])
+    i += 1
+  }
+  out
+}
+
+// Re-quote a string literal's inner content as a C string literal (escapes were
+// kept raw by the lexer, so the content is already C-safe; just wrap in quotes).
+fn gen_str(s:str) -> str { "\"" + s + "\"" }
+
+// A bare identifier: a nullary enum variant (`Bad`, `SBreak`) constructs via
+// `mkv_<name>()`; anything else is a local/param `v_<name>`.
+fn gen_var(sy:*Syms, name:str) -> str {
+  if is_variant(sy, name) rt "mkv_" + name + "()"
+  "v_" + name
+}
+
+fn gen_expr(sy:*Syms, e:Expr) -> str {
+  mt e {
+    Num(v)           => int_to_str(v);
+    Flt(fs)          => fs;
+    Str(s)           => gen_str(s);
+    Var(name)        => gen_var(sy, name);
+    Bin(op,l,r)      => gen_bin(sy, op, l, r);
+    Unary(op,x)      => "(!" + gen_expr(sy, x) + ")";
+    Call(fname,args) => gen_call(sy, fname, args);
+    Field(obj,fnm)   => gen_field(sy, obj, fnm);
+    Index(obj,idx)   => gen_index(sy, obj, idx);
+    Array(elems,ety) => gen_array(sy, elems, ety);
+    MapLit(mty,mks,mvs) => gen_maplit(sy, mty, mks, mvs);
+    Addr(x)          => "(&" + gen_expr(sy, x) + ")";
+    Match(sc,vn,vb,bd) => gen_match(sy, sc, vn, vb, bd);
+    IfE(c,t,el2)     => gen_ife(sy, c, t, el2);
+    Try(e)           => gen_try(sy, e);
+    Lambda(ps,pts,b,id)  => gen_lambda(sy, id);
+    Tuple(elems)     => gen_tuple_lit(sy, elems);
+    BlockE(body)     => gen_block_e(sy, body);
+    Bad              => "0";
+  }
+}
+
+// `if c { t } el { e }` as a value → a GNU statement-expression, like gen_match.
+// The result type is the then-branch's (branches are homogeneous in the subset).
+fn gen_ife(sy:*Syms, c:Expr, t:Expr, el2:Expr) -> str {
+  rty := type_of_expr(sy, t)
+  "({ " + cty(rty) + " __r; if (" + gen_expr(sy, c) + ") { __r = " + gen_expr(sy, t) + "; } else { __r = " + gen_expr(sy, el2) + "; } __r; })"
+}
+
+// `e?` → evaluate the result; on err, re-wrap into the *enclosing* fn's result
+// type (`@ret`, seeded per fn) and early-return; on ok, yield the unwrapped value.
+fn gen_try(sy:*Syms, e:Expr) -> str {
+  rcty := cty(type_of_expr(sy, e))          // res_<Te>
+  fret := ty_of(sy, "@ret")                 // enclosing fn's ok type
+  "({ " + rcty + " __t = " + gen_expr(sy, e) + "; if(__t.tag) return mk_err_" + arr_suffix(fret) + "(__t.err); __t.ok; })"
+}
+
+// `mt scrut { Variant(b…) => body; … }` → a GNU statement-expression:
+//   ({ T __m; ScrutTy __s = <scrut>; if(__s.tag==K0){ binds…; __m=arm0; }
+//      else if(…){…} __m; })
+// Variant bindings read `__s.u.<Variant>.f<i>` (a recursive/self-ref field is
+// stored boxed, so it's dereferenced). The scrutinee type drives tag indices.
+fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr]) -> str {
+  sty := type_of_expr(sy, sc)                 // the enum type name
+  // Type arm-0's bindings before inferring the result type: the result type is
+  // arm-0's body type, which may itself BE a binding (e.g. `Lambda(ps,b) => ps`,
+  // where `ps:[str]`). Without this the `__m` decl would default to i64 and the
+  // arm assignment `__m = <arr_str>` would be a C type error.
+  if len(vnames) > 0 { bind_arm_types(sy, vnames[0], split_semi(vbinds[0])) }
+  rty := match_type(sy, bodies)
+  mu out := "({ " + cty(rty) + " __m; " + cty(sty) + " __s = " + gen_expr(sy, sc) + "; "
+  mu i := 0
+  lp i < len(vnames) {
+    vname := vnames[i]
+    binds := split_semi(vbinds[i])
+    tag := variant_tag(sy, sty, vname)
+    kw := if i == 0 { "if" } el { "else if" }
+    out = out + kw + "(__s.tag==" + int_to_str(tag) + "){ "
+    out = out + gen_arm_binds(sy, vname, binds)
+    // type the binds so the body's gen_expr knows their types
+    bind_arm_types(sy, vname, binds)
+    out = out + "__m = " + gen_expr(sy, bodies[i]) + "; } "
+    i += 1
+  }
+  out + "__m; })"
+}
+
+// Emit the C locals for an arm's variant bindings, reading from the union and
+// dereferencing a boxed (self-recursive) field.
+fn gen_arm_binds(sy:*Syms, vname:str, binds:[str]) -> str {
+  ftypes := split_semi(sy.vft[vname])
+  mu out := ""
+  mu i := 0
+  lp i < len(binds) {
+    ft := if i < len(ftypes) { ftypes[i] } el { "i64" }
+    src := "__s.u." + vname + ".f" + int_to_str(i)
+    rhs := if is_boxed_ft(ft) { "*(" + src + ")" } el { src }
+    cft := if is_boxed_ft(ft) { cty(boxed_enum(ft, sy.evar[vname])) } el { cty(ft) }
+    out = out + cft + " v_" + binds[i] + " = " + rhs + "; "
+    i += 1
+  }
+  out
+}
+
+// Set the arm bindings' types in `sy` so the arm body types correctly.
+fn bind_arm_types(sy:*Syms, vname:str, binds:[str]) {
+  ftypes := split_semi(sy.vft[vname])
+  mu i := 0
+  lp i < len(binds) {
+    ft := if i < len(ftypes) { ftypes[i] } el { "i64" }
+    rt2 := if is_boxed_ft(ft) { boxed_enum(ft, sy.evar[vname]) } el { ft }
+    set_ty(sy, binds[i], rt2)
+    i += 1
+  }
+}
+
+// The 0-based tag index of `vname` within its enum, found via the variant order
+// recorded at parse time (`evar["@order." + sty]` is a ";"-joined variant list).
+// Stored in `evar` (not `vty`) because the per-fn var map is wiped each function
+// while the enum registry must survive — see `compile_to_c`.
+fn variant_tag(sy:*Syms, sty:str, vname:str) -> i64 {
+  order := split_semi(sy.evar["@order." + sty])
+  mu i := 0
+  lp i < len(order) {
+    if order[i] == vname rt i
+    i += 1
+  }
+  0
+}
+
+// Split a ";"-joined string into its parts ([] for an empty string).
+fn split_semi(s:str) -> [str] {
+  mu out:[str] := []
+  if len(s) == 0 rt out
+  mu start := 0
+  mu i := 0
+  lp i < len(s) {
+    if s[i] == 59 {                  // ';'
+      out = push(out, substring(s, start, i))
+      start = i + 1
+    }
+    i += 1
+  }
+  out = push(out, substring(s, start, len(s)))
+  out
+}
+
+// `obj.field`: if obj is a pointer (`*T`), use `->`; else `.`.
+fn gen_field(sy:*Syms, obj:Expr, fnm:str) -> str {
+  if is_ptr_ann(type_of_expr(sy, obj)) {
+    rt "(" + gen_expr(sy, obj) + ")->" + fnm
+  }
+  "(" + gen_expr(sy, obj) + ")." + fnm
+}
+
+// `xs[i]` → `arr_<T>_get(xs,i)`; `m[k]` → `map_<v>_get(m,k)`; `s[i]` on a string
+// → the i-th byte. Dispatch by the container's static type.
+fn gen_index(sy:*Syms, obj:Expr, idx:Expr) -> str {
+  ot := type_of_expr(sy, obj)
+  if is_array_ann(ot) {
+    rt "arr_" + arr_suffix(elem_of_ann(ot)) + "_get(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ")"
+  }
+  if is_map_ann(ot) {
+    rt map_cty(ot) + "_get(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ")"
+  }
+  if ot == "bytes" {
+    rt "bytes_at(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ")"
+  }
+  if ot == "str" {
+    rt "((int64_t)(unsigned char)(" + gen_expr(sy, obj) + ")[" + gen_expr(sy, idx) + "])"
+  }
+  "0"
+}
+
+// An array literal builds a fresh array then pushes each element:
+//   ({ arr_T a = arr_T_new(); a = arr_T_push(a, e0); …; a; })
+fn gen_array(sy:*Syms, elems:[Expr], ety:str) -> str {
+  at := array_type_of(sy, elems, ety)
+  suf := arr_suffix(elem_of_ann(at))
+  mu out := "({ arr_" + suf + " __a = arr_" + suf + "_new(); "
+  mu i := 0
+  lp i < len(elems) {
+    out = out + "__a = arr_" + suf + "_push(__a, " + gen_expr(sy, elems[i]) + "); "
+    i += 1
+  }
+  out + "__a; })"
+}
+
+// `{}` / `{k:v, …}` literal: (K,V) from the entries (or the annotation if empty),
+// then a statement-expr that news the map and `_set`s each entry (like gen_array).
+fn maplit_type(sy:*Syms, mty:str, keys:[Expr], vals:[Expr]) -> str {
+  if len(keys) > 0 rt "{" + type_of_expr(sy, keys[0]) + ":" + type_of_expr(sy, vals[0]) + "}"
+  map_lit_type(mty)
+}
+fn gen_maplit(sy:*Syms, mty:str, keys:[Expr], vals:[Expr]) -> str {
+  mc := map_cty(maplit_type(sy, mty, keys, vals))
+  if len(keys) == 0 rt mc + "_new()"
+  mu out := "({ " + mc + " __ml = " + mc + "_new(); "
+  mu i := 0
+  lp i < len(keys) {
+    out = out + mc + "_set(__ml, " + gen_expr(sy, keys[i]) + ", " + gen_expr(sy, vals[i]) + "); "
+    i += 1
+  }
+  out + "__ml; })"
+}
+
+// ----- lambdas + higher-order builtins (map/filter/reduce) ------------------
+// Lambdas are not first-class values here; they're INLINED into the loop a
+// map/filter/reduce generates, so captured outer vars stay in scope for free
+// (no env struct / fn pointer). `lam_params`/`lam_body` pull the parts out (the
+// arg is always a Lambda by construction; the other arms are dead but the match
+// must be total).
+fn empty_strs() -> [str] { mu e:[str] := []; e }
+fn no_exprs() -> [Expr] { mu e:[Expr] := []; e }   // typed empty [Expr] for ctor args
+fn lam_params(e:Expr) -> [str] {
+  mt e {
+    Lambda(ps,pts,b,id)  => ps;
+    Num(v)           => empty_strs();
+    Flt(s)           => empty_strs();
+    Str(s)           => empty_strs();
+    Var(n)           => empty_strs();
+    Bin(o,l,r)       => empty_strs();
+    Unary(o,x)       => empty_strs();
+    Call(f,a)        => empty_strs();
+    Field(o,f)       => empty_strs();
+    Index(o,i)       => empty_strs();
+    Array(es,et)     => empty_strs();
+    Tuple(tes)       => empty_strs();
+    BlockE(bb)       => empty_strs();
+    MapLit(m,mks,mvs) => empty_strs();
+    Addr(x)          => empty_strs();
+    Match(sc,vn,vb,bd) => empty_strs();
+    IfE(c,t,el2)     => empty_strs();
+    Try(x)           => empty_strs();
+    Bad              => empty_strs();
+  }
+}
+fn lam_body(e:Expr) -> Expr {
+  mt e {
+    Lambda(ps,pts,b,id)  => b;
+    Tuple(tes)       => Bad;
+    BlockE(bb)       => Bad;
+    Num(v)           => Bad;
+    Flt(s)           => Bad;
+    Str(s)           => Bad;
+    Var(n)           => Bad;
+    Bin(o,l,r)       => Bad;
+    Unary(o,x)       => Bad;
+    Call(f,a)        => Bad;
+    Field(o,f)       => Bad;
+    Index(o,i)       => Bad;
+    Array(es,et)     => Bad;
+    MapLit(m,mks,mvs) => Bad;
+    Addr(x)          => Bad;
+    Match(sc,vn,vb,bd) => Bad;
+    IfE(c,t,el2)     => Bad;
+    Try(x)           => Bad;
+    Bad              => Bad;
+  }
+}
+
+// ----- closure capture analysis ---------------------------------------------
+// `free_vars(b)` = the `Var` names appearing in a lambda body, deduped in
+// first-seen order. The caller (`register_lam`) narrows these to actual captures
+// (drop the lambda's own params + anything not a live enclosing local). MUST
+// recurse every Expr arm — esp. Match arm bodies and a nested Lambda's body — or
+// a capture is dropped and the lifted fn references an undeclared `v_<cap>`.
+fn is_param(ps:[str], nm:str) -> bool {
+  mu i := 0
+  lp i < len(ps) { if ps[i] == nm rt true   i += 1 }
+  false
+}
+fn fv_add(acc:[str], name:str) -> [str] {
+  mu i := 0
+  lp i < len(acc) { if acc[i] == name rt acc   i += 1 }   // already seen
+  push(acc, name)
+}
+fn fv_args(args:[Expr], acc:[str]) -> [str] {
+  mu a := acc
+  mu i := 0
+  lp i < len(args) { a = fv_walk(args[i], a); i += 1 }
+  a
+}
+fn fv_walk(e:Expr, acc:[str]) -> [str] {
+  mt e {
+    Var(name)        => fv_add(acc, name);
+    Num(v)           => acc;
+    Flt(s)           => acc;
+    Str(s)           => acc;
+    MapLit(m,mks,mvs) => fv_args(mvs, fv_args(mks, acc));
+    Bad              => acc;
+    Bin(op,l,r)      => fv_walk(r, fv_walk(l, acc));
+    Unary(op,x)      => fv_walk(x, acc);
+    Call(fname,args) => fv_args(args, acc);            // fname is a fn, not a captured var
+    Tuple(tes)       => fv_args(tes, acc);
+    BlockE(bb)       => fv_body(bb, acc);                 // block-body lambda: walk its stmts
+    Field(obj,fnm)   => fv_walk(obj, acc);
+    Index(obj,idx)   => fv_walk(idx, fv_walk(obj, acc));
+    Array(elems,ety) => fv_args(elems, acc);
+    Addr(x)          => fv_walk(x, acc);
+    Match(sc,vn,vb,bd) => fv_args(bd, fv_walk(sc, acc));   // scrutinee + every arm body
+    IfE(c,t,el2)     => fv_walk(el2, fv_walk(t, fv_walk(c, acc)));
+    Try(x)           => fv_walk(x, acc);
+    Lambda(ps,pts,b,id)  => fv_walk(b, acc);                  // nested lambda body
+  }
+}
+// Free vars inside a [Stmt] body — for a block-body lambda's capture analysis.
+// Over-collects (block-local `:=`/loop vars included), but `register_lam`
+// filters to actual enclosing locals, so bindings drop out harmlessly.
+fn fv_body(body:[Stmt], acc:[str]) -> [str] {
+  mu a := acc
+  mu i := 0
+  lp i < len(body) { a = fv_stmt(body[i], a); i += 1 }
+  a
+}
+fn fv_stmt(s:Stmt, acc:[str]) -> [str] {
+  mt s {
+    SDecl(name,e)         => fv_walk(e, acc);
+    SDestructure(names,e) => fv_walk(e, acc);
+    SAssign(name,e)       => fv_walk(e, acc);
+    SIdxAssign(o,ix,e)    => fv_walk(e, fv_walk(ix, fv_walk(o, acc)));
+    SFieldAssign(o,f,e)   => fv_walk(e, fv_walk(o, acc));
+    SReturn(e)            => fv_walk(e, acc);
+    SPrint(e)             => fv_walk(e, acc);
+    SExpr(e)              => fv_walk(e, acc);
+    SIf(c,b,eb)           => fv_body(eb, fv_body(b, fv_walk(c, acc)));
+    SLoop(c,b)            => fv_body(b, fv_walk(c, acc));
+    SLoopIn(vnm,coll,b)   => fv_body(b, fv_walk(coll, acc));
+    SLoopKV(kn,vn,coll,b) => fv_body(b, fv_walk(coll, acc));
+    SLoopRange(v,lo,hi,b) => fv_body(b, fv_walk(hi, fv_walk(lo, acc)));
+    SBreak                => acc;
+    SContinue             => acc;
+  }
+}
+fn free_vars(b:Expr) -> [str] { mu acc:[str] := []; fv_walk(b, acc) }
+
+// map(arr, fn(x) e) → a fresh array of e applied to each element.
+fn gen_map(sy:*Syms, arr:Expr, lam:Expr) -> str {
+  at := type_of_expr(sy, arr)
+  et := elem_of_ann(at)
+  ps := lam_params(lam)
+  set_ty(sy, ps[0], et)
+  b := lam_body(lam)
+  ut := type_of_expr(sy, b)
+  usuf := arr_suffix(ut)
+  tsuf := arr_suffix(et)
+  mu o := "({ arr_" + usuf + " __hm = arr_" + usuf + "_new(); arr_" + tsuf + " __hs = " + gen_expr(sy, arr) + "; "
+  o = o + "for(int64_t __hi=0; __hi<__hs.len; __hi++){ " + cty(et) + " v_" + ps[0] + " = __hs.data[__hi]; "
+  o = o + "__hm = arr_" + usuf + "_push(__hm, " + gen_expr(sy, b) + "); } __hm; })"
+  o
+}
+
+// filter(arr, fn(x) cond) → the elements where cond holds.
+fn gen_filter(sy:*Syms, arr:Expr, lam:Expr) -> str {
+  at := type_of_expr(sy, arr)
+  et := elem_of_ann(at)
+  ps := lam_params(lam)
+  set_ty(sy, ps[0], et)
+  b := lam_body(lam)
+  tsuf := arr_suffix(et)
+  mu o := "({ arr_" + tsuf + " __hm = arr_" + tsuf + "_new(); arr_" + tsuf + " __hs = " + gen_expr(sy, arr) + "; "
+  o = o + "for(int64_t __hi=0; __hi<__hs.len; __hi++){ " + cty(et) + " v_" + ps[0] + " = __hs.data[__hi]; "
+  o = o + "if(" + gen_expr(sy, b) + "){ __hm = arr_" + tsuf + "_push(__hm, v_" + ps[0] + "); } } __hm; })"
+  o
+}
+
+// reduce(arr, init, fn(acc, x) e) → fold from init.
+fn gen_reduce(sy:*Syms, arr:Expr, init:Expr, lam:Expr) -> str {
+  at := type_of_expr(sy, arr)
+  et := elem_of_ann(at)
+  ut := type_of_expr(sy, init)
+  ps := lam_params(lam)
+  set_ty(sy, ps[0], ut)
+  set_ty(sy, ps[1], et)
+  b := lam_body(lam)
+  tsuf := arr_suffix(et)
+  mu o := "({ " + cty(ut) + " __ha = " + gen_expr(sy, init) + "; arr_" + tsuf + " __hs = " + gen_expr(sy, arr) + "; "
+  o = o + "for(int64_t __hi=0; __hi<__hs.len; __hi++){ " + cty(ut) + " v_" + ps[0] + " = __ha; " + cty(et) + " v_" + ps[1] + " = __hs.data[__hi]; "
+  o = o + "__ha = " + gen_expr(sy, b) + "; } __ha; })"
+  o
+}
+
+// ----- generics (inlined, like lambdas) -------------------------------------
+// A generic fn `id<T>(x:T) -> T` isn't a C function; each call inlines its body
+// with params bound to the call's concrete types (so the body is only emitted
+// for types it's used with). `is_generic` short-circuits when none exist.
+fn is_generic(sy:*Syms, name:str) -> bool {
+  if len(sy.gfns) == 0 rt false
+  has(sy.evar, "@generic." + name)
+}
+fn is_tparam(f:Func, ty:str) -> bool {
+  mu i := 0
+  lp i < len(f.tparams) { if f.tparams[i] == ty rt true   i += 1 }
+  false
+}
+fn is_array_tparam(f:Func, ty:str) -> bool {        // ty is `[T]` for a type param T?
+  mu i := 0
+  lp i < len(f.tparams) { if ty == "[" + f.tparams[i] + "]" rt true   i += 1 }
+  false
+}
+fn subst_tparam(f:Func, ty:str, concrete:str) -> str {   // T→concrete, [T]→[concrete], else as-is
+  mu i := 0
+  lp i < len(f.tparams) {
+    if ty == f.tparams[i] rt concrete
+    if ty == "[" + f.tparams[i] + "]" rt "[" + concrete + "]"
+    i += 1
+  }
+  ty
+}
+fn find_gfn(sy:*Syms, name:str) -> Func {
+  mu i := 0
+  lp i < len(sy.gfns) {
+    if sy.gfns[i].name == name rt sy.gfns[i]
+    i += 1
+  }
+  mu nob:[Stmt] := []
+  mu noa:[str] := []
+  Func("", noa, noa, "", "", noa, nob)
+}
+fn generic_T(sy:*Syms, f:Func, args:[Expr]) -> str {
+  mu i := 0
+  lp i < len(f.ptypes) {
+    if i < len(args) {
+      if is_tparam(f, f.ptypes[i]) rt type_of_expr(sy, args[i])                       // scalar `T` param
+      if is_array_tparam(f, f.ptypes[i]) rt elem_of_ann(type_of_expr(sy, args[i]))    // `[T]` param → arg's elem type
+    }
+    i += 1
+  }
+  "i64"
+}
+fn inline_stmt_value(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SExpr(e)              => gen_expr(sy, e) + ";";
+    SReturn(e)            => gen_expr(sy, e) + ";";
+    SDestructure(names,e) => "0;";
+    SDecl(name,e)         => "0;";
+    SAssign(name,e)       => "0;";
+    SIdxAssign(o,i,e)     => "0;";
+    SFieldAssign(o,f,e)   => "0;";
+    SPrint(e)             => "0;";
+    SIf(c,b,eb)           => "0;";
+    SLoop(c,b)            => "0;";
+    SLoopIn(vnm,coll,b)   => "0;";
+    SLoopKV(kn,vn,coll,b) => "0;";
+    SLoopRange(v,lo,hi,b) => "0;";
+    SBreak                => "0;";
+    SContinue             => "0;";
+  }
+}
+fn gen_generic_call(sy:*Syms, name:str, args:[Expr]) -> str {
+  f := find_gfn(sy, name)
+  gt := generic_T(sy, f, args)
+  mu o := "({ "
+  mu i := 0
+  lp i < len(f.params) {
+    pt := subst_tparam(f, f.ptypes[i], gt)   // substitutes both `T` and `[T]`
+    set_ty(sy, f.params[i], pt)
+    o = o + cty(pt) + " v_" + f.params[i] + " = " + gen_expr(sy, args[i]) + "; "
+    i += 1
+  }
+  n := len(f.body)
+  mu j := 0
+  lp j < n - 1 { o = o + gen_stmt(sy, f.body[j], "") j += 1 }
+  if n > 0 { o = o + inline_stmt_value(sy, f.body[n - 1]) }
+  o + " })"
+}
+
+// ----- first-class closures -------------------------------------------------
+// A `Lambda` used as a value emits a `closure_t {fn, env}` literal. Captures
+// (names from evar["@lamcaps.<id>"]) are copied into a heap env; the RHS
+// `v_<cap>` resolve in the enclosing scope where the literal appears.
+fn gen_lambda(sy:*Syms, id:i64) -> str {
+  idstr := int_to_str(id)
+  caps := split_semi(sy.evar["@lamcaps." + idstr])
+  if len(caps) == 0 {
+    rt "((closure_t){ (void*)__lam_" + idstr + ", (void*)0 })"
+  }
+  mu out := "({ __env_" + idstr + "* __e = (__env_" + idstr + "*)GC_MALLOC(sizeof(__env_" + idstr + ")); "
+  mu k := 0
+  lp k < len(caps) { out = out + "__e->v_" + caps[k] + " = v_" + caps[k] + "; "; k += 1 }
+  out + "((closure_t){ (void*)__lam_" + idstr + ", (void*)__e }); })"
+}
+
+// `f(a0, ...)` on a closure-typed local: call through the fn pointer with the
+// env prepended. Cast spells the exact arity; args default to int64_t.
+fn gen_closure_call(sy:*Syms, fname:str, ret:str, args:[Expr]) -> str {
+  cv := gen_var(sy, fname)                     // "v_f"
+  pts := fn_params_of(ty_of(sy, fname))        // the closure's declared param types
+  mu cast := cty(ret) + " (*)(void*"
+  mu k := 0
+  lp k < len(args) {
+    pt := if k < len(pts) { pts[k] } el { "i64" }
+    cast = cast + ", " + cty(pt)
+    k += 1
+  }
+  cast = cast + ")"
+  mu out := "(((" + cast + ")(" + cv + ").fn)((" + cv + ").env"
+  k = 0
+  lp k < len(args) { out = out + ", " + gen_expr(sy, args[k]); k += 1 }
+  out + "))"
+}
+
+// `to_str(x)` → i2s; struct ctor → mk_Name; `len`/`push` on an array → the
+// monomorphic helper; any other call is a user fn → `f_<name>(args)`.
+fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if is_generic(sy, fname) { rt gen_generic_call(sy, fname, args) }
+  if fname == "map" && len(args) == 2 { rt gen_map(sy, args[0], args[1]) }
+  if fname == "filter" && len(args) == 2 { rt gen_filter(sy, args[0], args[1]) }
+  if fname == "reduce" && len(args) == 3 { rt gen_reduce(sy, args[0], args[1], args[2]) }
+  if fname == "to_str" && len(args) == 1 {
+    // Polymorphic stringify (drives string interpolation): str→itself, f64→%g,
+    // bool→true/false, bytes→decode, else i64→i2s. Matches ailangc's _Generic.
+    t := type_of_expr(sy, args[0])
+    if t == "str" rt gen_expr(sy, args[0])
+    if t == "f64" rt "f2s(" + gen_expr(sy, args[0]) + ")"
+    if t == "bool" rt "((" + gen_expr(sy, args[0]) + ") ? \"true\" : \"false\")"
+    if t == "bytes" rt "bytes_to_str(" + gen_expr(sy, args[0]) + ")"
+    rt "i2s(" + gen_expr(sy, args[0]) + ")"
+  }
+  // `print(x)` — like println but no trailing newline (same type dispatch). Used
+  // as an expression statement, so it returns the bare printf/print_bytes call.
+  if fname == "print" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if t == "str" rt "printf(\"%s\", " + gen_expr(sy, args[0]) + ")"
+    if t == "f64" rt "printf(\"%g\", (double)(" + gen_expr(sy, args[0]) + "))"
+    if t == "bool" rt "printf(\"%s\", (" + gen_expr(sy, args[0]) + ") ? \"true\" : \"false\")"
+    if t == "bytes" rt "print_bytes(" + gen_expr(sy, args[0]) + ")"
+    rt "printf(\"%lld\", (long long)(" + gen_expr(sy, args[0]) + "))"
+  }
+  // println as an EXPRESSION (e.g. a match/if arm body); the statement form is
+  // SPrint. Same type dispatch as `print`, with a trailing newline.
+  if fname == "println" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if t == "str" rt "printf(\"%s\\n\", " + gen_expr(sy, args[0]) + ")"
+    if t == "f64" rt "printf(\"%g\\n\", (double)(" + gen_expr(sy, args[0]) + "))"
+    if t == "bool" rt "printf(\"%s\\n\", (" + gen_expr(sy, args[0]) + ") ? \"true\" : \"false\")"
+    if t == "bytes" rt "(print_bytes(" + gen_expr(sy, args[0]) + "), putchar(10))"
+    if is_map_ann(t) && is_scalar_ty(map_vtype(t)) rt "(" + map_cty(t) + "_print(" + gen_expr(sy, args[0]) + "), putchar(10))"
+    rt "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, args[0]) + "))"
+  }
+  if fname == "int_to_str" && len(args) == 1 {
+    rt "i2s(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "str_to_int" && len(args) == 1 {
+    rt "s2i(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "float_to_str" && len(args) == 1 {
+    rt "f2s(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "str_to_float" && len(args) == 1 {
+    rt "s2f(" + gen_expr(sy, args[0]) + ")"
+  }
+  // `cstr(s)` — str → C-string passthrough (AiLang str is already `const char*`),
+  // so `s.cstr` lowers to a no-op. Matches ailangc's `cstr` builtin.
+  if fname == "cstr" && len(args) == 1 {
+    rt gen_expr(sy, args[0])
+  }
+  if fname == "substring" && len(args) == 3 {
+    rt "substr(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ", " + gen_expr(sy, args[2]) + ")"
+  }
+  if fname == "read_file" && len(args) == 1 {
+    rt "read_file_c(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "write_file" && len(args) == 2 {
+    rt "write_file_c(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+  }
+  // bytes builtins map 1:1 onto same-named C prelude helpers.
+  if fname == "str_to_bytes" && len(args) == 1 {
+    rt "str_to_bytes(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "bytes_to_str" && len(args) == 1 {
+    rt "bytes_to_str(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "bytes_at" && len(args) == 2 {
+    rt "bytes_at(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+  }
+  if fname == "bytes_slice" && len(args) == 3 {
+    rt "bytes_slice(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ", " + gen_expr(sy, args[2]) + ")"
+  }
+  if fname == "read_file_bytes" && len(args) == 1 {
+    rt "read_file_bytes(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "write_file_bytes" && len(args) == 2 {
+    rt "write_file_bytes(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+  }
+  if fname == "args" && len(args) == 0 {
+    rt "ailang_args()"
+  }
+  if fname == "exit" && len(args) == 1 {
+    rt "exit((int)(" + gen_expr(sy, args[0]) + "))"
+  }
+  // `!T` result helpers. `ok(x)` monomorphizes on x's type; `err_<T>(m)` on the
+  // name suffix; inspectors read the {tag, ok, err} struct directly.
+  if fname == "ok" && len(args) == 1 {
+    rt "mk_ok_" + arr_suffix(type_of_expr(sy, args[0])) + "(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "err" && len(args) == 1 {     // generic err(m) → mk_err_<enclosing !T>
+    rt "mk_err_" + arr_suffix(ty_of(sy, "@ret")) + "(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "unwrap" && len(args) == 1 {
+    rt "(" + gen_expr(sy, args[0]) + ").ok"
+  }
+  if fname == "is_ok" && len(args) == 1 {
+    rt "((" + gen_expr(sy, args[0]) + ").tag==0)"
+  }
+  if fname == "is_err" && len(args) == 1 {
+    rt "((" + gen_expr(sy, args[0]) + ").tag!=0)"
+  }
+  if fname == "err_msg" && len(args) == 1 {
+    rt "(" + gen_expr(sy, args[0]) + ").err"
+  }
+  if len(fname) > 4 && substring(fname, 0, 4) == "err_" && len(args) == 1 {
+    rt "mk_err_" + substring(fname, 4, len(fname)) + "(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "len" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) {
+      rt "arr_" + arr_suffix(elem_of_ann(t)) + "_len(" + gen_expr(sy, args[0]) + ")"
+    }
+    if t == "bytes" { rt "(" + gen_expr(sy, args[0]) + ").len" }
+    if is_map_ann(t) { rt map_cty(t) + "_len(" + gen_expr(sy, args[0]) + ")" }
+    rt "((int64_t)strlen(" + gen_expr(sy, args[0]) + "))"     // len of a string
+  }
+  if fname == "push" && len(args) == 2 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) {
+      suf := arr_suffix(elem_of_ann(t))
+      rt "arr_" + suf + "_push(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+    }
+  }
+  if fname == "has" && len(args) == 2 {
+    t := type_of_expr(sy, args[0])
+    if is_map_ann(t) {
+      rt map_cty(t) + "_has(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+    }
+  }
+  if fname == "slice" && len(args) == 3 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) {
+      rt "arr_" + arr_suffix(elem_of_ann(t)) + "_slice(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ", " + gen_expr(sy, args[2]) + ")"
+    }
+  }
+  if fname == "reverse" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) {
+      rt "arr_" + arr_suffix(elem_of_ann(t)) + "_reverse(" + gen_expr(sy, args[0]) + ")"
+    }
+  }
+  if fname == "sort" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) {
+      rt "arr_" + arr_suffix(elem_of_ann(t)) + "_sort(" + gen_expr(sy, args[0]) + ")"
+    }
+  }
+  if (fname == "keys" || fname == "values") && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if is_map_ann(t) {
+      rt map_cty(t) + "_" + fname + "(" + gen_expr(sy, args[0]) + ")"
+    }
+  }
+  // ===== Phase 1 string / numeric / io builtins (codegen) =====
+  if fname == "starts_with" && len(args) == 2 { rt "starts_with(" + gen_args(sy, args) + ")" }
+  if fname == "ends_with" && len(args) == 2 { rt "ends_with(" + gen_args(sy, args) + ")" }
+  if fname == "to_upper" && len(args) == 1 { rt "to_upper(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "to_lower" && len(args) == 1 { rt "to_lower(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "trim" && len(args) == 1 { rt "trim(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "replace" && len(args) == 3 { rt "str_replace(" + gen_args(sy, args) + ")" }
+  if fname == "repeat" && len(args) == 2 { rt "repeat(" + gen_args(sy, args) + ")" }
+  if fname == "pad_left" && len(args) == 3 { rt "pad_left(" + gen_args(sy, args) + ")" }
+  if fname == "pad_right" && len(args) == 3 { rt "pad_right(" + gen_args(sy, args) + ")" }
+  if fname == "chr" && len(args) == 1 { rt "chr(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "ord" && len(args) == 1 { rt "ord(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "str_to_bool" && len(args) == 1 { rt "str_to_bool(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "sign" && len(args) == 1 { rt "sign(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "clamp" && len(args) == 3 { rt "clamp(" + gen_args(sy, args) + ")" }
+  if fname == "read_line" && len(args) == 0 { rt "read_line()" }
+  if fname == "get_env" && len(args) == 1 { rt "get_env(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "split" && len(args) == 2 { rt "split(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
+  // Phase 2 native builtins → same-named C helpers (gated into the prelude).
+  if fname == "now_ms" && len(args) == 0 { rt "now_ms()" }
+  if fname == "now_us" && len(args) == 0 { rt "now_us()" }
+  if fname == "mono_ms" && len(args) == 0 { rt "mono_ms()" }
+  if fname == "sleep_ms" && len(args) == 1 { rt "sleep_ms(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "time_iso" && len(args) == 1 { rt "time_iso(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "tcp_listen" && len(args) == 2 { rt "tcp_listen(" + gen_args(sy, args) + ")" }
+  if fname == "tcp_accept" && len(args) == 1 { rt "tcp_accept(" + gen_args(sy, args) + ")" }
+  if fname == "tcp_connect" && len(args) == 2 { rt "tcp_connect(" + gen_args(sy, args) + ")" }
+  if fname == "sock_send" && len(args) == 2 { rt "sock_send(" + gen_args(sy, args) + ")" }
+  if fname == "sock_send_str" && len(args) == 2 { rt "sock_send_str(" + gen_args(sy, args) + ")" }
+  if fname == "sock_recv" && len(args) == 2 { rt "sock_recv(" + gen_args(sy, args) + ")" }
+  if fname == "sock_close" && len(args) == 1 { rt "sock_close(" + gen_args(sy, args) + ")" }
+  if fname == "proc_fork" && len(args) == 0 { rt "proc_fork()" }
+  if fname == "proc_getpid" && len(args) == 0 { rt "proc_getpid()" }
+  if fname == "proc_no_zombies" && len(args) == 0 { rt "proc_no_zombies()" }
+  if fname == "proc_reap" && len(args) == 0 { rt "proc_reap()" }
+  if fname == "regex_match" && len(args) == 2 { rt "regex_match(" + gen_args(sy, args) + ")" }
+  if fname == "regex_find" && len(args) == 2 { rt "regex_find(" + gen_args(sy, args) + ")" }
+  if fname == "format" && len(args) >= 1 { rt "format(" + gen_args(sy, args) + ")" }
+  if fname == "abs" && len(args) == 1 {
+    if type_of_expr(sy, args[0]) == "f64" { rt "abs_f64(" + gen_expr(sy, args[0]) + ")" }
+    rt "abs_i64(" + gen_expr(sy, args[0]) + ")"
+  }
+  if fname == "abs_i64" && len(args) == 1 { rt "abs_i64(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "abs_f64" && len(args) == 1 { rt "abs_f64(" + gen_expr(sy, args[0]) + ")" }
+  // contains / index_of: poly over string AND array (dispatch on arg[0]'s type).
+  if fname == "contains" && len(args) == 2 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) { rt "arr_" + arr_suffix(elem_of_ann(t)) + "_contains(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
+    rt "str_contains(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+  }
+  if fname == "index_of" && len(args) == 2 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) { rt "arr_" + arr_suffix(elem_of_ann(t)) + "_index_of(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
+    rt "str_index_of(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")"
+  }
+  if fname == "pop" && len(args) == 1 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) { rt "arr_" + arr_suffix(elem_of_ann(t)) + "_pop(" + gen_expr(sy, args[0]) + ")" }
+  }
+  if fname == "join" && len(args) == 2 {
+    t := type_of_expr(sy, args[0])
+    if is_array_ann(t) { rt "arr_" + arr_suffix(elem_of_ann(t)) + "_join(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
+  }
+  // Phase 3 TLS/PG native builtins → same-named C helper (gated into the prelude).
+  if is_native_call(fname) { rt fname + "(" + gen_args(sy, args) + ")" }
+  if is_ctor(sy, fname) {
+    rt "mk_" + fname + "(" + gen_args(sy, args) + ")"
+  }
+  if is_variant(sy, fname) {
+    rt "mkv_" + fname + "(" + gen_args(sy, args) + ")"   // variant constructor
+  }
+  // a closure-typed local called indirectly via its fn pointer (before the
+  // user-fn `f_<name>` fallback, since a closure var shadows that path)
+  if has(sy.vty, fname) && is_fn_ann(sy.vty[fname]) {
+    rt gen_closure_call(sy, fname, fn_ret_of(sy.vty[fname]), args)
+  }
+  "f_" + fname + "(" + gen_args(sy, args) + ")"
+}
+
+// A `+` whose operands are strings lowers to a runtime `scat(a, b)` call;
+// any other binary op is plain C infix. (Matches real AiLang: no int→str
+// auto-coercion — int operands must be wrapped in `to_str` first.)
+// `m[k] ?? d` — map get-or-default: read m[k] when key k is present, else d.
+// A bare infix `??` would lower to nothing sensible; the value of `??` is the
+// `has`-guarded read. A non-map index has no "absent" case, so it just reads.
+fn gen_qq_index(sy:*Syms, obj:Expr, idx:Expr, r:Expr) -> str {
+  ot := type_of_expr(sy, obj)
+  if is_map_ann(ot) {
+    rt "(" + map_cty(ot) + "_has(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ") ? " + gen_index(sy, obj, idx) + " : " + gen_expr(sy, r) + ")"
+  }
+  gen_index(sy, obj, idx)
+}
+// `l ?? d`. Only a map-index l-value has a defined "absent" case; every other
+// shape makes `??` a no-op yielding d (arms enumerated — the subset has no `_`).
+fn gen_qq(sy:*Syms, l:Expr, r:Expr) -> str {
+  mt l {
+    Index(obj, idx)     => gen_qq_index(sy, obj, idx, r);
+    Num(v)              => gen_expr(sy, r);
+    Flt(fs)             => gen_expr(sy, r);
+    Str(s)              => gen_expr(sy, r);
+    Var(n)              => gen_expr(sy, r);
+    Bin(o,a,b)          => gen_expr(sy, r);
+    Unary(o,x)          => gen_expr(sy, r);
+    Call(f,a)           => gen_expr(sy, r);
+    Field(o,fnm)        => gen_expr(sy, r);
+    Array(es,et)        => gen_expr(sy, r);
+    MapLit(mlt,mks,mvs) => gen_expr(sy, r);
+    Addr(x)             => gen_expr(sy, r);
+    Match(sc,vn,vb,bd)  => gen_expr(sy, r);
+    IfE(c,t,e2)         => gen_expr(sy, r);
+    Try(e2)             => gen_expr(sy, r);
+    Lambda(ps,pts,b,id) => gen_expr(sy, r);
+    Tuple(tes)          => gen_expr(sy, r);
+    BlockE(bb)          => gen_expr(sy, r);
+    Bad                 => gen_expr(sy, r);
+  }
+}
+
+fn gen_bin(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
+  if op == OP_QQ() { rt gen_qq(sy, l, r) }   // `??` — map get-or-default
+  if op == OP_ADD() && expr_is_str(l, sy) && expr_is_str(r, sy) {
+    rt "scat(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ")"
+  }
+  if op == OP_CAT() { rt "scat(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ")" }   // `++` string concat
+  // String equality must go through strcmp — a raw C `==` compares pointers, so
+  // `tok == "en"` (heap string vs literal) would be false even when equal. This
+  // is the crux of self-hosting: the bootstrap's keyword dispatch is all `str ==`.
+  if op == OP_EQ() && expr_is_str(l, sy) && expr_is_str(r, sy) {
+    rt "(strcmp(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ") == 0)"
+  }
+  if op == OP_NE() && expr_is_str(l, sy) && expr_is_str(r, sy) {
+    rt "(strcmp(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ") != 0)"
+  }
+  "(" + gen_expr(sy, l) + op_c(op) + gen_expr(sy, r) + ")"
+}
+
+// Emit `<cty> name = ...` (first declaration) or `name = ...` (reassignment).
+// `name := expr` lowers to a plain assignment — the C declaration was already
+// emitted at the function top by `hoist_decls`. (We still re-record the type so
+// `xs := push(xs, …)` etc. refine an inferred element type during codegen.)
+fn gen_decl(sy:*Syms, name:str, e:Expr, ind:str) -> str {
+  set_ty(sy, name, type_of_expr(sy, e))
+  ind + "v_" + name + " = " + gen_expr(sy, e) + ";\n"
+}
+
+// ----- tuple helpers (multi-return) -----------------------------------------
+// The static type of a tuple literal: "(T1;T2;…)" from each element's type.
+fn tuple_type_of(sy:*Syms, elems:[Expr]) -> str {
+  mu s := "("
+  mu i := 0
+  lp i < len(elems) {
+    if i > 0 { s = s + ";" }
+    s = s + type_of_expr(sy, elems[i])
+    i += 1
+  }
+  s + ")"
+}
+// A tuple literal → a C compound literal of its `tup_<suffix>` struct (fields
+// positional). It only appears in `return …`, so no macro-arg-comma hazard.
+fn gen_tuple_lit(sy:*Syms, elems:[Expr]) -> str {
+  ty := tuple_type_of(sy, elems)
+  mu out := "(" + cty(ty) + "){ "
+  mu i := 0
+  lp i < len(elems) {
+    if i > 0 { out = out + ", " }
+    out = out + gen_expr(sy, elems[i])
+    i += 1
+  }
+  out + " }"
+}
+// `a, b := f()` → a block holding a temp tuple, then one assignment per name
+// into the (hoisted) locals. A "_" slot is skipped. The temp is block-scoped,
+// so two destructures never collide on the `__dt` name.
+fn gen_destructure(sy:*Syms, names:[str], e:Expr, ind:str) -> str {
+  ty := type_of_expr(sy, e)
+  ets := tuple_elems(ty)
+  mu out := ind + "{ " + cty(ty) + " __dt = " + gen_expr(sy, e) + ";"
+  mu i := 0
+  lp i < len(names) {
+    if names[i] != "_" {
+      ft := if i < len(ets) { ets[i] } el { "i64" }
+      set_ty(sy, names[i], ft)
+      out = out + " v_" + names[i] + " = __dt._" + int_to_str(i) + ";"
+    }
+    i += 1
+  }
+  out + " }\n"
+}
+// Hoist a destructure's bindings (one C local per non-"_" name, typed from the
+// tuple's element types) — like hoist_one, so `:=` lowers to an assignment.
+fn hoist_destructure(sy:*Syms, names:[str], e:Expr, ind:str) -> str {
+  ty := type_of_expr(sy, e)
+  ets := tuple_elems(ty)
+  mu out := ""
+  mu i := 0
+  lp i < len(names) {
+    if names[i] != "_" {
+      ft := if i < len(ets) { ets[i] } el { "i64" }
+      if declared(sy, names[i]) == false {
+        set_ty(sy, names[i], ft)
+        out = out + ind + cty(ft) + " v_" + names[i] + ";\n"
+      }
+    }
+    i += 1
+  }
+  out
+}
+// One `tup_<suffix>` typedef for a tuple type "(T1;T2;…)".
+fn gen_tuple_typedef(ty:str) -> str {
+  es := tuple_elems(ty)
+  mu out := "typedef struct { "
+  mu i := 0
+  lp i < len(es) {
+    out = out + cty(es[i]) + " _" + int_to_str(i) + "; "
+    i += 1
+  }
+  out + "} tup_" + tuple_suffix(ty) + ";\n"
+}
+
+// ----- block expressions (`{ s1; s2; …; tail }` as a value) -----------------
+// Type = the tail (last stmt)'s expression type. Lowers to a GNU statement-expr
+// `({ <stmts>; <tail>; })`; the block's `:=` decls are block-LOCAL (declared in
+// place, naturally C-scoped — no function-top hoist), so a `_` of the same name
+// in two sibling blocks never collides.
+fn block_type(sy:*Syms, body:[Stmt]) -> str {
+  n := len(body)
+  if n == 0 rt "i64"
+  last_expr_type(sy, body[n - 1])
+}
+// One non-tail statement inside a block: a `:=` declares a block-local (full C
+// decl with its type); every other form reuses the normal statement codegen.
+fn gen_blk_decl(sy:*Syms, name:str, e:Expr) -> str {
+  ty := type_of_expr(sy, e)
+  set_ty(sy, name, ty)
+  cty(ty) + " v_" + name + " = " + gen_expr(sy, e) + "; "
+}
+fn gen_blk_stmt(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SDecl(name,e)            => gen_blk_decl(sy, name, e);
+    SDestructure(names,e)    => gen_stmt(sy, s, "");
+    SAssign(name,e)          => gen_stmt(sy, s, "");
+    SIdxAssign(o,i,e)        => gen_stmt(sy, s, "");
+    SFieldAssign(o,f,e)      => gen_stmt(sy, s, "");
+    SReturn(e)               => gen_stmt(sy, s, "");
+    SPrint(e)                => gen_stmt(sy, s, "");
+    SIf(c,b,eb)              => gen_stmt(sy, s, "");
+    SLoop(c,b)               => gen_stmt(sy, s, "");
+    SLoopIn(vnm,coll,b)      => gen_stmt(sy, s, "");
+    SLoopKV(kn,vn,coll,b)    => gen_stmt(sy, s, "");
+    SLoopRange(v,lo,hi,b)    => gen_stmt(sy, s, "");
+    SBreak                   => gen_stmt(sy, s, "");
+    SContinue                => gen_stmt(sy, s, "");
+    SExpr(e)                 => gen_stmt(sy, s, "");
+  }
+}
+// The tail statement supplies the block's value: a bare expr (or `rt`) is that
+// value; any other form runs as a statement and the block yields 0.
+fn gen_blk_tail(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SExpr(e)                 => gen_expr(sy, e) + "; ";
+    SReturn(e)               => gen_expr(sy, e) + "; ";
+    SDecl(name,e)            => gen_blk_decl(sy, name, e) + "0; ";
+    SDestructure(names,e)    => gen_stmt(sy, s, "") + "0; ";
+    SAssign(name,e)          => gen_stmt(sy, s, "") + "0; ";
+    SIdxAssign(o,i,e)        => gen_stmt(sy, s, "") + "0; ";
+    SFieldAssign(o,f,e)      => gen_stmt(sy, s, "") + "0; ";
+    SPrint(e)                => gen_stmt(sy, s, "") + "0; ";
+    SIf(c,b,eb)              => gen_stmt(sy, s, "") + "0; ";
+    SLoop(c,b)               => gen_stmt(sy, s, "") + "0; ";
+    SLoopIn(vnm,coll,b)      => gen_stmt(sy, s, "") + "0; ";
+    SLoopKV(kn,vn,coll,b)    => gen_stmt(sy, s, "") + "0; ";
+    SLoopRange(v,lo,hi,b)    => gen_stmt(sy, s, "") + "0; ";
+    SBreak                   => "break; 0; ";
+    SContinue                => "continue; 0; ";
+  }
+}
+fn gen_block_e(sy:*Syms, body:[Stmt]) -> str {
+  n := len(body)
+  if n == 0 rt "0"
+  mu out := "({ "
+  mu i := 0
+  lp i < n - 1 { out = out + gen_blk_stmt(sy, body[i]); i += 1 }
+  out + gen_blk_tail(sy, body[n - 1]) + "})"
+}
+
+// Emit `if (c) { body } [else { else_b }]`. The else block is omitted when
+// empty (no `el`); a nested `el if` lands as a single SIf inside `eb`, which
+// recursion renders as `else { if (...) ... }` — correct, if slightly nested.
+fn gen_if(sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], ind:str) -> str {
+  mu out := ind + "if (" + gen_expr(sy, c) + ") {\n" + gen_stmts(sy, b, ind + "    ") + ind + "}"
+  if len(eb) > 0 {
+    out = out + " else {\n" + gen_stmts(sy, eb, ind + "    ") + ind + "}"
+  }
+  out + "\n"
+}
+
+// Emit a [Stmt] body with the given C indentation prefix.
+fn gen_stmts(sy:*Syms, body:[Stmt], ind:str) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(body) {
+    out = out + gen_stmt(sy, body[i], ind)
+    i += 1
+  }
+  out
+}
+
+// Hoist every local declaration to the function top. AiLang `:=` bindings are
+// lexically block-scoped, but the bootstrap tracks declared names function-wide
+// (declare-once); a name reused in two *sibling* blocks would otherwise be
+// declared in the first C block (which then closes) and only assigned in the
+// second (now undeclared). Emitting one C declaration per name up front — and
+// turning every `:=` into a plain assignment (see `gen_decl`) — sidesteps C
+// block scoping entirely. Types are recorded into `sy` here so codegen agrees.
+fn hoist_decls(sy:*Syms, body:[Stmt], ind:str) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(body) {
+    out = out + hoist_stmt(sy, body[i], ind)
+    i += 1
+  }
+  out
+}
+
+fn hoist_stmt(sy:*Syms, s:Stmt, ind:str) -> str {
+  mt s {
+    SDecl(name,e)         => hoist_one(sy, name, e, ind);
+    SDestructure(names,e) => hoist_destructure(sy, names, e, ind);
+    SIf(c,b,eb)           => hoist_decls(sy, b, ind) + hoist_decls(sy, eb, ind);
+    SLoop(c,b)            => hoist_decls(sy, b, ind);
+    SLoopIn(vnm,coll,b)   => hoist_loopin(sy, vnm, coll, b, ind);
+    SLoopKV(kn,vn,coll,b) => hoist_loopkv(sy, kn, vn, coll, b, ind);
+    SLoopRange(v,lo,hi,b) => hoist_range(sy, v, b, ind);
+    SAssign(name,e)       => "";
+    SIdxAssign(o,i,e)     => "";
+    SFieldAssign(o,f,e)   => "";
+    SReturn(e)            => "";
+    SPrint(e)             => "";
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
+
+// Declare one hoisted local (skipped if it's a param or already hoisted). Sets
+// its type in `sy` so a later decl's RHS — and codegen — type correctly.
+fn hoist_one(sy:*Syms, name:str, e:Expr, ind:str) -> str {
+  if declared(sy, name) rt ""
+  ety := type_of_expr(sy, e)
+  set_ty(sy, name, ety)
+  ind + cty(ety) + " v_" + name + ";\n"
+}
+
+// A `lp x in coll` loop: the element var `x` is declared by `gen_loop_in` inside
+// its own C block, so we only record its type (for the body's decls) and hoist
+// the body's declarations.
+fn hoist_loopin(sy:*Syms, vnm:str, coll:Expr, b:[Stmt], ind:str) -> str {
+  set_ty(sy, vnm, coll_elem_type(sy, coll))
+  hoist_decls(sy, b, ind)
+}
+
+// `lp (k, v) in map` — k/v are declared in the loop's own block by gen_loop_kv;
+// record their types and hoist the body's decls.
+fn hoist_loopkv(sy:*Syms, kn:str, vn:str, coll:Expr, b:[Stmt], ind:str) -> str {
+  t := type_of_expr(sy, coll)
+  set_ty(sy, kn, map_ktype(t))
+  set_ty(sy, vn, map_vtype(t))
+  hoist_decls(sy, b, ind)
+}
+
+// A function body, with AiLang's implicit tail-expression return: in a non-void
+// function the last statement, if it's a bare expression, becomes `return <e>;`
+// (covers `fn cty(...) -> str { … "s_" + t }` and a tail `mt`/`if` used as the
+// result). Void functions and tails that are already `rt`/control-flow fall
+// through to plain statement emission.
+fn gen_fn_body(sy:*Syms, body:[Stmt], ret:str, ind:str) -> str {
+  n := len(body)
+  if n == 0 rt ""
+  if len(ret) == 0 rt gen_stmts(sy, body, ind)    // void → no implicit return
+  mu out := ""
+  mu i := 0
+  lp i < n - 1 {
+    out = out + gen_stmt(sy, body[i], ind)
+    i += 1
+  }
+  out + gen_tail_stmt(sy, body[n - 1], ret, ind)
+}
+
+// The last statement of a non-void body. A bare expression is returned; a tail
+// `if` (the common `fn f() -> T { if c { a } el { b } }` shape — e.g. `under_ptr`)
+// recurses so each branch returns its own tail. Other tails emit normally.
+fn gen_tail_stmt(sy:*Syms, s:Stmt, ret:str, ind:str) -> str {
+  mt s {
+    SExpr(e)                 => ind + "return " + gen_expr(sy, e) + ";\n";
+    SDecl(name,e)            => gen_decl(sy, name, e, ind);
+    SDestructure(names,e)    => gen_destructure(sy, names, e, ind);
+    SAssign(name,e)          => gen_assign(sy, name, e, ind);
+    SIdxAssign(obj,idx,e)    => gen_idx_assign(sy, obj, idx, e, ind);
+    SFieldAssign(obj,fnm,e)  => ind + gen_field(sy, obj, fnm) + " = " + gen_expr(sy, e) + ";\n";
+    SReturn(e)               => ind + "return " + gen_expr(sy, e) + ";\n";
+    SPrint(e)                => gen_print(sy, e, ind);
+    SIf(c,b,eb)              => gen_tail_if(sy, c, b, eb, ret, ind);
+    SLoop(c,b)               => ind + "while (" + gen_expr(sy, c) + ") {\n" + gen_stmts(sy, b, ind + "    ") + ind + "}\n";
+    SLoopIn(vnm,coll,b)      => gen_loop_in(sy, vnm, coll, b, ind);
+    SLoopKV(kn,vn,coll,b)    => gen_loop_kv(sy, kn, vn, coll, b, ind);
+    SLoopRange(v,lo,hi,b)    => gen_loop_range(sy, v, lo, hi, b, ind);
+    SBreak                   => ind + "break;\n";
+    SContinue                => ind + "continue;\n";
+  }
+}
+
+// A tail `if` in a non-void function: each branch is itself a function-body tail,
+// so its last bare expression becomes a `return`. (Distinct from `gen_if`, which
+// emits the if for effect, not value.)
+fn gen_tail_if(sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], ret:str, ind:str) -> str {
+  mu out := ind + "if (" + gen_expr(sy, c) + ") {\n" + gen_fn_body(sy, b, ret, ind + "    ") + ind + "}"
+  if len(eb) > 0 {
+    out = out + " else {\n" + gen_fn_body(sy, eb, ret, ind + "    ") + ind + "}"
+  }
+  out + "\n"
+}
+
+fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
+  t := type_of_expr(sy, e)                    // compute once (str / f64 / else)
+  if t == "str" {
+    rt ind + "printf(\"%s\\n\", " + gen_expr(sy, e) + ");\n"
+  }
+  if t == "f64" {                             // %g — matches AiLang's float format
+    rt ind + "printf(\"%g\\n\", (double)(" + gen_expr(sy, e) + "));\n"
+  }
+  if t == "bool" {                            // bool VALUE prints true/false; a raw
+    if expr_is_cmp(e) {                       // comparison/logic is C int → prints 1/0 (ailangc)
+      rt ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
+    }
+    rt ind + "printf(\"%s\\n\", (" + gen_expr(sy, e) + ") ? \"true\" : \"false\");\n"
+  }
+  if t == "bytes" {                           // pretty-print via helper, then a newline
+    rt ind + "print_bytes(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
+  if has(sy.ctors, t) {                       // a user struct → `Name{f: v, …}` printer
+    rt ind + "print_" + t + "(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
+  if is_array_ann(t) {                        // `[i64]`/`[str]` → `[e, e, …]` like ailangc
+    suf := arr_suffix(elem_of_ann(t))
+    if suf == "i64" || suf == "str" {
+      rt ind + "print_arr_" + suf + "(" + gen_expr(sy, e) + "); putchar(10);\n"
+    }
+  }
+  if is_map_ann(t) && is_scalar_ty(map_vtype(t)) {   // `{K:scalar}` → `{"k": v, …}` like ailangc
+    rt ind + map_cty(t) + "_print(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
+  ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
+}
+
+fn gen_stmt(sy:*Syms, s:Stmt, ind:str) -> str {
+  mt s {
+    SDecl(name,e)            => gen_decl(sy, name, e, ind);
+    SDestructure(names,e)    => gen_destructure(sy, names, e, ind);
+    SAssign(name,e)          => gen_assign(sy, name, e, ind);
+    SIdxAssign(obj,idx,e)    => gen_idx_assign(sy, obj, idx, e, ind);
+    SFieldAssign(obj,fnm,e)  => ind + gen_field(sy, obj, fnm) + " = " + gen_expr(sy, e) + ";\n";
+    SReturn(e)               => ind + "return " + gen_expr(sy, e) + ";\n";
+    SPrint(e)                => gen_print(sy, e, ind);
+    SIf(c,b,eb)              => gen_if(sy, c, b, eb, ind);
+    SLoop(c,b)               => ind + "while (" + gen_expr(sy, c) + ") {\n" + gen_stmts(sy, b, ind + "    ") + ind + "}\n";
+    SLoopIn(vnm,coll,b)      => gen_loop_in(sy, vnm, coll, b, ind);
+    SLoopKV(kn,vn,coll,b)    => gen_loop_kv(sy, kn, vn, coll, b, ind);
+    SLoopRange(v,lo,hi,b)    => gen_loop_range(sy, v, lo, hi, b, ind);
+    SBreak                   => ind + "break;\n";
+    SContinue                => ind + "continue;\n";
+    SExpr(e)                 => ind + gen_expr(sy, e) + ";\n";
+  }
+}
+
+// `name = expr`. Re-type the binding from the RHS so that `xs = push(xs, e)`
+// refines an `xs` that started as an empty `[]` (inferred `[i64]`) to the real
+// element type — mirroring how the Rust compiler back-propagates push types.
+fn gen_assign(sy:*Syms, name:str, e:Expr, ind:str) -> str {
+  et := type_of_expr(sy, e)
+  if is_array_ann(et) { set_ty(sy, name, et) }
+  ind + "v_" + name + " = " + gen_expr(sy, e) + ";\n"
+}
+
+// `obj[idx] = v`: for an array, write through the shared backing buffer in
+// place (persists across value copies, like AiLang); for a map, `map_<v>_set`
+// (reference-semantic, also persists).
+fn gen_idx_assign(sy:*Syms, obj:Expr, idx:Expr, e:Expr, ind:str) -> str {
+  ot := type_of_expr(sy, obj)
+  if is_array_ann(ot) {
+    rt ind + "(" + gen_expr(sy, obj) + ").data[" + gen_expr(sy, idx) + "] = " + gen_expr(sy, e) + ";\n"
+  }
+  if is_map_ann(ot) {
+    rt ind + map_cty(ot) + "_set(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ", " + gen_expr(sy, e) + ");\n"
+  }
+  ind + "/* unsupported index-assign */\n"
+}
+
+// Element type of an array-typed expr (its [T] stripped), or "i64".
+fn coll_elem_type(sy:*Syms, coll:Expr) -> str {
+  colt := type_of_expr(sy, coll)
+  if is_array_ann(colt) rt elem_of_ann(colt)
+  "i64"
+}
+
+// `lp x in coll { … }` over an array → a C for-loop binding `x` to each element.
+fn gen_loop_in(sy:*Syms, vnm:str, coll:Expr, body:[Stmt], ind:str) -> str {
+  et := coll_elem_type(sy, coll)
+  suf := arr_suffix(et)
+  iv := "__i_" + vnm
+  cv := "__c_" + vnm
+  set_ty(sy, vnm, et)
+  mu out := ind + "{ arr_" + suf + " " + cv + " = " + gen_expr(sy, coll) + ";\n"
+  out = out + ind + "for (int64_t " + iv + " = 0; " + iv + " < arr_" + suf + "_len(" + cv + "); " + iv + " = " + iv + " + 1) {\n"
+  out = out + ind + "    " + cty(et) + " v_" + vnm + " = arr_" + suf + "_get(" + cv + ", " + iv + ");\n"
+  out = out + gen_stmts(sy, body, ind + "    ")
+  out = out + ind + "} }\n"
+  out
+}
+
+// `lp i in lo..hi { … }` — counting for-loop over [lo, hi). The i64 counter is
+// declared in the for-init (naturally scoped, so sibling range loops reusing the
+// same name don't collide, and it isn't hoisted).
+fn gen_loop_range(sy:*Syms, vnm:str, lo:Expr, hi:Expr, body:[Stmt], ind:str) -> str {
+  set_ty(sy, vnm, "i64")
+  v := "v_" + vnm
+  mu out := ind + "for (int64_t " + v + " = " + gen_expr(sy, lo) + "; " + v + " < " + gen_expr(sy, hi) + "; " + v + " = " + v + " + 1) {\n"
+  out = out + gen_stmts(sy, body, ind + "    ")
+  out = out + ind + "}\n"
+  out
+}
+fn hoist_range(sy:*Syms, vnm:str, b:[Stmt], ind:str) -> str {
+  set_ty(sy, vnm, "i64")          // body type inference sees the counter as i64
+  hoist_decls(sy, b, ind)          // counter is for-init scoped, not hoisted
+}
+fn collect_range_s(base:*Syms, sy:*Syms, lo:Expr, hi:Expr, b:[Stmt]) -> i64 {
+  collect_lams_expr(base, sy, lo)
+  collect_lams_expr(base, sy, hi)
+  collect_lams(base, sy, b)
+  0
+}
+
+// `lp (k, v) in map { … }` → walk the assoc-list, binding key (str) + value.
+fn gen_loop_kv(sy:*Syms, kn:str, vn:str, coll:Expr, body:[Stmt], ind:str) -> str {
+  mt2 := type_of_expr(sy, coll)        // "{str:V}"
+  mc := map_cty(mt2)                    // map_ss / map_si
+  vt := map_vtype(mt2)                  // str / i64
+  nv := "__n_" + kn
+  mv := "__m_" + kn
+  set_ty(sy, kn, map_ktype(mt2))
+  set_ty(sy, vn, vt)
+  mu out := ind + "{ " + mc + " " + mv + " = " + gen_expr(sy, coll) + ";\n"
+  // Iterate backing slots in order (skipping empties) — same traversal as the
+  // reference's print/keys, so `lp (k,v) in m` visits entries in hash order.
+  out = out + ind + "for (int64_t " + nv + " = 0; " + nv + " < " + mv + "->cap; " + nv + " += 1) {\n"
+  out = out + ind + "    if (!" + mv + "->occupied[" + nv + "]) continue;\n"
+  out = out + ind + "    " + cty(map_ktype(mt2)) + " v_" + kn + " = " + mv + "->keys[" + nv + "];\n"
+  out = out + ind + "    " + cty(vt) + " v_" + vn + " = " + mv + "->values[" + nv + "];\n"
+  out = out + gen_stmts(sy, body, ind + "    ")
+  out = out + ind + "} }\n"
+  out
+}
+
+// C return type: an empty inferred type (a fn with no `rt`) is `void`.
+fn cty_ret(ret:str) -> str {
+  if len(ret) == 0 rt "void"
+  cty(ret)
+}
+
+// One C function signature: `<ret> f_<name>(<pty> v_p1, ...)`.
+fn gen_sig(f:Func, ret:str) -> str {
+  mu out := cty_ret(ret) + " f_" + f.name + "("
+  if len(f.params) == 0 {
+    out = out + "void"
+  } el {
+    mu i := 0
+    lp i < len(f.params) {
+      if i > 0 { out = out + ", " }
+      out = out + cty(f.ptypes[i]) + " v_" + f.params[i]
+      i += 1
+    }
+  }
+  out + ")"
+}
+
+// ----- lifted-lambda emission (all gated on len(base.lams) > 0) --------------
+// `__lam_<id>(void* __env, int64_t v_p0, ...)` — closure params default i64.
+fn gen_lam_sig(lf:Func) -> str {
+  mu out := "static " + cty(lf.ret) + " __lam_" + lf.name + "(void* __env"
+  mu k := 0
+  lp k < len(lf.params) {
+    pt := if k < len(lf.ptypes) { lf.ptypes[k] } el { "i64" }
+    out = out + ", " + cty(pt) + " v_" + lf.params[k]
+    k += 1
+  }
+  out + ")"
+}
+// `typedef struct { <cty(capt)> v_<cap>; ... } __env_<id>;` — only for capturing
+// lambdas (a non-capturing one carries env=(void*)0 and needs no struct).
+fn gen_env_struct(base:*Syms, lf:Func) -> str {
+  caps := split_semi(base.evar["@lamcaps." + lf.name])
+  capt := split_semi(base.evar["@lamcapt." + lf.name])
+  if len(caps) == 0 rt ""
+  mu out := "typedef struct { "
+  mu k := 0
+  lp k < len(caps) { out = out + cty(capt[k]) + " v_" + caps[k] + "; "; k += 1 }
+  out + "} __env_" + lf.name + ";\n"
+}
+// The lifted fn body: unpack captures into `v_<cap>` locals, then emit the
+// lambda body (stored as [SReturn(b)], so gen_fn_body yields `return <e>;`).
+// A fresh Syms seeded with params(i64)+captures(types) types the body correctly.
+fn gen_lifted_body(base:*Syms, lf:Func) -> str {
+  caps := split_semi(base.evar["@lamcaps." + lf.name])
+  capt := split_semi(base.evar["@lamcapt." + lf.name])
+  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  sy.vty = {}
+  mu pj := 0
+  lp pj < len(lf.params) {
+    pt := if pj < len(lf.ptypes) { lf.ptypes[pj] } el { "i64" }
+    set_ty(&sy, lf.params[pj], pt); pj += 1
+  }
+  mu cj := 0
+  lp cj < len(caps) { set_ty(&sy, caps[cj], capt[cj]); cj += 1 }
+  mu out := gen_lam_sig(lf) + "{ "
+  if len(caps) > 0 {
+    out = out + "__env_" + lf.name + "* __e = (__env_" + lf.name + "*)__env; "
+    mu uk := 0
+    lp uk < len(caps) { out = out + cty(capt[uk]) + " v_" + caps[uk] + " = __e->v_" + caps[uk] + "; "; uk += 1 }
+  } el {
+    out = out + "(void)__env; "
+  }
+  out + gen_fn_body(&sy, lf.body, lf.ret, "") + "}\n"
+}
+
+// Emit `typedef struct { T f; ... } s_Name;` + a `mk_Name(...)` constructor.
+// Emit the monomorphic dynamic-array runtime for one element type:
+//   typedef struct { len; cap; E* data; } arr_<suf>;
+//   arr_<suf>_new / _push (value-semantic, returns new) / _get / _len
+// Array runtime split into typedef (phase 2 — only needs `et` as a pointer
+// target) + helpers (phase 4 — size/copy `et` by value, so it must be complete).
+fn gen_arr_typedef(suf:str, et:str) -> str {
+  "typedef struct { int64_t len; int64_t cap; " + et + "* data; } arr_" + suf + ";\n"
+}
+fn gen_arr_helpers(suf:str, et:str) -> str {
+  mu o := "static arr_" + suf + " arr_" + suf + "_new(void){ arr_" + suf + " a; a.len=0; a.cap=0; a.data=0; return a; }\n"
+  o = o + "static arr_" + suf + " arr_" + suf + "_push(arr_" + suf + " a, " + et + " x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; " + et + "* nd=(" + et + "*)GC_MALLOC(nc*sizeof(" + et + ")); if(a.len) memcpy(nd,a.data,a.len*sizeof(" + et + ")); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }\n"
+  o = o + "static " + et + " arr_" + suf + "_get(arr_" + suf + " a, int64_t i){ return a.data[i]; }\n"
+  o = o + "static int64_t arr_" + suf + "_len(arr_" + suf + " a){ return a.len; }\n"
+  // pop: value-semantic drop of the last element (returns the shortened array).
+  o = o + "static arr_" + suf + " arr_" + suf + "_pop(arr_" + suf + " a){ if(a.len>0) a.len-=1; return a; }\n"
+  // slice [lo, hi) end-exclusive, and reverse — both return fresh arrays.
+  o = o + "static arr_" + suf + " arr_" + suf + "_slice(arr_" + suf + " a, int64_t lo, int64_t hi){ arr_" + suf + " r=arr_" + suf + "_new(); if(lo<0)lo=0; if(hi>a.len)hi=a.len; for(int64_t i=lo;i<hi;i++) r=arr_" + suf + "_push(r,a.data[i]); return r; }\n"
+  o = o + "static arr_" + suf + " arr_" + suf + "_reverse(arr_" + suf + " a){ arr_" + suf + " r=arr_" + suf + "_new(); for(int64_t i=a.len-1;i>=0;i--) r=arr_" + suf + "_push(r,a.data[i]); return r; }\n"
+  // `sort` only for the ordered scalar types (i64/str) — aggregates have no
+  // natural comparator (no closures yet). Returns a fresh ascending-sorted copy.
+  if suf == "i64" {
+    o = o + "static int __cmp_i64(const void* a, const void* b){ int64_t x=*(const int64_t*)a, y=*(const int64_t*)b; return (x>y)-(x<y); }\n"
+    o = o + "static arr_i64 arr_i64_sort(arr_i64 a){ arr_i64 r=arr_i64_reverse(arr_i64_reverse(a)); if(r.len>1) qsort(r.data,r.len,sizeof(int64_t),__cmp_i64); return r; }\n"
+    o = o + "static int64_t arr_i64_contains(arr_i64 a, int64_t x){ for(int64_t i=0;i<a.len;i++) if(a.data[i]==x) return 1; return 0; }\n"
+    o = o + "static int64_t arr_i64_index_of(arr_i64 a, int64_t x){ for(int64_t i=0;i<a.len;i++) if(a.data[i]==x) return i; return -1; }\n"
+    o = o + "static const char* arr_i64_join(arr_i64 a, const char* sep){ if(!sep) sep=\"\"; size_t sl=strlen(sep); size_t cap=(size_t)a.len*22+(a.len>1?sl*(size_t)(a.len-1):0)+1; if(cap<16) cap=16; char* o=(char*)GC_MALLOC(cap); char* w=o; for(int64_t i=0;i<a.len;i++){ if(i>0&&sl){ memcpy(w,sep,sl); w+=sl; } int n=snprintf(w,cap-(size_t)(w-o),\"%lld\",(long long)a.data[i]); if(n>0) w+=n; } *w=0; return o; }\n"
+  }
+  if suf == "str" {
+    o = o + "static int __cmp_str(const void* a, const void* b){ return strcmp(*(const char* const*)a, *(const char* const*)b); }\n"
+    o = o + "static arr_str arr_str_sort(arr_str a){ arr_str r=arr_str_reverse(arr_str_reverse(a)); if(r.len>1) qsort(r.data,r.len,sizeof(const char*),__cmp_str); return r; }\n"
+    o = o + "static int64_t arr_str_contains(arr_str a, const char* x){ for(int64_t i=0;i<a.len;i++) if(strcmp(a.data[i],x)==0) return 1; return 0; }\n"
+    o = o + "static int64_t arr_str_index_of(arr_str a, const char* x){ for(int64_t i=0;i<a.len;i++) if(strcmp(a.data[i],x)==0) return i; return -1; }\n"
+    o = o + "static const char* arr_str_join(arr_str a, const char* sep){ if(!sep) sep=\"\"; size_t sl=strlen(sep); size_t tot=0; for(int64_t i=0;i<a.len;i++) tot+=a.data[i]?strlen(a.data[i]):0; if(a.len>1) tot+=sl*(size_t)(a.len-1); char* o=(char*)GC_MALLOC(tot+1); char* w=o; for(int64_t i=0;i<a.len;i++){ if(i>0&&sl){ memcpy(w,sep,sl); w+=sl; } const char* s=a.data[i]?a.data[i]:\"\"; size_t n=strlen(s); if(n){ memcpy(w,s,n); w+=n; } } *w=0; return o; }\n"
+  }
+  o
+}
+
+// Map runtime (reference-semantic string-keyed assoc-list), split likewise.
+// A pointer means writes through a `*Syms` field persist, like AiLang's maps.
+// Forward typedefs (emitted in phase 2): the node is only forward-declared and
+// `_s` holds a `node*`, so neither needs the value type complete yet — a
+// struct-valued map can be *named* before the aggregate bodies are emitted. The
+// node BODY (which holds the value by value) is emitted by gen_map_node, after
+// the struct/enum bodies, exactly like gen_struct_fwd / gen_struct_body.
+// `println(m)` for a scalar-valued map → `{"k": v, …}`, byte-for-byte the format
+// ailangc emits (str keys/values quoted, i64/f64 bare). Only scalar value types
+// are printable; a struct-valued map gets a no-op printer (never printed in the
+// corpus). `pf_spec`/`pf_arg` pick the printf conversion + argument cast.
+fn pf_spec(t:str) -> str {
+  if t == "str" rt "\\\"%s\\\""
+  if t == "f64" rt "%g"
+  "%lld"
+}
+fn pf_arg(t:str, slot:str) -> str {
+  if t == "str" rt "(" + slot + " ? " + slot + " : \"\")"
+  if t == "f64" rt "(double)(" + slot + ")"
+  "(long long)(" + slot + ")"
+}
+fn is_scalar_ty(t:str) -> bool { t == "str" || t == "i64" || t == "f64" }
+fn gen_map_print(nm:str, kt:str, vt:str) -> str {
+  if is_scalar_ty(vt) {
+    fmt := pf_spec(kt) + ": " + pf_spec(vt)
+    ka := pf_arg(kt, "m->keys[i]")
+    va := pf_arg(vt, "m->values[i]")
+    rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + fmt + "\", " + ka + ", " + va + "); } printf(\"}\"); }\n"
+  }
+  "static void " + nm + "_print(" + nm + " m){ (void)m; }\n"
+}
+
+// Open-addressing hash table — mirrors ailangc's prelude.c map layout (FNV-1a /
+// splitmix64 hashes, cap 8, grow at load 0.7, linear probe), so slot-order
+// iteration is byte-identical to the reference. Phase 2 forward-declares the
+// storage tag + pointer typedef; the body lands in phase 3 (gen_map_node), the
+// helpers in phase 4 — the same 3-phase split the old assoc-list used.
+fn gen_map_fwd(nm:str) -> str {
+  mu o := "typedef struct " + nm + "_s " + nm + "_s;\n"
+  o = o + "typedef " + nm + "_s* " + nm + ";\n"
+  o
+}
+fn gen_map_node(nm:str, kt:str, vt:str) -> str {
+  // Phase-3 storage body: parallel cap-sized keys/values arrays + an occupied
+  // bitmap; `len` counts live entries. Values are held by value, so the value
+  // type must be complete here (as the old node body required).
+  "struct " + nm + "_s { int64_t cap; int64_t len; " + cty(kt) + "* keys; " + cty(vt) + "* values; unsigned char* occupied; };\n"
+}
+fn gen_map_helpers(nm:str, kt:str, vt:str, dflt:str) -> str {
+  ksuf := arr_suffix(kt)                                   // key's arr_<T> suffix
+  vsuf := arr_suffix(vt)                                   // value's arr_<T> suffix
+  kc := cty(kt)
+  vc := cty(vt)
+  // key equality: strcmp for string keys, == for everything else (i64 etc.).
+  keyeq := if kt == "str" { "strcmp(m->keys[i],k)==0" } el { "m->keys[i]==k" }
+  mu o := ""
+  // hash: FNV-1a over the C string for str keys, splitmix64 for scalar keys —
+  // the exact functions ailangc uses, so the slot a key lands in matches.
+  if kt == "str" {
+    o = o + "static uint64_t " + nm + "_hash(" + kc + " s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }\n"
+  } el {
+    o = o + "static uint64_t " + nm + "_hash(" + kc + " k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }\n"
+  }
+  o = o + "static " + nm + " " + nm + "_new(void){ " + nm + " m=(" + nm + ")GC_MALLOC(sizeof(" + nm + "_s)); m->cap=8; m->len=0; m->keys=(" + kc + "*)GC_MALLOC(8*sizeof(" + kc + ")); m->values=(" + vc + "*)GC_MALLOC(8*sizeof(" + vc + ")); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }\n"
+  o = o + "static void " + nm + "_grow(" + nm + " m){ int64_t oc=m->cap; " + kc + "* ok=m->keys; " + vc + "* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(" + kc + "*)GC_MALLOC(nc*sizeof(" + kc + ")); m->values=(" + vc + "*)GC_MALLOC(nc*sizeof(" + vc + ")); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=" + nm + "_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }\n"
+  o = o + "static void " + nm + "_set(" + nm + " m, " + kc + " k, " + vc + " val){ if(m->len*10>=m->cap*7) " + nm + "_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(" + keyeq + "){ m->values[i]=val; return; } } }\n"
+  o = o + "static " + vc + " " + nm + "_get(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return " + dflt + "; if(" + keyeq + ") return m->values[i]; } return " + dflt + "; }\n"
+  o = o + "static int64_t " + nm + "_has(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(" + keyeq + ") return 1; } return 0; }\n"
+  o = o + "static arr_" + ksuf + " " + nm + "_keys(" + nm + " m){ arr_" + ksuf + " r=arr_" + ksuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + ksuf + "_push(r,m->keys[i]); return r; }\n"
+  o = o + "static arr_" + vsuf + " " + nm + "_values(" + nm + " m){ arr_" + vsuf + " r=arr_" + vsuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + vsuf + "_push(r,m->values[i]); return r; }\n"
+  o = o + "static int64_t " + nm + "_len(" + nm + " m){ return m->len; }\n"
+  o = o + gen_map_print(nm, kt, vt)
+  o
+}
+
+// `m[k]` / `_get` default for a missing key, by value type: 0 for numbers, "" for
+// strings, a zero-initialised aggregate for struct/enum values.
+fn map_dflt(vt:str) -> str {
+  if vt == "str" rt "\"\""
+  if vt == "i64" rt "0"
+  if vt == "f64" rt "0"
+  "(s_" + vt + "){0}"
+}
+// Emit the whole map runtime as the cross product of scalar keys × values, the
+// same way arr_<T> is emitted once per element type. Keys are scalars only
+// (str/i64/f64 — aggregates have no usable C `==`); values add every struct/enum.
+// Split into 3 passes because the forward decls, node bodies, and helpers each
+// land in a different emission phase (see compile_to_c).
+fn map_nm(kt:str, vt:str) -> str { "map_" + arr_suffix(kt) + "_" + arr_suffix(vt) }
+fn gen_map_fwds_all(keys:[str], vals:[str]) -> str {
+  mu out := ""
+  mu ki := 0
+  lp ki < len(keys) {
+    mu vi := 0
+    lp vi < len(vals) { out = out + gen_map_fwd(map_nm(keys[ki], vals[vi])); vi += 1 }
+    ki += 1
+  }
+  out
+}
+fn gen_map_nodes_all(keys:[str], vals:[str]) -> str {
+  mu out := ""
+  mu ki := 0
+  lp ki < len(keys) {
+    mu vi := 0
+    lp vi < len(vals) { out = out + gen_map_node(map_nm(keys[ki], vals[vi]), keys[ki], vals[vi]); vi += 1 }
+    ki += 1
+  }
+  out
+}
+fn gen_map_helpers_all(keys:[str], vals:[str]) -> str {
+  mu out := ""
+  mu ki := 0
+  lp ki < len(keys) {
+    mu vi := 0
+    lp vi < len(vals) { out = out + gen_map_helpers(map_nm(keys[ki], vals[vi]), keys[ki], vals[vi], map_dflt(vals[vi])); vi += 1 }
+    ki += 1
+  }
+  out
+}
+
+// The `!T` result runtime (monomorphic per ok-type): a tagged `{tag, ok, err}`
+// with `ok`/`err` constructors. Emitted in phase 4 (holds `et` by value, so `et`
+// must be complete). tag 0 = ok, 1 = err; the error payload is always a string.
+fn gen_res(suf:str, et:str) -> str {
+  mu o := "typedef struct { int tag; " + et + " ok; const char* err; } res_" + suf + ";\n"
+  o = o + "static res_" + suf + " mk_ok_" + suf + "(" + et + " v){ res_" + suf + " r; r.tag=0; r.ok=v; r.err=\"\"; return r; }\n"
+  o = o + "static res_" + suf + " mk_err_" + suf + "(const char* m){ res_" + suf + " r; r.tag=1; r.err=m; return r; }\n"
+  o
+}
+
+// --- struct emission, split into the 4 phases (see compile_to_c) ---
+fn gen_struct_fwd(sd:StructDef) -> str { "typedef struct s_" + sd.name + " s_" + sd.name + ";\n" }
+
+fn gen_struct_body(sd:StructDef) -> str {
+  mu out := "struct s_" + sd.name + " { "
+  mu i := 0
+  lp i < len(sd.fnames) {
+    out = out + cty(sd.ftypes[i]) + " " + sd.fnames[i] + "; "
+    i += 1
+  }
+  out + "};\n"
+}
+
+// `static void print_<Name>(s_Name v){ … }` — pretty-prints a struct value as
+// `Name{f: v, …}`, byte-matching ailangc: str fields raw (no quotes), bool as
+// true/false, i64 as the number, any aggregate/other field as `?` (ailangc does
+// not recurse into nested structs either). Caller (gen_print) adds the newline.
+fn gen_struct_printer(sd:StructDef) -> str {
+  mu out := "static void print_" + sd.name + "(s_" + sd.name + " v){ printf(\"" + sd.name + "{\");"
+  mu i := 0
+  lp i < len(sd.fnames) {
+    if i > 0 { out = out + " printf(\", \");" }
+    out = out + " printf(\"" + sd.fnames[i] + ": \");"
+    ft := sd.ftypes[i]
+    if ft == "str" {
+      out = out + " printf(\"%s\", v." + sd.fnames[i] + ");"
+    } el if ft == "bool" {
+      out = out + " printf(\"%s\", (v." + sd.fnames[i] + ") ? \"true\" : \"false\");"
+    } el if ft == "i64" {
+      out = out + " printf(\"%lld\", (long long)(v." + sd.fnames[i] + "));"
+    } el {
+      out = out + " printf(\"?\");"
+    }
+    i += 1
+  }
+  out + " printf(\"}\"); }\n"
+}
+fn gen_struct_ctor(sd:StructDef) -> str {
+  mu out := "static s_" + sd.name + " mk_" + sd.name + "("
+  mu i := 0
+  lp i < len(sd.fnames) {
+    if i > 0 { out = out + ", " }
+    out = out + cty(sd.ftypes[i]) + " " + sd.fnames[i]
+    i += 1
+  }
+  // Result var is `__s` (not `v`), so a struct field literally named `v` doesn't
+  // collide with the ctor local (was a known bug: `mk_Box(int64_t v){ s_Box v; … }`).
+  out = out + "){ s_" + sd.name + " __s; "
+  i = 0
+  lp i < len(sd.fnames) {
+    out = out + "__s." + sd.fnames[i] + "=" + sd.fnames[i] + "; "
+    i += 1
+  }
+  out + "return __s; }\n"
+}
+
+// --- enum emission (tagged union, boxed self-recursive fields) ---
+fn gen_enum_fwd(ed:EnumDef) -> str { "typedef struct s_" + ed.name + " s_" + ed.name + ";\n" }
+
+// `struct s_Name { int tag; union { struct { <fields> } Variant; … } u; };`
+// A field of type "@self" is stored as `s_Name*` (boxed) to break the cycle.
+fn gen_enum_body(ed:EnumDef) -> str {
+  mu out := "struct s_" + ed.name + " { int tag; union {\n"
+  mu vi := 0
+  lp vi < len(ed.vnames) {
+    out = out + "  struct {"
+    ftypes := split_semi(ed.vftypes[vi])
+    mu fi := 0
+    lp fi < len(ftypes) {
+      cft := if is_boxed_ft(ftypes[fi]) { "s_" + boxed_enum(ftypes[fi], ed.name) + "*" } el { cty(ftypes[fi]) }
+      out = out + " " + cft + " f" + int_to_str(fi) + ";"
+      fi += 1
+    }
+    out = out + " } " + ed.vnames[vi] + ";\n"
+    vi += 1
+  }
+  out + "} u; };\n"
+}
+
+// One `mkv_<Variant>(args)` constructor per variant: set tag + fields; a boxed
+// "@self" field is heap-copied.
+fn gen_enum_ctors(ed:EnumDef) -> str {
+  mu out := ""
+  mu vi := 0
+  lp vi < len(ed.vnames) {
+    vn := ed.vnames[vi]
+    ftypes := split_semi(ed.vftypes[vi])
+    out = out + "static s_" + ed.name + " mkv_" + vn + "("
+    mu fi := 0
+    lp fi < len(ftypes) {
+      if fi > 0 { out = out + ", " }
+      cft := if is_boxed_ft(ftypes[fi]) { "s_" + boxed_enum(ftypes[fi], ed.name) } el { cty(ftypes[fi]) }
+      out = out + cft + " f" + int_to_str(fi)
+      fi += 1
+    }
+    out = out + "){ s_" + ed.name + " v; v.tag=" + int_to_str(vi) + "; "
+    fi = 0
+    lp fi < len(ftypes) {
+      dst := "v.u." + vn + ".f" + int_to_str(fi)
+      if is_boxed_ft(ftypes[fi]) {
+        bt := boxed_enum(ftypes[fi], ed.name)
+        out = out + dst + "=(s_" + bt + "*)GC_MALLOC(sizeof(s_" + bt + ")); *" + dst + "=f" + int_to_str(fi) + "; "
+      } el {
+        out = out + dst + "=f" + int_to_str(fi) + "; "
+      }
+      fi += 1
+    }
+    out = out + "return v; }\n"
+    vi += 1
+  }
+  out
+}
+
+// Seed a Syms' param bindings from a function's typed params.
+fn seed_params(sy:*Syms, f:Func) {
+  mu pj := 0
+  lp pj < len(f.params) { set_ty(sy, f.params[pj], f.ptypes[pj]); pj += 1 }
+}
+
+// Fresh per-fn Syms: a new var map, params seeded, `@ret` set for `!T` fns.
+// Shared by the function-body emit loop AND the closure-collection pass so a
+// lambda's captured-var types are computed exactly as the body will see them
+// (the caller then runs the same `hoist_decls` to add local types). Do NOT
+// hoist here — a second hoist on the same Syms re-declares nothing and would
+// blank the emit loop's declaration string.
+fn seed_fn(base:*Syms, f:Func) -> Syms {
+  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  sy.vty = {}
+  seed_params(&sy, f)
+  if is_result_ann(f.ret) { set_ty(&sy, "@ret", result_inner(f.ret)) }
+  sy
+}
+
+// ----- closure collection pass ----------------------------------------------
+// Walk a function body; on each FIRST-CLASS lambda (one NOT consumed inline by
+// map/filter/reduce) compute its captures, record them on `base.evar`, and push
+// a lifted `Func` onto `base.lams`. `sy` is the enclosing fn's seeded+hoisted
+// Syms (so a capture's type is `ty_of(sy, name)`). All collectors return a dummy
+// i64 (AiLang `mt` is expression-valued, so a side-effecting walker can't have
+// bare-block arms); effects flow through the `*Syms` pointers.
+fn register_lam(base:*Syms, sy:*Syms, ps:[str], pts:[str], b:Expr, id:i64) -> i64 {
+  idstr := int_to_str(id)
+  // Seed the lambda's params with their declared types so the body — and the
+  // captured-var detection / return-type inference below — types correctly
+  // (`fn(name:str) greeting + name` needs `name:str` to pick string concat).
+  mu sp := 0
+  lp sp < len(ps) { if sp < len(pts) { set_ty(sy, ps[sp], pts[sp]) }   sp += 1 }
+  fvs := free_vars(b)
+  mu cn := ""                              // ";"-joined capture NAMES
+  mu cts := ""                             // ";"-joined capture TYPES (parallel) — `ct` is a reserved word
+  mu k := 0
+  lp k < len(fvs) {
+    nm := fvs[k]
+    if is_param(ps, nm) == false {         // not the lambda's own param …
+      if has(sy.vty, nm) {                 // … and a real enclosing local ⇒ a capture
+        if len(cn) == 0 { cn = nm; cts = ty_of(sy, nm) } el { cn = cn + ";" + nm; cts = cts + ";" + ty_of(sy, nm) }
+      }
+    }
+    k += 1
+  }
+  // Two parallel keys (names / types), NOT one ":"-packed string — map/result
+  // type names contain ':' (e.g. "{str:i64}", "!T") and would corrupt a split.
+  base.evar["@lamcaps." + idstr] = cn
+  base.evar["@lamcapt." + idstr] = cts
+  rty := type_of_expr(sy, b)               // body typed with the params seeded above
+  mu noTp:[str] := []
+  mu lbody:[Stmt] := []
+  lbody = push(lbody, SReturn(b))
+  base.lams = push(base.lams, Func(idstr, ps, pts, rty, "", noTp, lbody))
+  collect_lams_expr(base, sy, b)           // nested first-class lambdas inside b
+  0
+}
+fn collect2(base:*Syms, sy:*Syms, a:Expr, b:Expr) -> i64 {
+  collect_lams_expr(base, sy, a)
+  collect_lams_expr(base, sy, b)
+  0
+}
+fn collect3(base:*Syms, sy:*Syms, a:Expr, b:Expr, c:Expr) -> i64 {
+  collect_lams_expr(base, sy, a)
+  collect_lams_expr(base, sy, b)
+  collect_lams_expr(base, sy, c)
+  0
+}
+fn collect_args(base:*Syms, sy:*Syms, args:[Expr]) -> i64 {
+  mu i := 0
+  lp i < len(args) { collect_lams_expr(base, sy, args[i]); i += 1 }
+  0
+}
+fn collect_kv(base:*Syms, sy:*Syms, keys:[Expr], vals:[Expr]) -> i64 {
+  collect_args(base, sy, keys)
+  collect_args(base, sy, vals)
+  0
+}
+fn collect_match_e(base:*Syms, sy:*Syms, sc:Expr, bodies:[Expr]) -> i64 {
+  collect_lams_expr(base, sy, sc)
+  collect_args(base, sy, bodies)
+  0
+}
+fn collect_if_s(base:*Syms, sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt]) -> i64 {
+  collect_lams_expr(base, sy, c)
+  collect_lams(base, sy, b)
+  collect_lams(base, sy, eb)
+  0
+}
+fn collect_body_s(base:*Syms, sy:*Syms, c:Expr, b:[Stmt]) -> i64 {
+  collect_lams_expr(base, sy, c)
+  collect_lams(base, sy, b)
+  0
+}
+fn collect_coll_s(base:*Syms, sy:*Syms, coll:Expr, b:[Stmt]) -> i64 {
+  collect_lams_expr(base, sy, coll)
+  collect_lams(base, sy, b)
+  0
+}
+// KEEP map/filter/reduce inlining: do NOT collect their lambda arg (it stays
+// inlined by gen_map/filter/reduce), only the array/init args.
+fn collect_call(base:*Syms, sy:*Syms, fname:str, args:[Expr]) -> i64 {
+  if (fname == "map" || fname == "filter") && len(args) == 2 {
+    collect_lams_expr(base, sy, args[0])
+    rt 0
+  }
+  if fname == "reduce" && len(args) == 3 {
+    collect_lams_expr(base, sy, args[0])
+    collect_lams_expr(base, sy, args[1])
+    rt 0
+  }
+  collect_args(base, sy, args)
+  0
+}
+fn collect_lams_expr(base:*Syms, sy:*Syms, e:Expr) -> i64 {
+  mt e {
+    Lambda(ps,pts,b,id)  => register_lam(base, sy, ps, pts, b, id);
+    Call(fname,args) => collect_call(base, sy, fname, args);
+    Bin(op,l,r)      => collect2(base, sy, l, r);
+    Unary(op,x)      => collect_lams_expr(base, sy, x);
+    Field(obj,fnm)   => collect_lams_expr(base, sy, obj);
+    Index(obj,idx)   => collect2(base, sy, obj, idx);
+    Array(elems,ety) => collect_args(base, sy, elems);
+    Addr(x)          => collect_lams_expr(base, sy, x);
+    Match(sc,vn,vb,bd) => collect_match_e(base, sy, sc, bd);
+    IfE(c,t,el2)     => collect3(base, sy, c, t, el2);
+    Try(x)           => collect_lams_expr(base, sy, x);
+    Num(v)           => 0;
+    Flt(s)           => 0;
+    Str(s)           => 0;
+    Var(n)           => 0;
+    MapLit(m,mks,mvs) => collect_kv(base, sy, mks, mvs);
+    Tuple(elems)     => collect_args(base, sy, elems);
+    BlockE(bb)       => collect_lams(base, sy, bb);
+    Bad              => 0;
+  }
+}
+fn collect_lams_stmt(base:*Syms, sy:*Syms, s:Stmt) -> i64 {
+  mt s {
+    SDecl(name,e)         => collect_lams_expr(base, sy, e);
+    SDestructure(names,e) => collect_lams_expr(base, sy, e);
+    SAssign(name,e)       => collect_lams_expr(base, sy, e);
+    SReturn(e)            => collect_lams_expr(base, sy, e);
+    SPrint(e)             => collect_lams_expr(base, sy, e);
+    SExpr(e)              => collect_lams_expr(base, sy, e);
+    SIdxAssign(o,i,e)     => collect3(base, sy, o, i, e);
+    SFieldAssign(o,f,e)   => collect2(base, sy, o, e);
+    SIf(c,b,eb)           => collect_if_s(base, sy, c, b, eb);
+    SLoop(c,b)            => collect_body_s(base, sy, c, b);
+    SLoopIn(vnm,coll,b)   => collect_coll_s(base, sy, coll, b);
+    SLoopKV(kn,vn,coll,b) => collect_coll_s(base, sy, coll, b);
+    SLoopRange(v,lo,hi,b) => collect_range_s(base, sy, lo, hi, b);
+    SBreak                => 0;
+    SContinue             => 0;
+  }
+}
+fn collect_lams(base:*Syms, sy:*Syms, body:[Stmt]) -> i64 {
+  mu i := 0
+  lp i < len(body) { collect_lams_stmt(base, sy, body[i]); i += 1 }
+  0
+}
+
+// Infer a function's C return type from the type of its first `rt expr`
+// (i64 if it has none). Uses a Syms seeded with params + the shared struct
+// maps so a `rt Point(..)` / `rt p.field` is typed correctly.
+fn infer_ret(f:Func, base:Syms) -> str {
+  if len(f.ret) > 0 rt f.ret          // explicit `-> T` wins
+  mu sy := base
+  seed_params(&sy, f)
+  first_return_type(&sy, f.body)
+}
+
+fn first_return_type(sy:*Syms, body:[Stmt]) -> str {
+  mu i := 0
+  lp i < len(body) {
+    r := stmt_return_type(sy, body[i])
+    if r != "" { rt r }
+    i += 1
+  }
+  // No `rt` found: a braceless / tail-expression body returns its LAST
+  // expression's type (the loop above fed every decl into `sy`). Only the tail
+  // counts — mid-body bare expressions are side effects, not the return.
+  if len(body) > 0 { rt last_expr_type(sy, body[len(body) - 1]) }
+  ""                                  // empty body → no return
+}
+
+// A raw comparison/logic expression: its C value is `int` (1/0), so ailangc's
+// _Generic prints it as an int even though its inferred type is bool. (A bool
+// *variable* — typed from such an expr — prints true/false.)
+fn expr_is_cmp(e:Expr) -> bool {
+  mt e {
+    Bin(op, l, r)         => op >= OP_LT() && op <= OP_OR();
+    Unary(op, x)          => op == OP_NOT();
+    Num(v)                => false;
+    Flt(fs)               => false;
+    Str(ss)               => false;
+    Var(nm)               => false;
+    Call(fnm, args)       => false;
+    Field(ob, fnm2)       => false;
+    Index(ob, ix)         => false;
+    Array(els, ety)       => false;
+    MapLit(mty, ks, vs)   => false;
+    Addr(x)               => false;
+    Match(sc, vn, vb, bd) => false;
+    IfE(cnd, thn, el2)    => false;
+    Try(x)                => false;
+    Lambda(ps, pts, bd, id)    => false;
+    Tuple(tes)            => false;
+    BlockE(bb)            => false;
+    Bad                   => false;
+  }
+}
+fn expr_is_call(e:Expr) -> bool {
+  mt e {
+    Call(fnm, args)       => true;
+    Tuple(tes)            => false;
+    BlockE(bb)            => false;
+    Num(v)                => false;
+    Flt(fs)               => false;
+    Str(ss)               => false;
+    Var(nm)               => false;
+    Bin(op, l, r)         => false;
+    Unary(op, x)          => false;
+    Field(ob, fnm2)       => false;
+    Index(ob, ix)         => false;
+    Array(els, ety)       => false;
+    MapLit(mty, ks, vs)   => false;
+    Addr(x)               => false;
+    Match(sc, vn, vb, bd) => false;
+    IfE(cnd, thn, el2)    => false;
+    Try(x)                => false;
+    Lambda(ps, pts, bd, id)    => false;
+    Bad                   => false;
+  }
+}
+// A tail bare-expression's contributed return type — but a tail *call* may be
+// void (`type_of_expr` defaults unknown/void calls to i64), and emitting
+// `return <void>` from the resulting non-void fn is invalid C. So keep call-tails
+// as "" (the fn stays void, as before); only non-call value exprs infer a type.
+// The called function's name, or "" if `e` isn't a Call.
+fn call_fname(e:Expr) -> str {
+  mt e {
+    Call(fname, args)  => fname;
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Var(n)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Array(es,et)       => "";
+    MapLit(ml,mks,mvs) => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,pts,b,id)    => "";
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
+    Bad                => "";
+  }
+}
+// The type a tail bare-expression contributes as an implicit return. A tail
+// *call* is only trusted when the callee's return type is KNOWN via `frets` (a
+// user fn or a declared extern): a void user-fn maps to "" (stays void); an
+// unknown/builtin call also stays "" — both avoid the old `return <void>` trap
+// where `type_of_expr` defaulted such calls to i64 and flipped the fn non-void.
+fn tail_sexpr_type(sy:*Syms, e:Expr) -> str {
+  if expr_is_call(e) {
+    fnm := call_fname(e)
+    if has(sy.frets, fnm) rt sy.frets[fnm]
+    rt ""
+  }
+  type_of_expr(sy, e)
+}
+// The type a trailing statement contributes as an implicit tail return: a bare
+// expression (or explicit `rt`) yields its expression's type; every other
+// statement form yields "" (no value falls out of it).
+fn last_expr_type(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SExpr(e)             => tail_sexpr_type(sy, e);
+    SReturn(e)           => type_of_expr(sy, e);
+    SDestructure(names,e)=> "";
+    SDecl(name,e)        => "";
+    SAssign(name,e)      => "";
+    SIdxAssign(o,i,e)    => "";
+    SFieldAssign(o,f,e)  => "";
+    SIf(c,b,eb)          => "";
+    SLoop(c,b)           => "";
+    SLoopIn(vnm,coll,b)  => "";
+    SLoopKV(kn,vn,coll,b)=> "";
+    SLoopRange(v,lo,hi,b)=> "";
+    SPrint(e)            => "";
+    SBreak               => "";
+    SContinue            => "";
+  }
+}
+
+// If this statement (or a branch/loop it contains) has a tail `rt`, the type of
+// its expression; "" otherwise. Also feeds `sy` so a decl before the `rt` types
+// later field access. Returns "i64" coerced default at the call site.
+fn stmt_return_type(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SReturn(e)            => type_of_expr(sy, e);
+    SDestructure(names,e) => "";
+    SDecl(name,e)         => decl_side(sy, name, e);
+    SIf(c,b,eb)           => either_return(sy, b, eb);
+    SLoop(c,b)            => first_return_type(sy, b);
+    SLoopIn(vnm,coll,b)   => first_return_type(sy, b);
+    SLoopKV(kn,vn,coll,b) => first_return_type(sy, b);
+    SLoopRange(v,lo,hi,b) => first_return_type(sy, b);
+    SAssign(name,e)       => "";
+    SIdxAssign(o,i,e)     => "";
+    SFieldAssign(o,f,e)   => "";
+    SPrint(e)             => "";
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
+
+// Record a decl's type into sy (side effect) during return inference; never a
+// return itself.
+fn decl_side(sy:*Syms, name:str, e:Expr) -> str {
+  set_ty(sy, name, type_of_expr(sy, e))
+  ""
+}
+
+fn either_return(sy:*Syms, b:[Stmt], eb:[Stmt]) -> str {
+  r := first_return_type(sy, b)
+  if r != "" { rt r }
+  first_return_type(sy, eb)
+}
+

@@ -1,0 +1,271 @@
+// ===== codegen ==============================================================
+fn op_c(op:i64) -> str {
+  if op == OP_ADD() rt " + "
+  if op == OP_SUB() rt " - "
+  if op == OP_MUL() rt " * "
+  if op == OP_DIV() rt " / "
+  if op == OP_MOD() rt " % "
+  if op == OP_LT() rt " < "
+  if op == OP_GT() rt " > "
+  if op == OP_LE() rt " <= "
+  if op == OP_GE() rt " >= "
+  if op == OP_EQ() rt " == "
+  if op == OP_NE() rt " != "
+  if op == OP_AND() rt " && "
+  if op == OP_OR() rt " || "
+  if op == OP_SHL() rt " << "
+  if op == OP_SHR() rt " >> "
+  if op == OP_BAND() rt " & "
+  if op == OP_BXOR() rt " ^ "
+  if op == OP_BOR() rt " | "
+  " ? "
+}
+
+// ===== type tracking =========================================================
+// Codegen tracks a *type name* per binding — "i64", "str", or a struct name.
+// `vty` maps varname → type; `fld` maps "Struct.field" → field's type; `ctors`
+// records struct names → 1 so a `Name(...)` call is recognized as a constructor;
+// `frets` maps user fn name → its return type (so `p := mk()` types `p`). All in
+// one `Syms` threaded by pointer (AiLang fns return a single value). `has(vty,n)`
+// also means "already declared" → declare-once for `:=`/`mu` vs `=`.
+st Syms {
+  vty: {str:str}      // varname → "i64" / "str" / StructName / "*T" / "[T]" / "{K:V}" / EnumName
+  fld: {str:str}      // "Struct.field" → field type
+  ctors: {str:str}    // StructName → "1"
+  frets: {str:str}    // fn name → return type name
+  evar: {str:str}     // VariantName → EnumName (so a `Variant(args)` call is recognized)
+  vft: {str:str}      // VariantName → ";"-joined field type names ("" for a unit variant)
+  gfns: [Func]        // generic functions (tparams non-empty) — inlined at call sites
+  lams: [Func]        // lifted first-class lambdas (name=<lamid>, ptypes all i64, ret=body type, body=[SReturn(b)]); ordered registry driving deterministic env/__lam emission. Captures ride evar["@lamcaps.<id>"]/["@lamcapt.<id>"].
+}
+
+fn ty_of(sy:*Syms, name:str) -> str {
+  if has(sy.vty, name) rt sy.vty[name]
+  if is_variant(sy, name) rt sy.evar[name]    // a bare nullary variant → its enum
+  "i64"
+}
+fn declared(sy:*Syms, name:str) -> bool { has(sy.vty, name) }
+fn set_ty(sy:*Syms, name:str, ty:str) { sy.vty[name] = ty }
+fn is_ctor(sy:*Syms, name:str) -> bool { has(sy.ctors, name) }
+fn is_variant(sy:*Syms, name:str) -> bool { has(sy.evar, name) }
+
+// Field key joins a struct + field name into the `fld` map key.
+fn fkey(sname:str, fname:str) -> str { sname + "." + fname }
+
+// The C suffix for an element type, used in the monomorphic `arr_<suffix>`
+// helpers. i64/str keep their name; a struct keeps its name (matches its
+// typedef's `s_<name>` only after `cty`, so we use the bare name for the
+// suffix). Array-of-array would nest; not needed yet.
+fn arr_suffix(ety:str) -> str { if ety == "bool" { "i64" } el { ety } }   // bool reuses the i64 array/result runtime
+
+// The C type spelling for a bootstrap type name.
+// A C header type (from `cinc` + `ex fn`, e.g. `div_t`) is encoded "@c:<name>"
+// so it spells RAW in C (no `s_` prefix — it isn't an AiLang struct). Marked on
+// extern signatures by `mark_extern_ctypes` once all user structs/enums are known.
+fn is_c_type_ann(ty:str) -> bool { len(ty) >= 3 && ty[0] == 64 && ty[1] == 99 && ty[2] == 58 }  // "@c:"
+fn c_type_name(ty:str) -> str { substring(ty, 3, len(ty)) }
+
+fn cty(ty:str) -> str {
+  if is_c_type_ann(ty) rt c_type_name(ty)        // header type → raw, before the s_ fallback
+  if ty == "i64" rt "int64_t"
+  if ty == "bool" rt "int64_t"     // AiLang bool is a truthy int (true→1/false→0)
+  if ty == "i32" rt "int64_t"      // libc-int extern returns widen to i64
+  if ty == "u32" rt "uint32_t"     // unsigned 32-bit (e.g. srand)
+  if ty == "f64" rt "double"
+  if ty == "bytes" rt "ailang_bytes"
+  if ty == "str" rt "const char*"
+  if is_array_ann(ty) rt "arr_" + arr_suffix(elem_of_ann(ty))   // [T] → arr_T
+  if is_map_ann(ty) rt map_cty(ty)                               // {K:V} → map_<suffix>
+  if is_ptr_ann(ty) rt cty(deref_ann(ty)) + "*"                  // *T → <cty(T)>*
+  if is_result_ann(ty) rt "res_" + arr_suffix(result_inner(ty)) // !T → res_T
+  if is_fn_ann(ty) rt "closure_t"                               // fn(...)->R → closure_t
+  if is_tuple_ann(ty) rt "tup_" + tuple_suffix(ty)              // (T1;T2) → tup_T1_T2
+  "s_" + ty               // a struct → its typedef name
+}
+
+// Map type-name helpers for `{K:V}`. The C runtime type is `map_<ksuf>_<vsuf>`
+// (map_str_str / map_str_i64 / map_i64_i64 / map_i64_str …) where each suffix is
+// arr_suffix(type-name). `map_ktype`/`map_vtype` split out K / V.
+fn map_vtype(ty:str) -> str {
+  // ty is "{K:V}" — return the part after the ':' up to the closing '}'.
+  mu i := 1
+  lp i < len(ty) { if ty[i] == 58 { br } i += 1 }   // find ':'
+  substring(ty, i + 1, len(ty) - 1)
+}
+fn map_ktype(ty:str) -> str {
+  // ty is "{K:V}" — return K (after '{' up to ':').
+  mu i := 1
+  lp i < len(ty) { if ty[i] == 58 { br } i += 1 }   // find ':'
+  substring(ty, 1, i)
+}
+fn map_cty(ty:str) -> str {
+  map_nm(map_ktype(ty), map_vtype(ty))    // same name builder the runtime emits
+}
+
+// ----- static type of an expression (the type name it produces) -------------
+fn type_of_expr(sy:*Syms, e:Expr) -> str {
+  mt e {
+    Num(v)           => "i64";
+    Flt(fs)          => "f64";
+    Str(s)           => "str";
+    Var(name)        => ty_of(sy, name);
+    Bin(op,l,r)      => bin_type(sy, op, l, r);
+    Unary(op,x)      => "i64";
+    Call(fname,args) => call_type_a(sy, fname, args);
+    Field(obj,fnm)   => field_type(sy, obj, fnm);
+    Index(obj,idx)   => index_type(sy, obj);
+    Array(elems,ety) => array_type_of(sy, elems, ety);
+    MapLit(mty,mks,mvs) => maplit_type(sy, mty, mks, mvs);
+    Addr(x)          => "*" + type_of_expr(sy, x);
+    Match(sc,vn,vb,bd) => match_type(sy, bd);
+    IfE(c,t,el2)     => type_of_expr(sy, t);
+    Try(e)           => result_inner(type_of_expr(sy, e));
+    Lambda(ps,pts,b,id)  => lambda_type(sy, ps, pts, b);
+    Tuple(elems)     => tuple_type_of(sy, elems);
+    BlockE(body)     => block_type(sy, body);
+    Bad              => "i64";
+  }
+}
+
+// A match's type = its first arm's body type. (The subset's matches are
+// homogeneous; codegen would clash at C level if not.)
+fn match_type(sy:*Syms, bodies:[Expr]) -> str {
+  if len(bodies) > 0 rt type_of_expr(sy, bodies[0])
+  "i64"
+}
+
+// Type produced by `obj[idx]`: an array's element type, a map's value type, or
+// a string's byte (i64).
+fn index_type(sy:*Syms, obj:Expr) -> str {
+  t := type_of_expr(sy, obj)
+  if is_array_ann(t) rt elem_of_ann(t)
+  if is_map_ann(t) rt map_vtype(t)
+  "i64"                     // string byte, or unknown
+}
+
+// The array type "[T]" produced by a literal: from the annotation if present,
+// else inferred from the first element.
+fn array_type_of(sy:*Syms, elems:[Expr], ety:str) -> str {
+  if len(ety) > 0 { rt "[" + ety + "]" }
+  if len(elems) > 0 { rt "[" + type_of_expr(sy, elems[0]) + "]" }
+  "[i64]"
+}
+
+// The map type produced by a `{}` literal: its annotation, or default {str:str}.
+fn map_lit_type(mty:str) -> str {
+  if len(mty) > 0 rt mty
+  "{str:str}"
+}
+
+fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
+  if op == OP_CAT() rt "str"        // `++` always concatenates strings
+  if op == OP_QQ() rt type_of_expr(sy, l)   // `m[k] ?? d` → the map's value type
+  // `+` on two strings is concat → str.
+  if op == OP_ADD() && type_of_expr(sy, l) == "str" && type_of_expr(sy, r) == "str" {
+    rt "str"
+  }
+  // arithmetic with an f64 operand is f64 (comparisons/logic stay i64-bool).
+  if op == OP_ADD() || op == OP_SUB() || op == OP_MUL() || op == OP_DIV() {
+    if type_of_expr(sy, l) == "f64" || type_of_expr(sy, r) == "f64" { rt "f64" }
+  }
+  if op >= OP_LT() && op <= OP_OR() rt "bool"   // 5..12: < > <= >= == != && || → bool
+  "i64"
+}
+
+// TLS / Postgres native builtins all lower to `fname(args)` (the C helper shares
+// the name, no polymorphism), so they share one dispatch arm + grouped type rules
+// instead of ~26 identical per-builtin arms.
+fn is_native_call(fname:str) -> bool {
+  if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" rt true
+  if fname == "pg_connect" || fname == "pg_status" || fname == "pg_error" || fname == "pg_close" || fname == "pg_exec" || fname == "pg_ok" || fname == "pg_result_error" || fname == "pg_clear" || fname == "pg_nrows" || fname == "pg_ncols" || fname == "pg_value" || fname == "pg_isnull" || fname == "pg_col_name" || fname == "pg_affected" || fname == "pg_escape" rt true
+  false
+}
+
+fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
+  // A generic call's type: its return type with the type param substituted.
+  if is_generic(sy, fname) {
+    f := find_gfn(sy, fname)
+    gt := generic_T(sy, f, args)
+    if is_tparam(f, f.ret) rt gt
+    rt f.ret
+  }
+  // HOFs: map → [body-type] (param typed from the array elem first); filter →
+  // same array type; reduce → the accumulator/init type.
+  if fname == "map" && len(args) == 2 {
+    et := elem_of_ann(type_of_expr(sy, args[0]))
+    ps := lam_params(args[1])
+    set_ty(sy, ps[0], et)
+    rt "[" + type_of_expr(sy, lam_body(args[1])) + "]"
+  }
+  if fname == "filter" && len(args) == 2 { rt type_of_expr(sy, args[0]) }
+  if fname == "reduce" && len(args) == 3 { rt type_of_expr(sy, args[1]) }
+  if fname == "to_str" rt "str"
+  if fname == "cstr" rt "str"                          // str passthrough (`s.cstr`)
+  if fname == "print" || fname == "println" rt "i64"   // printf-returns-int (expression form)
+  if fname == "int_to_str" rt "str"
+  if fname == "str_to_int" rt "i64"
+  if fname == "float_to_str" rt "str"
+  if fname == "str_to_float" rt "f64"
+  if fname == "substring" rt "str"
+  if fname == "read_file" rt "str"
+  if fname == "write_file" rt "bool"   // success flag — ailangc prints true/false
+  if fname == "str_to_bytes" rt "bytes"
+  if fname == "bytes_to_str" rt "str"
+  if fname == "bytes_at" rt "i64"
+  if fname == "bytes_slice" rt "bytes"
+  if fname == "read_file_bytes" rt "bytes"
+  if fname == "write_file_bytes" rt "i64"
+  if fname == "args" rt "[str]"
+  if fname == "len" rt "i64"
+  // `!T` result helpers: ok(x):!Tx; err_<T>(m):!T; unwrap(r):T; is_*/err_msg.
+  if fname == "ok" && len(args) > 0 { rt "!" + type_of_expr(sy, args[0]) }
+  if fname == "err" && len(args) > 0 { rt "!" + ty_of(sy, "@ret") }   // generic err → enclosing !T
+  if fname == "unwrap" && len(args) > 0 { rt result_inner(type_of_expr(sy, args[0])) }
+  if fname == "is_ok" || fname == "is_err" rt "bool"
+  if fname == "err_msg" rt "str"
+  if len(fname) > 4 && substring(fname, 0, 4) == "err_" rt "!" + substring(fname, 4, len(fname))
+  if fname == "keys" && len(args) > 0 rt "[" + map_ktype(type_of_expr(sy, args[0])) + "]"
+  if fname == "values" && len(args) > 0 { rt "[" + map_vtype(type_of_expr(sy, args[0])) + "]" }
+  // push/slice/reverse/sort return the same array type as their first arg.
+  if (fname == "push" || fname == "slice" || fname == "reverse" || fname == "sort") && len(args) > 0 {
+    rt type_of_expr(sy, args[0])
+  }
+  // Phase 1 builtins: predicates/indices → i64; string transforms → str.
+  if fname == "starts_with" || fname == "ends_with" || fname == "contains" || fname == "str_to_bool" || fname == "has" rt "bool"
+  if fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" rt "i64"
+  if fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "get_env" || fname == "format" || fname == "join" rt "str"
+  if fname == "split" rt "[str]"
+  // Phase 2 native builtins: time / sockets / process / regex.
+  if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" rt "i64"
+  if fname == "time_iso" rt "str"
+  if fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" rt "i64"
+  if fname == "sock_recv" rt "bytes"
+  if fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" rt "i64"
+  if fname == "regex_match" rt "bool"
+  if fname == "regex_find" rt "str"
+  if fname == "abs" && len(args) > 0 rt type_of_expr(sy, args[0])   // i64 or f64
+  if fname == "abs_i64" rt "i64"
+  if fname == "abs_f64" rt "f64"
+  if fname == "pop" && len(args) > 0 rt type_of_expr(sy, args[0])   // same array type
+  // Phase 3 TLS/PG return types (grouped); everything else native → i64.
+  if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" rt "str"
+  if fname == "tls_recv" || fname == "sha1" rt "bytes"
+  if fname == "pg_ok" || fname == "pg_isnull" rt "bool"
+  if is_native_call(fname) rt "i64"        // handles / counts / status (incl. void→i64)
+  if is_ctor(sy, fname) rt fname           // a struct ctor produces that struct
+  if is_variant(sy, fname) rt sy.evar[fname]   // a variant ctor produces its enum
+  // a closure-typed local called as `f(...)` yields its fn-type's return type
+  if has(sy.vty, fname) && is_fn_ann(sy.vty[fname]) rt fn_ret_of(sy.vty[fname])
+  if has(sy.frets, fname) rt sy.frets[fname]
+  "i64"
+}
+
+fn field_type(sy:*Syms, obj:Expr, fname:str) -> str {
+  sty := under_ptr(type_of_expr(sy, obj))      // look through a *T
+  k := fkey(sty, fname)
+  if has(sy.fld, k) rt sy.fld[k]
+  "i64"
+}
+
+fn expr_is_str(e:Expr, sy:*Syms) -> bool { type_of_expr(sy, e) == "str" }
+

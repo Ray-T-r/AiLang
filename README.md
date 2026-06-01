@@ -1,9 +1,9 @@
 # AiLang — the self-hosted compiler
 
-The AiLang compiler **written in AiLang itself**: a 4,769-line program
-(`selfhost/main.ail`) that lexes, parses, type-tracks, and lowers `.ail`
-source to C, then drives `clang` to a native binary — the whole pipeline
-authored in `.ail`.
+The AiLang compiler **written in AiLang itself**: a ~4,700-line compiler
+(`selfhost/main.ail` + the `selfhost/src/*.ail` modules) that lexes, parses,
+type-tracks, and lowers `.ail` source to C, then drives `clang` to a native
+binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
 a byte-identical compiler (`stage2.c == stage3.c`, 6,841 lines), with **no Rust
@@ -31,7 +31,7 @@ in via `im`.
 
 | | |
 |---|---|
-| `selfhost/main.ail` | 4,769 lines |
+| compiler source | ~4,700 lines across `main.ail` + 6 `src/` modules |
 | strict fixpoint | `stage2.c == stage3.c` — **6,841 lines, byte-identical** |
 | sample programs | **32**, each output-verified against a frozen fixture |
 | standard library | 10 modules, all compiling |
@@ -41,7 +41,14 @@ in via `im`.
 
 ```
 selfhost/
-  main.ail        the compiler: lexer + parser + type tracking + C codegen + clang driver
+  main.ail        driver entry — `im`s the modules below, then runs the pipeline
+  src/
+    lexer.ail     token kinds + lexer
+    ast.ail       AST node types + parser state + diagnostics
+    parser.ail    recursive-descent + Pratt parser
+    types.ail     static type tracking
+    codegen.ail   C code generation
+    driver.ail    import resolution + compile_to_c + clang invocation
   lexer.ail       standalone token-dump harness (illustrative)
   parser.ail      standalone tree-eval harness (illustrative)
   seed/ailc.c     the bootstrap seed — main.ail self-compiled to C (the fixpoint snapshot)

@@ -1,0 +1,204 @@
+// ===== token kinds + Token ==================================================
+fn TK_EOF() -> i64    { 0 }
+fn TK_INT() -> i64    { 1 }
+fn TK_IDENT() -> i64  { 2 }
+fn TK_PLUS() -> i64   { 3 }
+fn TK_MINUS() -> i64  { 4 }
+fn TK_STAR() -> i64   { 5 }
+fn TK_SLASH() -> i64  { 6 }
+fn TK_LPAREN() -> i64 { 7 }
+fn TK_RPAREN() -> i64 { 8 }
+fn TK_LBRACE() -> i64 { 9 }
+fn TK_RBRACE() -> i64 { 10 }
+fn TK_COMMA() -> i64  { 11 }
+fn TK_WALRUS() -> i64 { 12 }   // :=
+fn TK_LT() -> i64     { 13 }   // <
+fn TK_GT() -> i64     { 14 }   // >
+fn TK_LE() -> i64     { 15 }   // <=
+fn TK_GE() -> i64     { 16 }   // >=
+fn TK_EQ() -> i64     { 17 }   // ==
+fn TK_NE() -> i64     { 18 }   // !=
+fn TK_ASSIGN() -> i64 { 19 }   // =
+fn TK_AND() -> i64    { 20 }   // &&
+fn TK_OR() -> i64     { 21 }   // ||
+fn TK_NOT() -> i64    { 22 }   // !
+fn TK_STR() -> i64    { 23 }   // "string literal" (text = inner content)
+fn TK_PERCENT() -> i64 { 24 }  // %
+fn TK_DOT() -> i64    { 25 }   // .
+fn TK_SEMI() -> i64   { 26 }   // ;
+fn TK_COLON() -> i64  { 27 }   // :
+fn TK_LBRACK() -> i64 { 28 }   // [
+fn TK_RBRACK() -> i64 { 29 }   // ]
+fn TK_AMP() -> i64    { 30 }   // &  (address-of)
+fn TK_QUEST() -> i64  { 32 }   // ?  (try / error propagation)
+fn TK_FLOAT() -> i64  { 33 }   // 3.14  (f64 literal)
+fn TK_DOTDOT() -> i64 { 34 }   // ..  (range, as in `lp i in lo..hi`)
+fn TK_LTLT() -> i64   { 35 }   // <<  (shift left)
+fn TK_GTGT() -> i64   { 36 }   // >>  (shift right)
+fn TK_CARET() -> i64  { 37 }   // ^   (bitwise xor)
+fn TK_PIPE() -> i64   { 38 }   // |   (bitwise or; `||` is TK_OR)
+fn TK_PIPEGT() -> i64 { 39 }   // |>  (pipe-forward)
+fn TK_CHAR() -> i64   { 40 }   // 'a' (char literal → i64 code)
+fn TK_CONCAT() -> i64 { 41 }   // ++  (string concat)
+fn TK_QQ() -> i64     { 42 }   // ??  (nil-coalesce; `?` is TK_QUEST)
+fn TK_ERR() -> i64    { 31 }
+
+st Token { kind: i64; text: str; pos: i64 }
+
+fn is_digit(c:i64) -> bool { c >= 48 && c <= 57 }
+fn is_alpha(c:i64) -> bool {
+  (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95
+}
+fn is_space(c:i64) -> bool { c == 32 || c == 9 || c == 10 || c == 13 }
+
+// ===== lexer ================================================================
+fn lex(src:str) -> [Token] {
+  mu toks:[Token] := []
+  mu i := 0
+  lp i < len(src) {
+    c := src[i]
+    if is_space(c) { i += 1; ct }
+
+    // line comment `// ...`
+    if c == 47 && i + 1 < len(src) && src[i + 1] == 47 {
+      lp i < len(src) { if src[i] == 10 { br } i += 1 }
+      ct
+    }
+
+    // block comment `/* ... */`  (42 = '*'); unterminated runs to EOF
+    if c == 47 && i + 1 < len(src) && src[i + 1] == 42 {
+      i += 2
+      lp i + 1 < len(src) { if src[i] == 42 && src[i + 1] == 47 { br } i += 1 }
+      i += 2
+      ct
+    }
+
+    // string literal "..."  — text is the inner content with escapes kept raw
+    // (a `\` escapes the next byte, so `\"` stays inside the string).
+    if c == 34 {                 // opening "
+      mu j := i + 1
+      lp j < len(src) {
+        d := src[j]
+        if d == 92 { j += 2; ct }   // backslash: skip the escaped byte
+        if d == 34 { br }           // closing "
+        j += 1
+      }
+      toks = push(toks, Token(TK_STR(), substring(src, i + 1, j), i))
+      i = j + 1                   // past closing "
+      ct
+    }
+
+    // char literal '…' — text is the inner content; parser decodes to an i64 code
+    if c == 39 {                 // opening '
+      mu j := i + 1
+      lp j < len(src) {
+        d := src[j]
+        if d == 92 { j += 2; ct }   // backslash: skip the escaped byte
+        if d == 39 { br }           // closing '
+        j += 1
+      }
+      toks = push(toks, Token(TK_CHAR(), substring(src, i + 1, j), i))
+      i = j + 1
+      ct
+    }
+
+    // two-char operators
+    if c == 58 && i + 1 < len(src) && src[i + 1] == 61 {   // :=
+      toks = push(toks, Token(TK_WALRUS(), ":=", i)); i += 2; ct
+    }
+    if c == 60 && i + 1 < len(src) && src[i + 1] == 61 {   // <=
+      toks = push(toks, Token(TK_LE(), "<=", i)); i += 2; ct
+    }
+    if c == 62 && i + 1 < len(src) && src[i + 1] == 61 {   // >=
+      toks = push(toks, Token(TK_GE(), ">=", i)); i += 2; ct
+    }
+    if c == 61 && i + 1 < len(src) && src[i + 1] == 61 {   // ==
+      toks = push(toks, Token(TK_EQ(), "==", i)); i += 2; ct
+    }
+    if c == 33 && i + 1 < len(src) && src[i + 1] == 61 {   // !=
+      toks = push(toks, Token(TK_NE(), "!=", i)); i += 2; ct
+    }
+    if c == 38 && i + 1 < len(src) && src[i + 1] == 38 {   // &&
+      toks = push(toks, Token(TK_AND(), "&&", i)); i += 2; ct
+    }
+    if c == 124 && i + 1 < len(src) && src[i + 1] == 124 { // ||
+      toks = push(toks, Token(TK_OR(), "||", i)); i += 2; ct
+    }
+    if c == 46 && i + 1 < len(src) && src[i + 1] == 46 {   // ..  (range)
+      toks = push(toks, Token(TK_DOTDOT(), "..", i)); i += 2; ct
+    }
+    if c == 60 && i + 1 < len(src) && src[i + 1] == 60 {   // <<
+      toks = push(toks, Token(TK_LTLT(), "<<", i)); i += 2; ct
+    }
+    if c == 62 && i + 1 < len(src) && src[i + 1] == 62 {   // >>
+      toks = push(toks, Token(TK_GTGT(), ">>", i)); i += 2; ct
+    }
+    if c == 124 && i + 1 < len(src) && src[i + 1] == 62 {  // |>
+      toks = push(toks, Token(TK_PIPEGT(), "|>", i)); i += 2; ct
+    }
+    if c == 43 && i + 1 < len(src) && src[i + 1] == 43 {   // ++
+      toks = push(toks, Token(TK_CONCAT(), "++", i)); i += 2; ct
+    }
+    if c == 63 && i + 1 < len(src) && src[i + 1] == 63 {   // ??  (must precede bare `?`)
+      toks = push(toks, Token(TK_QQ(), "??", i)); i += 2; ct
+    }
+
+    if is_digit(c) {
+      mu j := i
+      lp j < len(src) { if is_digit(src[j]) == false { br } j += 1 }
+      // a '.' between digits is a decimal point → f64 literal (not field access)
+      if j + 1 < len(src) && src[j] == 46 && is_digit(src[j + 1]) {
+        j += 1                          // consume '.'
+        lp j < len(src) { if is_digit(src[j]) == false { br } j += 1 }
+        toks = push(toks, Token(TK_FLOAT(), substring(src, i, j), i)); i = j; ct
+      }
+      // typed-int suffix like `0_i64`/`42_i32` — a usage hint; str_to_int reads
+      // the leading digits and ignores the rest, so just absorb it into the token.
+      if j < len(src) && src[j] == 95 {   // '_'
+        j += 1
+        lp j < len(src) { dd := src[j]; if is_alpha(dd) == false && is_digit(dd) == false { br } j += 1 }
+      }
+      toks = push(toks, Token(TK_INT(), substring(src, i, j), i)); i = j; ct
+    }
+
+    if is_alpha(c) {
+      mu j := i
+      lp j < len(src) {
+        d := src[j]
+        if is_alpha(d) == false && is_digit(d) == false { br }
+        j += 1
+      }
+      toks = push(toks, Token(TK_IDENT(), substring(src, i, j), i)); i = j; ct
+    }
+
+    // single-char tokens
+    k := TK_ERR()
+    if c == 43 { k = TK_PLUS() }
+    if c == 45 { k = TK_MINUS() }
+    if c == 42 { k = TK_STAR() }
+    if c == 47 { k = TK_SLASH() }
+    if c == 37 { k = TK_PERCENT() }
+    if c == 46 { k = TK_DOT() }          // .
+    if c == 59 { k = TK_SEMI() }         // ;
+    if c == 58 { k = TK_COLON() }        // : (the `:=` two-char case ran earlier)
+    if c == 91 { k = TK_LBRACK() }       // [
+    if c == 93 { k = TK_RBRACK() }       // ]
+    if c == 40 { k = TK_LPAREN() }
+    if c == 41 { k = TK_RPAREN() }
+    if c == 123 { k = TK_LBRACE() }
+    if c == 125 { k = TK_RBRACE() }
+    if c == 44 { k = TK_COMMA() }
+    if c == 60 { k = TK_LT() }
+    if c == 62 { k = TK_GT() }
+    if c == 61 { k = TK_ASSIGN() }       // bare `=` (the `==`/`:=` cases ran earlier)
+    if c == 33 { k = TK_NOT() }          // bare `!` (the `!=` case ran earlier)
+    if c == 38 { k = TK_AMP() }          // bare `&` (the `&&` case ran earlier)
+    if c == 94 { k = TK_CARET() }        // ^
+    if c == 124 { k = TK_PIPE() }        // bare `|` (the `||`/`|>` cases ran earlier)
+    if c == 63 { k = TK_QUEST() }        // ?  (error propagation)
+    toks = push(toks, Token(k, substring(src, i, i + 1), i)); i += 1
+  }
+  toks = push(toks, Token(TK_EOF(), "", i))
+  toks
+}
+
