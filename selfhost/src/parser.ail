@@ -787,12 +787,13 @@ fn parse_stmt(p:*P) -> Stmt {
     adv(p); adv(p)                  // name =
     rt SAssign(name, parse_expr(p))
   }
-  // `name += expr` — compound add-assign (lexed `+` then `=`); desugar to
-  // `name = name + expr`. The only compound op the subset needs.
-  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_PLUS() && p.toks[p.pos + 2].kind == TK_ASSIGN() {
+  // `name <op>= expr` — compound assign (`+= -= *= /= %=`, lexed as `<op>` then
+  // `=`); desugar to `name = name <op> expr`.
+  if k == TK_IDENT() && compound_op(p.toks[p.pos + 1].kind) > 0 && p.toks[p.pos + 2].kind == TK_ASSIGN() {
     name := t
-    adv(p); adv(p); adv(p)          // name + =
-    rt SAssign(name, Bin(OP_ADD(), Var(name), parse_expr(p)))
+    cop := compound_op(p.toks[p.pos + 1].kind)
+    adv(p); adv(p); adv(p)          // name <op> =
+    rt SAssign(name, Bin(cop, Var(name), parse_expr(p)))
   }
   // `obj[idx] = expr` or `obj.field = expr` — l-value assignment. A statement
   // starting `IDENT [` or `IDENT .` parses a factor first; if `=` follows, it's
@@ -808,17 +809,30 @@ fn parse_stmt(p:*P) -> Stmt {
         adv(p)
         rt mk_lvalue_assign(lhs, parse_expr(p))
       }
-      adv(p); adv(p)                  // `+` `=` — compound add-assign `lhs += expr`
-      rt mk_lvalue_assign(lhs, Bin(OP_ADD(), lhs, parse_expr(p)))
+      cop := compound_op(ckind(p))    // `<op>` `=` — compound assign `lhs <op>= expr`
+      adv(p); adv(p)
+      rt mk_lvalue_assign(lhs, Bin(cop, lhs, parse_expr(p)))
     }
   }
   // bare expression statement
   SExpr(parse_expr(p))
 }
 
+// The OP code for a compound-assign operator token (`+= -= *= /= %=`), or 0
+// when the token isn't one (every real OP code is > 0).
+fn compound_op(k:i64) -> i64 {
+  if k == TK_PLUS()    rt OP_ADD()
+  if k == TK_MINUS()   rt OP_SUB()
+  if k == TK_STAR()    rt OP_MUL()
+  if k == TK_SLASH()   rt OP_DIV()
+  if k == TK_PERCENT() rt OP_MOD()
+  0
+}
+
 // Lookahead (no token consumption): does the upcoming `IDENT(.field|[idx])…`
-// chain end at an assignment operator (`=` or `+=`)? If not, that `IDENT.`/
-// `IDENT[` opens a bare expression (e.g. `p.x * p.x`) that must parse in full.
+// chain end at an assignment operator (`=` or a compound `+= -= *= /= %=`)? If
+// not, that `IDENT.`/`IDENT[` opens a bare expression (e.g. `p.x * p.x`) that
+// must parse in full.
 fn is_lvalue_assign(p:*P) -> bool {
   mu i := p.pos + 1                   // past the head IDENT
   lp i < len(p.toks) {
@@ -840,7 +854,7 @@ fn is_lvalue_assign(p:*P) -> bool {
   }
   if i >= len(p.toks) rt false
   if p.toks[i].kind == TK_ASSIGN() rt true
-  if p.toks[i].kind == TK_PLUS() && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_ASSIGN() rt true
+  if compound_op(p.toks[i].kind) > 0 && i + 1 < len(p.toks) && p.toks[i + 1].kind == TK_ASSIGN() rt true
   false
 }
 // Build the right assignment statement from an l-value: `obj[idx]` → SIdxAssign,

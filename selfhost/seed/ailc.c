@@ -935,6 +935,7 @@ arr_Stmt f_parse_block(s_P* v_p);
 int64_t f_is_destructure_ahead(s_P* v_p);
 s_Stmt f_parse_destructure(s_P* v_p);
 s_Stmt f_parse_stmt(s_P* v_p);
+int64_t f_compound_op(int64_t v_k);
 int64_t f_is_lvalue_assign(s_P* v_p);
 s_Stmt f_mk_lvalue_assign(s_Expr v_lhs, s_Expr v_rhs);
 s_Expr f_parse_decl_rhs(s_P* v_p, const char* v_ann);
@@ -2700,6 +2701,7 @@ s_Stmt f_parse_stmt(s_P* v_p) {
     s_Expr v_e;
     const char* v_name;
     const char* v_ann;
+    int64_t v_cop;
     s_Expr v_lhs;
     v_k = f_ckind(v_p);
     v_t = f_ctext(v_p);
@@ -2821,12 +2823,13 @@ s_Stmt f_parse_stmt(s_P* v_p) {
         f_adv(v_p);
         return mkv_SAssign(v_name, f_parse_expr(v_p));
     }
-    if ((((v_k == f_TK_IDENT()) && ((arr_Token_get((v_p)->toks, ((v_p)->pos + 1))).kind == f_TK_PLUS())) && ((arr_Token_get((v_p)->toks, ((v_p)->pos + 2))).kind == f_TK_ASSIGN()))) {
+    if ((((v_k == f_TK_IDENT()) && (f_compound_op((arr_Token_get((v_p)->toks, ((v_p)->pos + 1))).kind) > 0)) && ((arr_Token_get((v_p)->toks, ((v_p)->pos + 2))).kind == f_TK_ASSIGN()))) {
         v_name = v_t;
+        v_cop = f_compound_op((arr_Token_get((v_p)->toks, ((v_p)->pos + 1))).kind);
         f_adv(v_p);
         f_adv(v_p);
         f_adv(v_p);
-        return mkv_SAssign(v_name, mkv_Bin(f_OP_ADD(), mkv_Var(v_name), f_parse_expr(v_p)));
+        return mkv_SAssign(v_name, mkv_Bin(v_cop, mkv_Var(v_name), f_parse_expr(v_p)));
     }
     if (((v_k == f_TK_IDENT()) && (((arr_Token_get((v_p)->toks, ((v_p)->pos + 1))).kind == f_TK_LBRACK()) || ((arr_Token_get((v_p)->toks, ((v_p)->pos + 1))).kind == f_TK_DOT())))) {
         if (f_is_lvalue_assign(v_p)) {
@@ -2835,12 +2838,32 @@ s_Stmt f_parse_stmt(s_P* v_p) {
                 f_adv(v_p);
                 return f_mk_lvalue_assign(v_lhs, f_parse_expr(v_p));
             }
+            v_cop = f_compound_op(f_ckind(v_p));
             f_adv(v_p);
             f_adv(v_p);
-            return f_mk_lvalue_assign(v_lhs, mkv_Bin(f_OP_ADD(), v_lhs, f_parse_expr(v_p)));
+            return f_mk_lvalue_assign(v_lhs, mkv_Bin(v_cop, v_lhs, f_parse_expr(v_p)));
         }
     }
     return mkv_SExpr(f_parse_expr(v_p));
+}
+
+int64_t f_compound_op(int64_t v_k) {
+    if ((v_k == f_TK_PLUS())) {
+        return f_OP_ADD();
+    }
+    if ((v_k == f_TK_MINUS())) {
+        return f_OP_SUB();
+    }
+    if ((v_k == f_TK_STAR())) {
+        return f_OP_MUL();
+    }
+    if ((v_k == f_TK_SLASH())) {
+        return f_OP_DIV();
+    }
+    if ((v_k == f_TK_PERCENT())) {
+        return f_OP_MOD();
+    }
+    return 0;
 }
 
 int64_t f_is_lvalue_assign(s_P* v_p) {
@@ -2879,7 +2902,7 @@ int64_t f_is_lvalue_assign(s_P* v_p) {
     if (((arr_Token_get((v_p)->toks, v_i)).kind == f_TK_ASSIGN())) {
         return (1 == 1);
     }
-    if (((((arr_Token_get((v_p)->toks, v_i)).kind == f_TK_PLUS()) && ((v_i + 1) < arr_Token_len((v_p)->toks))) && ((arr_Token_get((v_p)->toks, (v_i + 1))).kind == f_TK_ASSIGN()))) {
+    if ((((f_compound_op((arr_Token_get((v_p)->toks, v_i)).kind) > 0) && ((v_i + 1) < arr_Token_len((v_p)->toks))) && ((arr_Token_get((v_p)->toks, (v_i + 1))).kind == f_TK_ASSIGN()))) {
         return (1 == 1);
     }
     return (1 != 1);
