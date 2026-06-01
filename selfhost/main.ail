@@ -64,6 +64,7 @@ fn TK_PIPE() -> i64   { 38 }   // |   (bitwise or; `||` is TK_OR)
 fn TK_PIPEGT() -> i64 { 39 }   // |>  (pipe-forward)
 fn TK_CHAR() -> i64   { 40 }   // 'a' (char literal → i64 code)
 fn TK_CONCAT() -> i64 { 41 }   // ++  (string concat)
+fn TK_QQ() -> i64     { 42 }   // ??  (nil-coalesce; `?` is TK_QUEST)
 fn TK_ERR() -> i64    { 31 }
 
 st Token { kind: i64; text: str; pos: i64 }
@@ -162,6 +163,9 @@ fn lex(src:str) -> [Token] {
     if c == 43 && i + 1 < len(src) && src[i + 1] == 43 {   // ++
       toks = push(toks, Token(TK_CONCAT(), "++", i)); i += 2; ct
     }
+    if c == 63 && i + 1 < len(src) && src[i + 1] == 63 {   // ??  (must precede bare `?`)
+      toks = push(toks, Token(TK_QQ(), "??", i)); i += 2; ct
+    }
 
     if is_digit(c) {
       mu j := i
@@ -244,6 +248,7 @@ fn OP_BAND() -> i64 { 17 }   // &  (infix bitwise and)
 fn OP_BXOR() -> i64 { 18 }   // ^
 fn OP_BOR() -> i64  { 19 }   // |
 fn OP_CAT() -> i64  { 20 }   // ++ (string concat)
+fn OP_QQ() -> i64   { 21 }   // ?? (nil-coalesce / map get-or-default)
 
 en Expr {
   Num(v:i64),
@@ -359,7 +364,16 @@ fn cmp_op(k:i64) -> i64 {
   0
 }
 
-fn parse_expr(p:*P) -> Expr { parse_pipe(p) }
+fn parse_expr(p:*P) -> Expr { parse_coalesce(p) }
+
+// `a ?? b` — nil-coalesce, the loosest binary level. For a map index
+// `m[k] ?? d` it yields m[k] when key k is present, else the default d
+// (see gen_qq). Left-assoc; a single `??` is all the subset needs.
+fn parse_coalesce(p:*P) -> Expr {
+  mu left := parse_pipe(p)
+  lp ckind(p) == TK_QQ() { adv(p); left = Bin(OP_QQ(), left, parse_pipe(p)) }
+  left
+}
 
 // `a |> f` / `a |> f(b)` → f(a) / f(a, b): pipe the lhs in as the first argument.
 fn prepend_arg(x:Expr, xs:[Expr]) -> [Expr] {
@@ -1100,6 +1114,18 @@ fn parse_stmt(p:*P) -> Stmt {
   }
   // `a, b := expr` — tuple destructure (must precede the single-name `name :=`).
   if is_destructure_ahead(p) { rt parse_destructure(p) }
+  // `name : Type = expr` — typed immutable binding (the non-`mu` analogue of the
+  // `mu name : Type := …` form above). The annotation pins an empty array/map
+  // literal's element type, e.g. `m : {str:i64} = {}`. Accepts `=` or `:=` after
+  // the type so both `name : T = e` and `name : T := e` bind.
+  if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_COLON() {
+    name := t
+    adv(p)                          // name
+    adv(p)                          // :
+    ann := parse_type(p)
+    if ckind(p) == TK_WALRUS() { adv(p) } el { eat(p, TK_ASSIGN()) }   // := or =
+    rt SDecl(name, parse_decl_rhs(p, ann))
+  }
   // `name := expr` — new binding
   if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_WALRUS() {
     name := t
@@ -1880,6 +1906,7 @@ fn map_lit_type(mty:str) -> str {
 
 fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
   if op == OP_CAT() rt "str"        // `++` always concatenates strings
+  if op == OP_QQ() rt type_of_expr(sy, l)   // `m[k] ?? d` → the map's value type
   // `+` on two strings is concat → str.
   if op == OP_ADD() && type_of_expr(sy, l) == "str" && type_of_expr(sy, r) == "str" {
     rt "str"
@@ -2531,6 +2558,7 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
     if t == "f64" rt "printf(\"%g\\n\", (double)(" + gen_expr(sy, args[0]) + "))"
     if t == "bool" rt "printf(\"%s\\n\", (" + gen_expr(sy, args[0]) + ") ? \"true\" : \"false\")"
     if t == "bytes" rt "(print_bytes(" + gen_expr(sy, args[0]) + "), putchar(10))"
+    if is_map_ann(t) && is_scalar_ty(map_vtype(t)) rt "(" + map_cty(t) + "_print(" + gen_expr(sy, args[0]) + "), putchar(10))"
     rt "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, args[0]) + "))"
   }
   if fname == "int_to_str" && len(args) == 1 {
@@ -2735,7 +2763,44 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
 // A `+` whose operands are strings lowers to a runtime `scat(a, b)` call;
 // any other binary op is plain C infix. (Matches real AiLang: no int→str
 // auto-coercion — int operands must be wrapped in `to_str` first.)
+// `m[k] ?? d` — map get-or-default: read m[k] when key k is present, else d.
+// A bare infix `??` would lower to nothing sensible; the value of `??` is the
+// `has`-guarded read. A non-map index has no "absent" case, so it just reads.
+fn gen_qq_index(sy:*Syms, obj:Expr, idx:Expr, r:Expr) -> str {
+  ot := type_of_expr(sy, obj)
+  if is_map_ann(ot) {
+    rt "(" + map_cty(ot) + "_has(" + gen_expr(sy, obj) + ", " + gen_expr(sy, idx) + ") ? " + gen_index(sy, obj, idx) + " : " + gen_expr(sy, r) + ")"
+  }
+  gen_index(sy, obj, idx)
+}
+// `l ?? d`. Only a map-index l-value has a defined "absent" case; every other
+// shape makes `??` a no-op yielding d (arms enumerated — the subset has no `_`).
+fn gen_qq(sy:*Syms, l:Expr, r:Expr) -> str {
+  mt l {
+    Index(obj, idx)     => gen_qq_index(sy, obj, idx, r);
+    Num(v)              => gen_expr(sy, r);
+    Flt(fs)             => gen_expr(sy, r);
+    Str(s)              => gen_expr(sy, r);
+    Var(n)              => gen_expr(sy, r);
+    Bin(o,a,b)          => gen_expr(sy, r);
+    Unary(o,x)          => gen_expr(sy, r);
+    Call(f,a)           => gen_expr(sy, r);
+    Field(o,fnm)        => gen_expr(sy, r);
+    Array(es,et)        => gen_expr(sy, r);
+    MapLit(mlt,mks,mvs) => gen_expr(sy, r);
+    Addr(x)             => gen_expr(sy, r);
+    Match(sc,vn,vb,bd)  => gen_expr(sy, r);
+    IfE(c,t,e2)         => gen_expr(sy, r);
+    Try(e2)             => gen_expr(sy, r);
+    Lambda(ps,pts,b,id) => gen_expr(sy, r);
+    Tuple(tes)          => gen_expr(sy, r);
+    BlockE(bb)          => gen_expr(sy, r);
+    Bad                 => gen_expr(sy, r);
+  }
+}
+
 fn gen_bin(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
+  if op == OP_QQ() { rt gen_qq(sy, l, r) }   // `??` — map get-or-default
   if op == OP_ADD() && expr_is_str(l, sy) && expr_is_str(r, sy) {
     rt "scat(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ")"
   }
@@ -3064,6 +3129,9 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
       rt ind + "print_arr_" + suf + "(" + gen_expr(sy, e) + "); putchar(10);\n"
     }
   }
+  if is_map_ann(t) && is_scalar_ty(map_vtype(t)) {   // `{K:scalar}` → `{"k": v, …}` like ailangc
+    rt ind + map_cty(t) + "_print(" + gen_expr(sy, e) + "); putchar(10);\n"
+  }
   ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
 }
 
@@ -3164,9 +3232,12 @@ fn gen_loop_kv(sy:*Syms, kn:str, vn:str, coll:Expr, body:[Stmt], ind:str) -> str
   set_ty(sy, kn, map_ktype(mt2))
   set_ty(sy, vn, vt)
   mu out := ind + "{ " + mc + " " + mv + " = " + gen_expr(sy, coll) + ";\n"
-  out = out + ind + "for (" + mc + "_node* " + nv + " = " + mv + "->head; " + nv + "; " + nv + " = " + nv + "->next) {\n"
-  out = out + ind + "    " + cty(map_ktype(mt2)) + " v_" + kn + " = " + nv + "->k;\n"
-  out = out + ind + "    " + cty(vt) + " v_" + vn + " = " + nv + "->v;\n"
+  // Iterate backing slots in order (skipping empties) — same traversal as the
+  // reference's print/keys, so `lp (k,v) in m` visits entries in hash order.
+  out = out + ind + "for (int64_t " + nv + " = 0; " + nv + " < " + mv + "->cap; " + nv + " += 1) {\n"
+  out = out + ind + "    if (!" + mv + "->occupied[" + nv + "]) continue;\n"
+  out = out + ind + "    " + cty(map_ktype(mt2)) + " v_" + kn + " = " + mv + "->keys[" + nv + "];\n"
+  out = out + ind + "    " + cty(vt) + " v_" + vn + " = " + mv + "->values[" + nv + "];\n"
   out = out + gen_stmts(sy, body, ind + "    ")
   out = out + ind + "} }\n"
   out
@@ -3288,14 +3359,46 @@ fn gen_arr_helpers(suf:str, et:str) -> str {
 // struct-valued map can be *named* before the aggregate bodies are emitted. The
 // node BODY (which holds the value by value) is emitted by gen_map_node, after
 // the struct/enum bodies, exactly like gen_struct_fwd / gen_struct_body.
+// `println(m)` for a scalar-valued map → `{"k": v, …}`, byte-for-byte the format
+// ailangc emits (str keys/values quoted, i64/f64 bare). Only scalar value types
+// are printable; a struct-valued map gets a no-op printer (never printed in the
+// corpus). `pf_spec`/`pf_arg` pick the printf conversion + argument cast.
+fn pf_spec(t:str) -> str {
+  if t == "str" rt "\\\"%s\\\""
+  if t == "f64" rt "%g"
+  "%lld"
+}
+fn pf_arg(t:str, slot:str) -> str {
+  if t == "str" rt "(" + slot + " ? " + slot + " : \"\")"
+  if t == "f64" rt "(double)(" + slot + ")"
+  "(long long)(" + slot + ")"
+}
+fn is_scalar_ty(t:str) -> bool { t == "str" || t == "i64" || t == "f64" }
+fn gen_map_print(nm:str, kt:str, vt:str) -> str {
+  if is_scalar_ty(vt) {
+    fmt := pf_spec(kt) + ": " + pf_spec(vt)
+    ka := pf_arg(kt, "m->keys[i]")
+    va := pf_arg(vt, "m->values[i]")
+    rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + fmt + "\", " + ka + ", " + va + "); } printf(\"}\"); }\n"
+  }
+  "static void " + nm + "_print(" + nm + " m){ (void)m; }\n"
+}
+
+// Open-addressing hash table — mirrors ailangc's prelude.c map layout (FNV-1a /
+// splitmix64 hashes, cap 8, grow at load 0.7, linear probe), so slot-order
+// iteration is byte-identical to the reference. Phase 2 forward-declares the
+// storage tag + pointer typedef; the body lands in phase 3 (gen_map_node), the
+// helpers in phase 4 — the same 3-phase split the old assoc-list used.
 fn gen_map_fwd(nm:str) -> str {
-  mu o := "typedef struct " + nm + "_node " + nm + "_node;\n"
-  o = o + "typedef struct { " + nm + "_node* head; } " + nm + "_s;\n"
+  mu o := "typedef struct " + nm + "_s " + nm + "_s;\n"
   o = o + "typedef " + nm + "_s* " + nm + ";\n"
   o
 }
 fn gen_map_node(nm:str, kt:str, vt:str) -> str {
-  "struct " + nm + "_node { " + cty(kt) + " k; " + cty(vt) + " v; struct " + nm + "_node* next; };\n"
+  // Phase-3 storage body: parallel cap-sized keys/values arrays + an occupied
+  // bitmap; `len` counts live entries. Values are held by value, so the value
+  // type must be complete here (as the old node body required).
+  "struct " + nm + "_s { int64_t cap; int64_t len; " + cty(kt) + "* keys; " + cty(vt) + "* values; unsigned char* occupied; };\n"
 }
 fn gen_map_helpers(nm:str, kt:str, vt:str, dflt:str) -> str {
   ksuf := arr_suffix(kt)                                   // key's arr_<T> suffix
@@ -3303,16 +3406,24 @@ fn gen_map_helpers(nm:str, kt:str, vt:str, dflt:str) -> str {
   kc := cty(kt)
   vc := cty(vt)
   // key equality: strcmp for string keys, == for everything else (i64 etc.).
-  seteq := if kt == "str" { "strcmp((*pp)->k,k)==0" } el { "(*pp)->k==k" }
-  geq := if kt == "str" { "strcmp(n->k,k)==0" } el { "n->k==k" }
-  mu o := "static " + nm + " " + nm + "_new(void){ " + nm + " m=(" + nm + ")GC_MALLOC(sizeof(" + nm + "_s)); m->head=0; return m; }\n"
-  // `_set` APPENDS new keys (insertion order) so iteration / keys() match AiLang.
-  o = o + "static void " + nm + "_set(" + nm + " m, " + kc + " k, " + vc + " val){ " + nm + "_node** pp=&m->head; while(*pp){ if(" + seteq + "){ (*pp)->v=val; return; } pp=&(*pp)->next; } " + nm + "_node* n=(" + nm + "_node*)GC_MALLOC(sizeof(" + nm + "_node)); n->k=k; n->v=val; n->next=0; *pp=n; }\n"
-  o = o + "static " + vc + " " + nm + "_get(" + nm + " m, " + kc + " k){ for(" + nm + "_node* n=m->head;n;n=n->next) if(" + geq + ") return n->v; return " + dflt + "; }\n"
-  o = o + "static int64_t " + nm + "_has(" + nm + " m, " + kc + " k){ for(" + nm + "_node* n=m->head;n;n=n->next) if(" + geq + ") return 1; return 0; }\n"
-  o = o + "static arr_" + ksuf + " " + nm + "_keys(" + nm + " m){ arr_" + ksuf + " r=arr_" + ksuf + "_new(); for(" + nm + "_node* n=m->head;n;n=n->next) r=arr_" + ksuf + "_push(r,n->k); return r; }\n"
-  o = o + "static arr_" + vsuf + " " + nm + "_values(" + nm + " m){ arr_" + vsuf + " r=arr_" + vsuf + "_new(); for(" + nm + "_node* n=m->head;n;n=n->next) r=arr_" + vsuf + "_push(r,n->v); return r; }\n"
-  o = o + "static int64_t " + nm + "_len(" + nm + " m){ int64_t c=0; for(" + nm + "_node* n=m->head;n;n=n->next) c=c+1; return c; }\n"
+  keyeq := if kt == "str" { "strcmp(m->keys[i],k)==0" } el { "m->keys[i]==k" }
+  mu o := ""
+  // hash: FNV-1a over the C string for str keys, splitmix64 for scalar keys —
+  // the exact functions ailangc uses, so the slot a key lands in matches.
+  if kt == "str" {
+    o = o + "static uint64_t " + nm + "_hash(" + kc + " s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }\n"
+  } el {
+    o = o + "static uint64_t " + nm + "_hash(" + kc + " k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }\n"
+  }
+  o = o + "static " + nm + " " + nm + "_new(void){ " + nm + " m=(" + nm + ")GC_MALLOC(sizeof(" + nm + "_s)); m->cap=8; m->len=0; m->keys=(" + kc + "*)GC_MALLOC(8*sizeof(" + kc + ")); m->values=(" + vc + "*)GC_MALLOC(8*sizeof(" + vc + ")); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }\n"
+  o = o + "static void " + nm + "_grow(" + nm + " m){ int64_t oc=m->cap; " + kc + "* ok=m->keys; " + vc + "* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(" + kc + "*)GC_MALLOC(nc*sizeof(" + kc + ")); m->values=(" + vc + "*)GC_MALLOC(nc*sizeof(" + vc + ")); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=" + nm + "_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }\n"
+  o = o + "static void " + nm + "_set(" + nm + " m, " + kc + " k, " + vc + " val){ if(m->len*10>=m->cap*7) " + nm + "_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(" + keyeq + "){ m->values[i]=val; return; } } }\n"
+  o = o + "static " + vc + " " + nm + "_get(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return " + dflt + "; if(" + keyeq + ") return m->values[i]; } return " + dflt + "; }\n"
+  o = o + "static int64_t " + nm + "_has(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(" + keyeq + ") return 1; } return 0; }\n"
+  o = o + "static arr_" + ksuf + " " + nm + "_keys(" + nm + " m){ arr_" + ksuf + " r=arr_" + ksuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + ksuf + "_push(r,m->keys[i]); return r; }\n"
+  o = o + "static arr_" + vsuf + " " + nm + "_values(" + nm + " m){ arr_" + vsuf + " r=arr_" + vsuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + vsuf + "_push(r,m->values[i]); return r; }\n"
+  o = o + "static int64_t " + nm + "_len(" + nm + " m){ return m->len; }\n"
+  o = o + gen_map_print(nm, kt, vt)
   o
 }
 

@@ -1,0 +1,7 @@
+# bootstrap.sh build outputs. The seed itself (seed/ailc.c) is tracked — it
+# lives in seed/ and is not matched by these repo-root-anchored patterns.
+/ailc
+/ailc2
+/_bootcheck*
+/*.c
+# compiled sample binaries (examples-selfhost/* land next to their source)

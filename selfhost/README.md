@@ -57,9 +57,10 @@ uses, which is why the compiler can compile its own source. On top of the earlie
 slices (functions, control flow, structs, arrays, strings) it now has the data and
 control machinery a compiler needs:
 
-- **`{str:V}` maps** (`{}` / `m[k]` / `m[k]=v` / `has`) — monomorphic `map_ss`/
-  `map_si` assoc-list runtime, **reference-semantic** so writes through a `*Syms`
-  pointer field persist.
+- **`{str:V}` maps** (`{}` / `m[k]` / `m[k]=v` / `has` / `m[k] ?? d`) — monomorphic
+  `map_ss`/`map_si` **open-addressing** runtime (same FNV-1a / linear-probe layout as
+  `ailangc`, so iteration order matches), **reference-semantic** so writes through a
+  `*Syms` pointer field persist.
 - **`*T` pointers** + `&x` + `->` — mutable parser state (`fn adv(p:*P)`).
 - **`en` enums + `mt` match** — recursive ADTs with **heap-boxed** self-referential
   fields (the `Expr`/`Stmt` AST), `mt` as a value (statement-expression).
@@ -73,8 +74,9 @@ control machinery a compiler needs:
   `read_file`, `write_file`, `args`, `exit`, `println`.
 - **string interpolation** `"hi ${name}, ${n * n}"` — desugars to a `scat` chain;
   each `${…}` hole is stringified with `to_str`.
-- **map iteration** `lp (k, v) in m { … }` plus `keys(m)` / `values(m)` (assoc-list
-  order; AiLang's own order is hash-based, so don't rely on it cross-compiler).
+- **map iteration** `lp (k, v) in m { … }` plus `keys(m)` / `values(m)` and whole-map
+  `println(m)` — hash-slot order, identical to `ailangc`'s (open-addressing, so they
+  match byte-for-byte).
 - **`!T` error propagation**: `-> !i64` results, `ok(x)` / `err_i64("…")`, the `e?`
   propagation operator, and `unwrap` / `is_ok` / `is_err` / `err_msg`. Each `!T`
   lowers to a monomorphic `res_<T>` tagged struct.
