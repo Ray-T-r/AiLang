@@ -1304,6 +1304,59 @@ fn parse_enum(p:*P) -> EnumDef {
   EnumDef(name, vnames, vftypes)
 }
 
+// ----- boxed enum fields (recursion-cycle breaking) -------------------------
+// A variant field is boxed (stored as a heap pointer) when storing it by value
+// would close a struct cycle: a self-reference ("@self") OR a bare field typed
+// as ANOTHER enum ("@box:<Enum>"). `is_boxed_ft` tests either; `boxed_enum`
+// returns the pointee enum name (the container for @self).
+fn is_boxed_ft(ft:str) -> bool {
+  if ft == "@self" rt true
+  len(ft) >= 5 && substring(ft, 0, 5) == "@box:"
+}
+fn boxed_enum(ft:str, selfname:str) -> str {
+  if ft == "@self" rt selfname
+  substring(ft, 5, len(ft))                 // strip "@box:"
+}
+fn is_enum_name(enums:[EnumDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(enums) { if enums[i].name == nm rt true   i += 1 }
+  false
+}
+// Post-pass (after ALL enums are known, so forward refs resolve): mark every
+// bare field typed as a different enum "@box:<Enum>" so two enums can reference
+// each other (mutual recursion). Self-refs are already "@self"; arrays `[Enum]`
+// stay by-name (they're heap-backed `arr_<Enum>`), so only bare enum fields box.
+fn box_cross_enums(enums:[EnumDef]) -> [EnumDef] {
+  mu out:[EnumDef] := []
+  mu i := 0
+  lp i < len(enums) {
+    ed := enums[i]
+    mu newvft:[str] := []
+    mu vi := 0
+    lp vi < len(ed.vftypes) {
+      raw := ed.vftypes[vi]
+      if len(raw) == 0 {
+        newvft = push(newvft, "")           // unit variant — no fields
+      } el {
+        fts := split_semi(raw)
+        mu nf := ""
+        mu fi := 0
+        lp fi < len(fts) {
+          ft := fts[fi]
+          if ft != "@self" && is_enum_name(enums, ft) { ft = "@box:" + ft }
+          if fi == 0 { nf = ft } el { nf = nf + ";" + ft }
+          fi += 1
+        }
+        newvft = push(newvft, nf)
+      }
+      vi += 1
+    }
+    out = push(out, EnumDef(ed.name, ed.vnames, newvft))
+    i += 1
+  }
+  out
+}
+
 // A type name: `i64`/`str`/StructName, an array `[T]`, a map `{K:V}`, or a
 // pointer `*T`. Returned as a literal string ("[i64]", "{str:str}", "*P", …) —
 // a leading '[' / '{' / '*' tells codegen which kind it is.
@@ -1962,8 +2015,8 @@ fn gen_arm_binds(sy:*Syms, vname:str, binds:[str]) -> str {
   lp i < len(binds) {
     ft := if i < len(ftypes) { ftypes[i] } el { "i64" }
     src := "__s.u." + vname + ".f" + int_to_str(i)
-    rhs := if ft == "@self" { "*(" + src + ")" } el { src }
-    cft := if ft == "@self" { cty(sy.evar[vname]) } el { cty(ft) }
+    rhs := if is_boxed_ft(ft) { "*(" + src + ")" } el { src }
+    cft := if is_boxed_ft(ft) { cty(boxed_enum(ft, sy.evar[vname])) } el { cty(ft) }
     out = out + cft + " v_" + binds[i] + " = " + rhs + "; "
     i += 1
   }
@@ -1976,7 +2029,7 @@ fn bind_arm_types(sy:*Syms, vname:str, binds:[str]) {
   mu i := 0
   lp i < len(binds) {
     ft := if i < len(ftypes) { ftypes[i] } el { "i64" }
-    rt2 := if ft == "@self" { sy.evar[vname] } el { ft }
+    rt2 := if is_boxed_ft(ft) { boxed_enum(ft, sy.evar[vname]) } el { ft }
     set_ty(sy, binds[i], rt2)
     i += 1
   }
@@ -3307,7 +3360,7 @@ fn gen_enum_body(ed:EnumDef) -> str {
     ftypes := split_semi(ed.vftypes[vi])
     mu fi := 0
     lp fi < len(ftypes) {
-      cft := if ftypes[fi] == "@self" { "s_" + ed.name + "*" } el { cty(ftypes[fi]) }
+      cft := if is_boxed_ft(ftypes[fi]) { "s_" + boxed_enum(ftypes[fi], ed.name) + "*" } el { cty(ftypes[fi]) }
       out = out + " " + cft + " f" + int_to_str(fi) + ";"
       fi += 1
     }
@@ -3329,7 +3382,7 @@ fn gen_enum_ctors(ed:EnumDef) -> str {
     mu fi := 0
     lp fi < len(ftypes) {
       if fi > 0 { out = out + ", " }
-      cft := if ftypes[fi] == "@self" { "s_" + ed.name } el { cty(ftypes[fi]) }
+      cft := if is_boxed_ft(ftypes[fi]) { "s_" + boxed_enum(ftypes[fi], ed.name) } el { cty(ftypes[fi]) }
       out = out + cft + " f" + int_to_str(fi)
       fi += 1
     }
@@ -3337,8 +3390,9 @@ fn gen_enum_ctors(ed:EnumDef) -> str {
     fi = 0
     lp fi < len(ftypes) {
       dst := "v.u." + vn + ".f" + int_to_str(fi)
-      if ftypes[fi] == "@self" {
-        out = out + dst + "=(s_" + ed.name + "*)GC_MALLOC(sizeof(s_" + ed.name + ")); *" + dst + "=f" + int_to_str(fi) + "; "
+      if is_boxed_ft(ftypes[fi]) {
+        bt := boxed_enum(ftypes[fi], ed.name)
+        out = out + dst + "=(s_" + bt + "*)GC_MALLOC(sizeof(s_" + bt + ")); *" + dst + "=f" + int_to_str(fi) + "; "
       } el {
         out = out + dst + "=f" + int_to_str(fi) + "; "
       }
@@ -4000,6 +4054,9 @@ fn compile_to_c(src:str) -> str {
     lp fi < len(sd.fnames) { base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]; fi += 1 }
     si += 1
   }
+  // Box bare cross-enum fields now that ALL enums are known (mutual recursion),
+  // BEFORE the registry/codegen read their field types.
+  enums = box_cross_enums(enums)
   // Enum registry: each variant → its enum + ";"-joined field types; plus a
   // per-enum "@order.<Enum>" → ";"-joined variant list (for tag indices).
   mu ei := 0
