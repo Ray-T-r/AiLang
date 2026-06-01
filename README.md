@@ -93,6 +93,29 @@ examples-selfhost/
   expected/*.out  frozen known-good output (byte-equal to Rust `ailangc` at split time)
 ```
 
+## Install — pre-built binary
+
+The fastest way: grab the latest `ailc` from
+[Releases](https://github.com/Ray-T-r/AiLang/releases). The installer
+downloads the right archive for your platform, places `ailc` in
+`~/.local/bin/`, and adds that directory to `$PATH`:
+
+```bash
+curl -fsSL https://github.com/Ray-T-r/AiLang/releases/latest/download/install.sh | bash
+```
+
+Then:
+
+```bash
+echo 'println("hello from ailang")' > /tmp/hi.ail
+ailc /tmp/hi.ail /tmp/hi && /tmp/hi
+```
+
+You still need `clang`, `bdw-gc`, OpenSSL, and `libpq` installed locally —
+`ailc` shells out to clang at compile time and the runtime prelude links all
+three (see [Requirements](#requirements)). The installer warns about anything
+missing.
+
 ## Build it — from nothing but C
 
 No Rust, no prior AiLang binary required — just `clang` and Boehm GC:
