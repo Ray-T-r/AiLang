@@ -3542,8 +3542,41 @@ fn expr_is_call(e:Expr) -> bool {
 // void (`type_of_expr` defaults unknown/void calls to i64), and emitting
 // `return <void>` from the resulting non-void fn is invalid C. So keep call-tails
 // as "" (the fn stays void, as before); only non-call value exprs infer a type.
+// The called function's name, or "" if `e` isn't a Call.
+fn call_fname(e:Expr) -> str {
+  mt e {
+    Call(fname, args)  => fname;
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Var(n)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Array(es,et)       => "";
+    MapLit(ml,mks,mvs) => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,b,id)    => "";
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
+    Bad                => "";
+  }
+}
+// The type a tail bare-expression contributes as an implicit return. A tail
+// *call* is only trusted when the callee's return type is KNOWN via `frets` (a
+// user fn or a declared extern): a void user-fn maps to "" (stays void); an
+// unknown/builtin call also stays "" — both avoid the old `return <void>` trap
+// where `type_of_expr` defaulted such calls to i64 and flipped the fn non-void.
 fn tail_sexpr_type(sy:*Syms, e:Expr) -> str {
-  if expr_is_call(e) rt ""
+  if expr_is_call(e) {
+    fnm := call_fname(e)
+    if has(sy.frets, fnm) rt sy.frets[fnm]
+    rt ""
+  }
   type_of_expr(sy, e)
 }
 // The type a trailing statement contributes as an implicit tail return: a bare
@@ -3935,20 +3968,21 @@ fn compile_to_c(src:str) -> str {
     base.evar["@order." + ed.name] = order
     ei += 1
   }
+  // Externs FIRST: register each declared return type before fn inference, so a
+  // fn whose tail is an extern call (`fn parse_int(s) { atoi(s) }`) infers that
+  // extern's return type instead of defaulting to void. (i32/i64 both lower to
+  // int64_t via cty, so this is fixpoint-stable.)
+  mu xi := 0
+  lp xi < len(externs) {
+    if len(externs[xi].ret) > 0 { base.frets[externs[xi].name] = externs[xi].ret }
+    xi += 1
+  }
   // Infer + record each fn's return type (so calls type their results).
   mu fi2 := 0
   lp fi2 < len(funcs) {
     f := funcs[fi2]
     base.frets[f.name] = infer_ret(f, base)
     fi2 += 1
-  }
-  // Externs: register each one's declared return type so a call types correctly
-  // (`v := zlibVersion()` → str → printed with %s, not %lld). The wrapper below
-  // matches. (i32/i64 both lower to int64_t via cty, so this is fixpoint-stable.)
-  mu xi := 0
-  lp xi < len(externs) {
-    if len(externs[xi].ret) > 0 { base.frets[externs[xi].name] = externs[xi].ret }
-    xi += 1
   }
   // Mark generic fn names so calls are recognized + inlined (see gen_call).
   mu gj := 0
