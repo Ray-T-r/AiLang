@@ -6799,8 +6799,11 @@ int main(int argc, char** argv){
     GC_INIT();
     g_argc=argc; g_argv=argv;
     arr_str v_av;
+    int64_t v_ai;
     const char* v_input;
     const char* v_outbin;
+    int64_t v_ni;
+    int64_t v_ob;
     const char* v_src;
     map_str_str v_seen;
     const char* v_cprog;
@@ -6808,12 +6811,35 @@ int main(int argc, char** argv){
     const char* v_cmd;
     int64_t v_rc;
     v_av = ailang_args();
-    if ((arr_str_len(v_av) < 2)) {
-        printf("%s\n", "usage: ailc0 <input.ail> <output-binary>");
+    v_ai = 0;
+    if (((arr_str_len(v_av) > 0) && (strcmp(arr_str_get(v_av, 0), "compile") == 0))) {
+        v_ai = 1;
+    }
+    if ((arr_str_len(v_av) <= v_ai)) {
+        printf("%s\n", "usage: ailc [compile] <input.ail> [output-binary]");
         exit((int)(1));
     }
-    v_input = arr_str_get(v_av, 0);
-    v_outbin = arr_str_get(v_av, 1);
+    v_input = arr_str_get(v_av, v_ai);
+    v_outbin = "";
+    if ((arr_str_len(v_av) > (v_ai + 1))) {
+        v_outbin = arr_str_get(v_av, (v_ai + 1));
+    } else {
+        v_ni = ((int64_t)strlen(v_input));
+        if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
+            v_outbin = substr(v_input, 0, (v_ni - 4));
+        } else {
+            v_outbin = scat(v_input, ".out");
+        }
+    }
+    if ((strcmp(v_outbin, v_input) == 0)) {
+        printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
+        exit((int)(1));
+    }
+    v_ob = ((int64_t)strlen(v_outbin));
+    if (((v_ob >= 4) && (strcmp(substr(v_outbin, (v_ob - 4), v_ob), ".ail") == 0))) {
+        printf("%s\n", scat("error: refusing to write the compiled binary over a .ail source file: ", v_outbin));
+        exit((int)(1));
+    }
     v_src = read_file_c(v_input);
     v_src = scat(f_auto_imports(v_src), v_src);
     if (f_has_import(v_src)) {

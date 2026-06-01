@@ -29,12 +29,33 @@ im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
 av := args()
-if len(av) < 2 {
-  println("usage: ailc0 <input.ail> <output-binary>")
+// Accept `ailc [compile] <input.ail> [output]`. Tolerate a leading `compile`
+// (ailangc-CLI habit), default the output to the input minus its `.ail`, and
+// NEVER write the binary over a `.ail` source — the footgun `ailc compile
+// foo.ail` used to hit, taking `foo.ail` as the OUTPUT path and clobbering it.
+mu ai := 0
+if len(av) > 0 && av[0] == "compile" { ai = 1 }
+if len(av) <= ai {
+  println("usage: ailc [compile] <input.ail> [output-binary]")
   exit(1)
 }
-input := av[0]
-outbin := av[1]
+input := av[ai]
+mu outbin := ""
+if len(av) > ai + 1 {
+  outbin = av[ai + 1]
+} el {
+  ni := len(input)
+  if ni >= 4 && substring(input, ni - 4, ni) == ".ail" { outbin = substring(input, 0, ni - 4) } el { outbin = input + ".out" }
+}
+if outbin == input {
+  println("error: output would overwrite the input file: " + input)
+  exit(1)
+}
+ob := len(outbin)
+if ob >= 4 && substring(outbin, ob - 4, ob) == ".ail" {
+  println("error: refusing to write the compiled binary over a .ail source file: " + outbin)
+  exit(1)
+}
 
 mu src := read_file(input)
 src = auto_imports(src) + src        // inject `im "std/…"` for referenced std exports
