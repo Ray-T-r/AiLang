@@ -478,16 +478,32 @@ fn parse_unary(p:*P) -> Expr {
   parse_factor(p)
 }
 
-// factor := primary ('.' IDENT)*    — `.field` postfixes chain left to right.
+// factor := primary ('.' IDENT ('(' args ')')? | '[' index ']')*
+// `.field`/`[index]` postfixes chain left to right; `.name(args)` is a UFCS
+// method call that desugars at parse time to `name(receiver, args)` — the `(`
+// disambiguates it from a plain field access, so no struct-registry lookup is
+// needed. Bare `.cstr` is the one property-form sugar (str passthrough).
 fn parse_factor(p:*P) -> Expr {
   mu e := parse_primary(p)
-  // `.field` and `[index]` postfixes chain left to right.
   lp ckind(p) == TK_DOT() || ckind(p) == TK_LBRACK() {
     if ckind(p) == TK_DOT() {
       adv(p)                            // .
       fname := ctext(p)
-      adv(p)                            // field name
-      e = Field(e, fname)
+      adv(p)                            // field / method name
+      if ckind(p) == TK_LPAREN() {      // UFCS method call: `e.f(args)` → `f(e, args)`
+        adv(p)                          // (
+        mu margs:[Expr] := [e]          // receiver becomes the first argument
+        lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+          margs = push(margs, parse_expr(p))
+          if ckind(p) == TK_COMMA() { adv(p) }
+        }
+        eat(p, TK_RPAREN())             // )
+        e = Call(fname, margs)
+      } el if fname == "cstr" {         // bare `.cstr` property → `cstr(e)`
+        e = Call("cstr", [e])
+      } el {
+        e = Field(e, fname)
+      }
     } el {
       adv(p)                            // [
       idx := parse_expr(p)
@@ -1889,6 +1905,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "filter" && len(args) == 2 { rt type_of_expr(sy, args[0]) }
   if fname == "reduce" && len(args) == 3 { rt type_of_expr(sy, args[1]) }
   if fname == "to_str" rt "str"
+  if fname == "cstr" rt "str"                          // str passthrough (`s.cstr`)
   if fname == "print" || fname == "println" rt "i64"   // printf-returns-int (expression form)
   if fname == "int_to_str" rt "str"
   if fname == "str_to_int" rt "i64"
@@ -2512,6 +2529,11 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   }
   if fname == "str_to_float" && len(args) == 1 {
     rt "s2f(" + gen_expr(sy, args[0]) + ")"
+  }
+  // `cstr(s)` — str → C-string passthrough (AiLang str is already `const char*`),
+  // so `s.cstr` lowers to a no-op. Matches ailangc's `cstr` builtin.
+  if fname == "cstr" && len(args) == 1 {
+    rt gen_expr(sy, args[0])
   }
   if fname == "substring" && len(args) == 3 {
     rt "substr(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ", " + gen_expr(sy, args[2]) + ")"
