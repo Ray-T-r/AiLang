@@ -39,6 +39,12 @@ function Log  ($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function OK   ($m) { Write-Host "   ok $m" -ForegroundColor Green }
 function Warn ($m) { Write-Host "   !! $m" -ForegroundColor Yellow }
 function Die  ($m) { Write-Host "ERROR $m" -ForegroundColor Red; exit 1 }
+function Test-Admin {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+    } catch { $false }
+}
 
 Log 'AiLang on Windows runs inside WSL2, fronted by native ailc/ailrun/ailexe shims.'
 
@@ -48,15 +54,32 @@ if (Get-Command wsl -ErrorAction SilentlyContinue) {
     try { if ((wsl -e bash -c "echo __ailang_wsl_ok__" 2>$null) -match '__ailang_wsl_ok__') { $wslReady = $true } } catch { }
 }
 if (-not $wslReady) {
-    Warn 'WSL2 with a Linux distro is not ready yet.'
-    Log  'Installing it (needs admin + usually a reboot): wsl --install -d Ubuntu'
-    try { wsl --install -d Ubuntu } catch { Warn "wsl --install failed: $_" }
+    Warn 'WSL2 with a Linux distro is not installed yet.'
+    # `wsl --install` enables a Windows feature → requires administrator rights.
+    if (Test-Admin) {
+        Log 'Installing WSL2 + Ubuntu: wsl --install -d Ubuntu'
+        try { wsl --install -d Ubuntu } catch { Warn "wsl --install failed: $_" }
+    } else {
+        Warn 'Installing WSL needs administrator rights — opening an elevated window.'
+        Log  'Approve the UAC prompt; it will run: wsl --install -d Ubuntu'
+        try {
+            Start-Process -FilePath 'powershell' -Verb RunAs -ArgumentList @(
+                '-NoExit','-NoProfile','-Command',
+                'Write-Host "Installing WSL2 + Ubuntu..." -ForegroundColor Cyan; wsl --install -d Ubuntu'
+            ) | Out-Null
+            OK 'elevated WSL install launched in a separate window'
+        } catch {
+            Warn 'auto-elevation was declined/failed. Open PowerShell as Administrator and run:'
+            Warn '    wsl --install -d Ubuntu'
+        }
+    }
     Write-Host @"
 
-Next steps:
+WSL is installing (in the elevated window if one opened). After it finishes:
   1. Reboot if Windows asks you to.
-  2. Launch "Ubuntu" once from the Start menu and create your Linux username/password.
-  3. Re-run this installer:  iwr -useb $BaseUrl/install.ps1 | iex
+  2. Launch "Ubuntu" once from the Start menu; create your Linux username/password.
+  3. Re-run this installer (a normal terminal is fine for the rest):
+       iwr -useb $BaseUrl/install.ps1 | iex
 
 "@ -ForegroundColor Yellow
     exit 0
