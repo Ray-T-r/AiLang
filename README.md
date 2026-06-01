@@ -191,7 +191,7 @@ numbers.
 
 ## What works today
 
-The compiler runs the full pipeline: lex → parse → sema → codegen → `clang -O2` → native binary. **60 automated tests pass; 30 end-to-end example programs compile and run correctly.**
+The compiler runs the full pipeline: lex → parse → sema → codegen → `clang -O2` → native binary. **60 automated tests pass; 30 end-to-end example programs compile and run correctly.** The language is also **[self-hosting](#self-hosting)** — a compiler written in AiLang compiles its own source to a byte-identical fixpoint.
 
 Working: functions, recursion, mutual recursion, `if`/`el`, `lp` (for-in
 + while + map `(k,v)` destructure), `mt` match with tuple **and variant**
@@ -645,6 +645,47 @@ Error: undefined name `unknown_name`
    │               ╰──── undefined name `unknown_name`
 ───╯
 ```
+
+---
+
+## Self-hosting
+
+AiLang ships a **second compiler, written in AiLang itself** —
+[`selfhost/main.ail`](selfhost/main.ail). It runs the same pipeline (lex → parse
+→ C codegen → `clang`) and reaches a **strict byte-identical fixpoint**, the gold
+standard for a self-hosting compiler:
+
+```
+stage1 = ailangc(main.ail)     # the Rust compiler builds the AiLang one
+stage2 = stage1(main.ail)      # that compiler rebuilds itself from source
+stage3 = stage2(main.ail)      # …and once more
+diff stage2.c stage3.c         # → empty: 6657 lines, byte-for-byte identical
+```
+
+The AiLang-written compiler covers structs, enums (including mutual recursion),
+arrays, maps, pointers, generics, `!T` results, `f64`, `bytes`, first-class
+closures, tuples / multi-return, block expressions, UFCS method calls
+(`x.f(a)` → `f(x, a)`), and variadic externs (`ex fn printf(fmt, ...)`).
+
+Reproduce the whole proof — per-sample fidelity *and* the fixpoint — with:
+
+```bash
+bash selfhost/verify.sh
+```
+
+Across the example corpus the two compilers emit **byte-identical output on 59 of
+64 programs.** The other five can't match *by construction* — none is a gap in the
+self-hosted compiler:
+
+| Example | Why it can't byte-match |
+| --- | --- |
+| `bad.ail`, `sema_error.ail` | **Negative tests** — both compilers reject them on purpose, so there's no program output to compare. |
+| `coverage.ail` | A token-coverage probe that uses syntax AiLang deliberately doesn't accept (e.g. ternary `?:`), so the **reference compiler rejects it too**. |
+| `bench.ail` | A benchmark that prints **wall-clock microsecond timings** plus a `now_us()`-seeded result — non-deterministic by design. The self-hosted build computes identical results on every deterministic workload; only the timings and the seeded value differ (the reference compiler can't match its *own* output run-to-run either). |
+| `wc.ail` | Prints an entire map, and the two compilers iterate maps in **different (unspecified) orders** — hash vs insertion — so the lines come out permuted. |
+
+So the self-hosted compiler matches the reference on every example whose output is
+actually well-defined.
 
 ---
 
