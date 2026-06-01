@@ -6825,6 +6825,10 @@ int main(int argc, char** argv){
     GC_INIT();
     g_argc=argc; g_argv=argv;
     arr_str v_av;
+    int64_t v_keepc;
+    arr_str v_pos;
+    int64_t v_fi;
+    const char* v_a;
     int64_t v_ai;
     const char* v_input;
     const char* v_outbin;
@@ -6837,18 +6841,30 @@ int main(int argc, char** argv){
     const char* v_cmd;
     int64_t v_rc;
     v_av = ailang_args();
+    v_keepc = (1 != 1);
+    v_pos = ({ arr_str __a = arr_str_new(); __a; });
+    v_fi = 0;
+    while ((v_fi < arr_str_len(v_av))) {
+        v_a = arr_str_get(v_av, v_fi);
+        if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
+            v_keepc = (1 == 1);
+        } else {
+            v_pos = arr_str_push(v_pos, v_a);
+        }
+        v_fi = (v_fi + 1);
+    }
     v_ai = 0;
-    if (((arr_str_len(v_av) > 0) && (strcmp(arr_str_get(v_av, 0), "compile") == 0))) {
+    if (((arr_str_len(v_pos) > 0) && (strcmp(arr_str_get(v_pos, 0), "compile") == 0))) {
         v_ai = 1;
     }
-    if ((arr_str_len(v_av) <= v_ai)) {
-        printf("%s\n", "usage: ailc [compile] <input.ail> [output-binary]");
+    if ((arr_str_len(v_pos) <= v_ai)) {
+        printf("%s\n", "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]");
         exit((int)(1));
     }
-    v_input = arr_str_get(v_av, v_ai);
+    v_input = arr_str_get(v_pos, v_ai);
     v_outbin = "";
-    if ((arr_str_len(v_av) > (v_ai + 1))) {
-        v_outbin = arr_str_get(v_av, (v_ai + 1));
+    if ((arr_str_len(v_pos) > (v_ai + 1))) {
+        v_outbin = arr_str_get(v_pos, (v_ai + 1));
     } else {
         v_ni = ((int64_t)strlen(v_input));
         if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
@@ -6887,6 +6903,9 @@ int main(int argc, char** argv){
     if ((v_rc != 0)) {
         printf("%s\n", "clang failed");
         exit((int)(1));
+    }
+    if ((v_keepc == (1 != 1))) {
+        f_system(scat("rm -f ", v_cpath));
     }
     printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outbin));
     return 0;

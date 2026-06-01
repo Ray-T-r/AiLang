@@ -29,20 +29,31 @@ im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
 av := args()
-// Accept `ailc [compile] <input.ail> [output]`. Tolerate a leading `compile`
-// (ailangc-CLI habit), default the output to the input minus its `.ail`, and
-// NEVER write the binary over a `.ail` source — the footgun `ailc compile
-// foo.ail` used to hit, taking `foo.ail` as the OUTPUT path and clobbering it.
+// `--keep-c` / `-k`: keep the generated C next to the binary. Default: delete
+// it after a clean build (it's a transient build intermediate). Filter the
+// flag out of the args; everything else is positional.
+mu keepc := false
+mu pos:[str] := []
+mu fi := 0
+lp fi < len(av) {
+  a := av[fi]
+  if a == "--keep-c" || a == "-k" { keepc = true } el { pos = push(pos, a) }
+  fi += 1
+}
+// Accept `ailc [--keep-c] [compile] <input.ail> [output]`. Tolerate a leading
+// `compile` (ailangc-CLI habit), default the output to the input minus its
+// `.ail`, and NEVER write the binary over a `.ail` source — the footgun `ailc
+// compile foo.ail` used to hit, taking `foo.ail` as OUTPUT and clobbering it.
 mu ai := 0
-if len(av) > 0 && av[0] == "compile" { ai = 1 }
-if len(av) <= ai {
-  println("usage: ailc [compile] <input.ail> [output-binary]")
+if len(pos) > 0 && pos[0] == "compile" { ai = 1 }
+if len(pos) <= ai {
+  println("usage: ailc [--keep-c] [compile] <input.ail> [output-binary]")
   exit(1)
 }
-input := av[ai]
+input := pos[ai]
 mu outbin := ""
-if len(av) > ai + 1 {
-  outbin = av[ai + 1]
+if len(pos) > ai + 1 {
+  outbin = pos[ai + 1]
 } el {
   ni := len(input)
   if ni >= 4 && substring(input, ni - 4, ni) == ".ail" { outbin = substring(input, 0, ni - 4) } el { outbin = input + ".out" }
@@ -81,4 +92,7 @@ if rc != 0 {
   println("clang failed")
   exit(1)
 }
+// The generated C is a build intermediate — delete it unless `--keep-c`. On a
+// clang failure we already exited above, leaving it for inspection.
+if keepc == false { system("rm -f " + cpath) }
 println("compiled " + input + " -> " + outbin)

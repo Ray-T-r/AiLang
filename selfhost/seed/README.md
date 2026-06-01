@@ -30,11 +30,11 @@ changes (compiling `main.ail` `im`s them all), or `bootstrap.sh`'s fixpoint
 check will report a mismatch. With a working `ailc` (or via Rust):
 
 ```bash
-# from an already-bootstrapped ./selfhost/ailc:
-./ailc main.ail /tmp/s && cp /tmp/s.c seed/ailc.c
+# from an already-bootstrapped ./selfhost/ailc (--keep-c keeps the .c we copy):
+./ailc --keep-c main.ail /tmp/s && cp /tmp/s.c seed/ailc.c
 
 # or seeding from the Rust compiler:
-ailangc compile main.ail -o /tmp/a && /tmp/a main.ail /tmp/s && cp /tmp/s.c seed/ailc.c
+ailangc compile main.ail -o /tmp/a && /tmp/a --keep-c main.ail /tmp/s && cp /tmp/s.c seed/ailc.c
 ```
 
 Then re-run `bash selfhost/bootstrap.sh` to confirm the fixpoint holds.

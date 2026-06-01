@@ -52,13 +52,13 @@ echo "==> [2/3] recompiling main.ail with the seeded compiler"
 echo "    ok — ./ailc2 built from source by ./ailc"
 
 echo "==> [3/3] fixpoint: does ailc(main.ail) reproduce the seed?"
-./ailc main.ail _bootcheck >/dev/null 2>&1
+./ailc --keep-c main.ail _bootcheck >/dev/null 2>&1   # --keep-c: we diff the .c
 if diff -q "$SEED" _bootcheck.c >/dev/null; then
   echo "    ✅ byte-identical — the seed IS the fixpoint of the current main.ail"
   rc=0
 else
   echo "    ⚠️  differs — main.ail changed since the seed was frozen."
-  echo "        refresh it with:  ./ailc main.ail /tmp/s && cp /tmp/s.c $SEED"
+  echo "        refresh it with:  ./ailc --keep-c main.ail /tmp/s && cp /tmp/s.c $SEED"
   rc=1
 fi
 
