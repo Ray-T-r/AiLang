@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # AiLang installer (macOS / Linux).
 #
-# Downloads the latest pre-built self-hosted `ailc` binary from GitHub
-# Releases and installs it to ~/.local/bin/ailc. Adds that dir to $PATH
-# (zshrc / bashrc) if missing.
+# Downloads the latest pre-built self-hosted `ailc` from GitHub Releases,
+# installs it to ~/.local/bin/ailc, adds that dir to $PATH, installs the
+# AiLang skill for Claude Code, and — by default — installs the native
+# libraries `ailc` needs (clang, Boehm GC, OpenSSL, libpq).
 #
 # One-liner:
 #   curl -fsSL https://github.com/Ray-T-r/AiLang/releases/latest/download/install.sh | bash
+#
+# Flags / env:
+#   --no-deps         skip auto-installing native libraries (just warn)
+#   --no-skill        skip installing the Claude Code skill
+#   AILANG_NO_DEPS=1  same as --no-deps
 #
 # Re-run any time — every step is idempotent.
 
@@ -16,11 +22,32 @@ REPO="Ray-T-r/AiLang"
 BASE_URL="https://github.com/${REPO}/releases/latest/download"
 BIN_DIR="${HOME}/.local/bin"
 BIN_PATH="${BIN_DIR}/ailc"
+SKILL_DIR="${HOME}/.claude/skills/ailang"
+SKILL_PATH="${SKILL_DIR}/SKILL.md"
+
+INSTALL_DEPS=1
+INSTALL_SKILL=1
+[[ "${AILANG_NO_DEPS:-}" == "1" ]] && INSTALL_DEPS=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-deps)  INSTALL_DEPS=0 ;;
+        --no-skill) INSTALL_SKILL=0 ;;
+    esac
+done
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m   ok\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m   !!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR\033[0m %s\n' "$*" >&2; exit 1; }
+
+# `curl | bash` feeds the script on stdin, so an interactive sudo password
+# prompt can't be answered. Use sudo only when it won't need to ask.
+SUDO=""
+if [[ "$(id -u)" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        SUDO="sudo"
+    fi
+fi
 
 # -------- 1. detect platform --------
 log "Detecting platform"
@@ -31,72 +58,119 @@ case "${OS_NAME}-${ARCH_NAME}" in
     Darwin-x86_64)     ASSET="ailc-macos-x86_64.tar.gz"   ;;
     Linux-x86_64)      ASSET="ailc-linux-x86_64.tar.gz"   ;;
     Linux-aarch64)     ASSET="ailc-linux-aarch64.tar.gz"  ;;
-    *) die "unsupported platform: ${OS_NAME} ${ARCH_NAME}." ;;
+    *) die "unsupported platform: ${OS_NAME} ${ARCH_NAME}. For Windows, use install.ps1." ;;
 esac
 ok "${OS_NAME} ${ARCH_NAME} → ${ASSET}"
 
-# -------- 2. runtime prerequisites (all MANDATORY for the current seed) --------
-# The self-hosted ailc invokes clang at compile time, and its runtime prelude
-# unconditionally links Boehm GC + OpenSSL + libpq. Without those, both ailc
-# itself and the programs it produces will fail to link.
-log "Checking runtime prerequisites (clang + bdw-gc + OpenSSL + libpq)"
-command -v clang >/dev/null 2>&1 || command -v cc >/dev/null 2>&1 \
-    || warn "no C compiler found. ailc shells out to clang at compile time. Install Xcode CLT (macOS) or build-essential (Linux)."
+# -------- 2. native dependencies --------
+# `ailc` shells out to clang at compile time, and the runtime prelude links
+# Boehm GC + OpenSSL + libpq unconditionally. All four are required.
+need_cc() { command -v clang >/dev/null 2>&1 || command -v cc >/dev/null 2>&1; }
+have_gc()  { pkg-config --exists bdw-gc 2>/dev/null || [[ -n "${BDW_GC_PREFIX:-}" ]]; }
+have_ssl() { pkg-config --exists openssl 2>/dev/null; }
+have_pq()  { pkg-config --exists libpq 2>/dev/null; }
 
-missing=()
-if [[ "$OS_NAME" == "Darwin" ]]; then
-    pkg-config --exists bdw-gc 2>/dev/null \
-        || [[ -n "${BDW_GC_PREFIX:-}" ]] \
-        || brew --prefix bdw-gc >/dev/null 2>&1 \
-        || missing+=("bdw-gc")
-    pkg-config --exists openssl 2>/dev/null \
-        || brew --prefix openssl@3 >/dev/null 2>&1 \
-        || brew --prefix openssl >/dev/null 2>&1 \
-        || missing+=("openssl@3")
-    pkg-config --exists libpq 2>/dev/null \
-        || brew --prefix libpq >/dev/null 2>&1 \
-        || missing+=("libpq")
-    if (( ${#missing[@]} )); then
-        warn "missing libraries: ${missing[*]}"
-        warn "install with:  brew install ${missing[*]} pkg-config"
+install_deps_macos() {
+    command -v brew >/dev/null 2>&1 || {
+        warn "Homebrew not found — can't auto-install. Install from https://brew.sh then re-run,"
+        warn "or: install bdw-gc, openssl, libpq, pkg-config manually."
+        return
+    }
+    local pkgs=()
+    have_gc  || pkgs+=("bdw-gc")
+    have_ssl || brew --prefix openssl@3 >/dev/null 2>&1 || pkgs+=("openssl@3")
+    have_pq  || brew --prefix libpq >/dev/null 2>&1 || pkgs+=("libpq")
+    pkg-config --version >/dev/null 2>&1 || pkgs+=("pkg-config")
+    need_cc || warn "no clang/cc — install the Xcode Command Line Tools: xcode-select --install"
+    if (( ${#pkgs[@]} )); then
+        log "Installing native deps via Homebrew: ${pkgs[*]}"
+        brew install "${pkgs[@]}"
+        ok "brew deps installed"
+    else
+        ok "native deps already present"
     fi
-elif [[ "$OS_NAME" == "Linux" ]]; then
-    pkg-config --exists bdw-gc 2>/dev/null || [[ -n "${BDW_GC_PREFIX:-}" ]] || missing+=("libgc-dev")
-    pkg-config --exists openssl 2>/dev/null || missing+=("libssl-dev")
-    pkg-config --exists libpq 2>/dev/null || missing+=("libpq-dev")
-    if (( ${#missing[@]} )); then
-        warn "missing libraries: ${missing[*]}"
-        warn "install with:  sudo apt-get install -y clang ${missing[*]} pkg-config"
+}
+
+install_deps_linux() {
+    # Map the four deps onto whichever package manager is present.
+    local mgr="" inst=() pkgs=()
+    if command -v apt-get >/dev/null 2>&1; then
+        mgr="apt-get"; inst=($SUDO apt-get install -y)
+        pkgs=(clang libgc-dev libssl-dev libpq-dev pkg-config)
+    elif command -v dnf >/dev/null 2>&1; then
+        mgr="dnf"; inst=($SUDO dnf install -y)
+        pkgs=(clang gc-devel openssl-devel libpq-devel pkgconf-pkg-config)
+    elif command -v pacman >/dev/null 2>&1; then
+        mgr="pacman"; inst=($SUDO pacman -S --noconfirm)
+        pkgs=(clang gc openssl postgresql-libs pkgconf)
+    else
+        warn "no apt-get / dnf / pacman found — install clang + bdw-gc + OpenSSL + libpq manually."
+        return
     fi
+    # Skip if everything's already there.
+    if need_cc && have_gc && have_ssl && have_pq; then
+        ok "native deps already present"
+        return
+    fi
+    if [[ "$(id -u)" -ne 0 && -z "$SUDO" ]]; then
+        warn "native deps missing and passwordless sudo unavailable. Run this yourself:"
+        warn "    sudo ${inst[*]:1} ${pkgs[*]}"
+        return
+    fi
+    log "Installing native deps via ${mgr}: ${pkgs[*]}"
+    if [[ "$mgr" == "apt-get" ]]; then $SUDO apt-get update -qq || true; fi
+    "${inst[@]}" "${pkgs[@]}" && ok "${mgr} deps installed" \
+        || warn "dep install failed — install manually: ${inst[*]} ${pkgs[*]}"
+}
+
+if (( INSTALL_DEPS )); then
+    log "Checking / installing native dependencies (clang + bdw-gc + OpenSSL + libpq)"
+    case "$OS_NAME" in
+        Darwin) install_deps_macos ;;
+        Linux)  install_deps_linux ;;
+    esac
+else
+    log "Skipping dependency install (--no-deps). You need clang + bdw-gc + OpenSSL + libpq."
+    need_cc  || warn "missing: a C compiler (clang/cc)"
+    have_gc  || warn "missing: Boehm GC (bdw-gc)"
+    have_ssl || warn "missing: OpenSSL"
+    have_pq  || warn "missing: libpq"
 fi
-ok "checked"
 
-# -------- 3. download + extract --------
+# -------- 3. download + extract ailc --------
 log "Downloading ${ASSET}"
 mkdir -p "$BIN_DIR"
 TMP_DIR="$(mktemp -d -t ailc.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 TMP_ARCHIVE="${TMP_DIR}/${ASSET}"
 if ! curl -fL --progress-bar -o "$TMP_ARCHIVE" "${BASE_URL}/${ASSET}"; then
-    die "could not download ${BASE_URL}/${ASSET}. Has the release been published yet?"
+    die "could not download ${BASE_URL}/${ASSET}. Has the release been published for this platform yet?"
 fi
 [[ -s "$TMP_ARCHIVE" ]] || die "downloaded file is empty"
 
 log "Extracting"
-tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" \
-    || die "could not extract ${TMP_ARCHIVE} (corrupt download?)"
-[[ -f "${TMP_DIR}/ailc" ]] \
-    || die "archive did not contain an 'ailc' binary at the top level"
+tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" || die "could not extract ${TMP_ARCHIVE} (corrupt download?)"
+[[ -f "${TMP_DIR}/ailc" ]] || die "archive did not contain an 'ailc' binary at the top level"
 
 install -m 755 "${TMP_DIR}/ailc" "$BIN_PATH"
-# Strip the macOS Gatekeeper quarantine xattr if it's there. curl-installed
-# binaries normally don't carry it, but clear defensively.
 if [[ "$OS_NAME" == "Darwin" ]]; then
     xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
 fi
 ok "installed to $BIN_PATH"
 
-# -------- 4. ensure ~/.local/bin on PATH --------
+# -------- 4. install the Claude Code skill --------
+if (( INSTALL_SKILL )); then
+    log "Installing AiLang skill for Claude Code"
+    mkdir -p "$SKILL_DIR"
+    if curl -fL -s -o "${TMP_DIR}/SKILL.md" "${BASE_URL}/SKILL.md"; then
+        install -m 644 "${TMP_DIR}/SKILL.md" "$SKILL_PATH"
+        ok "skill → ${SKILL_PATH}"
+    else
+        warn "could not download SKILL.md (ailc itself is installed fine)"
+    fi
+fi
+
+# -------- 5. ensure ~/.local/bin on PATH --------
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 case ":${PATH}:" in
     *":${BIN_DIR}:"*)

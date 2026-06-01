@@ -97,11 +97,21 @@ examples-selfhost/
 
 The fastest way: grab the latest `ailc` from
 [Releases](https://github.com/Ray-T-r/AiLang/releases). The installer
-downloads the right archive for your platform, places `ailc` in
-`~/.local/bin/`, and adds that directory to `$PATH`:
+downloads the right archive for your platform, puts `ailc` on your `$PATH`,
+installs the native toolchain it needs (`clang`, `bdw-gc`, OpenSSL, `libpq`),
+and drops the AiLang skill into `~/.claude/skills/` so
+[Claude Code](https://claude.com/claude-code) can write `.ail` for you.
+
+**macOS / Linux:**
 
 ```bash
 curl -fsSL https://github.com/Ray-T-r/AiLang/releases/latest/download/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://github.com/Ray-T-r/AiLang/releases/latest/download/install.ps1 | iex
 ```
 
 Then:
@@ -111,10 +121,11 @@ echo 'println("hello from ailang")' > /tmp/hi.ail
 ailc /tmp/hi.ail /tmp/hi && /tmp/hi
 ```
 
-You still need `clang`, `bdw-gc`, OpenSSL, and `libpq` installed locally —
-`ailc` shells out to clang at compile time and the runtime prelude links all
-three (see [Requirements](#requirements)). The installer warns about anything
-missing.
+The installer auto-installs dependencies via Homebrew (macOS),
+apt/dnf/pacman (Linux), or MSYS2 (Windows). Pass `--no-deps` (or `-NoDeps`
+on Windows) to skip that and manage them yourself — see
+[Requirements](#requirements). `ailc` shells out to clang at compile time and
+the runtime prelude links Boehm GC + OpenSSL + libpq.
 
 ## Build it — from nothing but C
 
