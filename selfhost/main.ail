@@ -2126,7 +2126,7 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     Unary(op,x)      => fv_walk(x, acc);
     Call(fname,args) => fv_args(args, acc);            // fname is a fn, not a captured var
     Tuple(tes)       => fv_args(tes, acc);
-    BlockE(bb)       => acc;
+    BlockE(bb)       => fv_body(bb, acc);                 // block-body lambda: walk its stmts
     Field(obj,fnm)   => fv_walk(obj, acc);
     Index(obj,idx)   => fv_walk(idx, fv_walk(obj, acc));
     Array(elems,ety) => fv_args(elems, acc);
@@ -2135,6 +2135,34 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     IfE(c,t,el2)     => fv_walk(el2, fv_walk(t, fv_walk(c, acc)));
     Try(x)           => fv_walk(x, acc);
     Lambda(ps,b,id)  => fv_walk(b, acc);                  // nested lambda body
+  }
+}
+// Free vars inside a [Stmt] body — for a block-body lambda's capture analysis.
+// Over-collects (block-local `:=`/loop vars included), but `register_lam`
+// filters to actual enclosing locals, so bindings drop out harmlessly.
+fn fv_body(body:[Stmt], acc:[str]) -> [str] {
+  mu a := acc
+  mu i := 0
+  lp i < len(body) { a = fv_stmt(body[i], a); i += 1 }
+  a
+}
+fn fv_stmt(s:Stmt, acc:[str]) -> [str] {
+  mt s {
+    SDecl(name,e)         => fv_walk(e, acc);
+    SDestructure(names,e) => fv_walk(e, acc);
+    SAssign(name,e)       => fv_walk(e, acc);
+    SIdxAssign(o,ix,e)    => fv_walk(e, fv_walk(ix, fv_walk(o, acc)));
+    SFieldAssign(o,f,e)   => fv_walk(e, fv_walk(o, acc));
+    SReturn(e)            => fv_walk(e, acc);
+    SPrint(e)             => fv_walk(e, acc);
+    SExpr(e)              => fv_walk(e, acc);
+    SIf(c,b,eb)           => fv_body(eb, fv_body(b, fv_walk(c, acc)));
+    SLoop(c,b)            => fv_body(b, fv_walk(c, acc));
+    SLoopIn(vnm,coll,b)   => fv_body(b, fv_walk(coll, acc));
+    SLoopKV(kn,vn,coll,b) => fv_body(b, fv_walk(coll, acc));
+    SLoopRange(v,lo,hi,b) => fv_body(b, fv_walk(hi, fv_walk(lo, acc)));
+    SBreak                => acc;
+    SContinue             => acc;
   }
 }
 fn free_vars(b:Expr) -> [str] { mu acc:[str] := []; fv_walk(b, acc) }
