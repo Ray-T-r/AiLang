@@ -27,12 +27,45 @@ variadic externs (`ex fn printf(fmt, ...)`), and the 10 `std/*` modules —
 sockets, HTTP, TLS, Postgres, Redis, WebSocket, JSON, time, str, math — pulled
 in via `im`.
 
+## Benchmarks
+
+AiLang's bet: **the fewest source tokens** (cheap for an LLM to write) at
+**native speed** (it lowers to C, built with `clang -O2`). Both, measured.
+
+**Token efficiency** — source tokens (`tiktoken`, `cl100k_base`) for the same
+four programs (`fib`, `fizzbuzz`, `greet`, `sum`):
+
+| | AiLang | Python | JS | Rust | Go | Java | C |
+|---|---|---|---|---|---|---|---|
+| tokens | **130** | 136 | 167 | 186 | 223 | 261 | 270 |
+| vs AiLang | 1.00× | 1.05× | 1.28× | 1.43× | 1.72× | 2.01× | 2.08× |
+
+The densest of the seven — fewer tokens than Python, under half of C.
+
+**Runtime** — recursive `fib(40)`, `hyperfine` mean on Apple Silicon, each
+language at its standard optimization (`clang -O2`, `rustc -O`, `go build`,
+`javac`, `node`, `python3`):
+
+| language | time | vs AiLang |
+|---|---|---|
+| **AiLang** (→ C, `clang -O2`) | **142 ms** | 1.00× |
+| C | 142 ms | 1.00× |
+| Rust | 143 ms | 1.00× |
+| Java | 159 ms | 1.12× |
+| Go | 219 ms | 1.54× |
+| Node | 479 ms | 3.37× |
+| Python | 5394 ms | 38× |
+
+AiLang runs neck-and-neck with C and Rust — it *is* C, generated. The
+self-hosted `ailc` produces identically fast binaries (`ailc fib40.ail` → 145 ms,
+matching `clang -O2`).
+
 ## Status
 
 | | |
 |---|---|
-| compiler source | ~4,700 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **6,841 lines, byte-identical** |
+| compiler source | ~4,800 lines across `main.ail` + 6 `src/` modules |
+| strict fixpoint | `stage2.c == stage3.c` — **6,912 lines, byte-identical** |
 | sample programs | **32**, each output-verified against a frozen fixture |
 | standard library | 10 modules, all compiling |
 | Rust in the build | **none** |
