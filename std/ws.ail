@@ -1,0 +1,114 @@
+// std/ws.ail — minimal WebSocket (RFC 6455) server-side support.
+//
+// Provides handshake + text-frame send/recv. Limited to short text frames
+// (payload < 126 bytes); binary frames and continuation frames are
+// follow-up work. Sufficient for chat-style demos and small JSON streams.
+//
+// Pattern:
+//   im "std/http.ail"
+//   req := bytes_to_str(sock_recv(cli, 4096))
+//   key := http_header(req, "Sec-WebSocket-Key")
+//   sock_send_str(cli, ws_handshake_response(key))
+//   lp i in 0..1000 {
+//     msg := ws_recv_text(cli)
+//     if len(msg) == 0 br
+//     ws_send_text(cli, "echo: " + msg)
+//   }
+
+// --- base64 (encode-only) ---
+
+fn b64_encode(b:bytes) -> str {
+  alpha := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  n := len(b)
+  mu out := ""
+  mu i := 0
+  lp k in 0..1000000 {
+    if i >= n br
+    b0 := bytes_at(b, i)
+    mu b1 := 0
+    mu b2 := 0
+    mu have := 1
+    if i + 1 < n { b1 = bytes_at(b, i + 1); have = 2 }
+    if i + 2 < n { b2 = bytes_at(b, i + 2); have = 3 }
+    triple := (b0 << 16) | (b1 << 8) | b2
+    c0 := substring(alpha, (triple >> 18) & 63, ((triple >> 18) & 63) + 1)
+    c1 := substring(alpha, (triple >> 12) & 63, ((triple >> 12) & 63) + 1)
+    if have == 1 {
+      out = out + c0 + c1 + "=="
+    } el {
+      c2 := substring(alpha, (triple >> 6) & 63, ((triple >> 6) & 63) + 1)
+      if have == 2 {
+        out = out + c0 + c1 + c2 + "="
+      } el {
+        c3 := substring(alpha, triple & 63, (triple & 63) + 1)
+        out = out + c0 + c1 + c2 + c3
+      }
+    }
+    i = i + 3
+  }
+  out
+}
+
+// --- handshake ---
+
+// ws_accept_key(client_key) — compute the Sec-WebSocket-Accept value.
+//   base64(SHA1(client_key + magic_uuid))
+fn ws_accept_key(client_key:str) -> str {
+  magic := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+  b64_encode(sha1(client_key + magic))
+}
+
+// ws_handshake_response(client_key) — the full 101 Switching Protocols
+// response. Caller does sock_send_str(cli, this).
+fn ws_handshake_response(client_key:str) -> str {
+  accept := ws_accept_key(client_key)
+  "HTTP/1.1 101 Switching Protocols\r\n"
+    + "Upgrade: websocket\r\n"
+    + "Connection: Upgrade\r\n"
+    + "Sec-WebSocket-Accept: " + accept + "\r\n"
+    + "\r\n"
+}
+
+// --- frames ---
+
+// ws_send_text(fd, payload) — send a single text frame.
+// LIMITATION: payload must be < 126 bytes (short-frame format only).
+fn ws_send_text(fd:i64, payload:str) -> i64 {
+  n := len(payload)
+  if n >= 126 rt -1
+  // Server frames are unmasked: byte0=0x81, byte1=n, then payload.
+  frame := chr(129) + chr(n) + payload
+  sock_send_str(fd, frame)
+}
+
+// ws_recv_text(fd) — read one masked text frame from the client.
+// Returns the payload as str. "" on close/error.
+// LIMITATION: assumes short-frame (len < 126).
+fn ws_recv_text(fd:i64) -> str {
+  hdr := sock_recv(fd, 2)
+  if len(hdr) < 2 rt ""
+  // byte0: FIN|RSV|opcode — opcode 0x8 = close, return ""
+  op := bytes_at(hdr, 0) & 15
+  if op == 8 rt ""
+  // byte1: MASK | LEN
+  blen := bytes_at(hdr, 1)
+  masked := (blen & 128) != 0
+  plen := blen & 127
+  if plen >= 126 rt ""
+  if !masked rt ""    // client MUST mask per RFC
+  // Read 4-byte mask + payload.
+  mk := sock_recv(fd, 4)
+  if len(mk) < 4 rt ""
+  payload_b := sock_recv(fd, plen)
+  if len(payload_b) < plen rt ""
+  // Unmask: each payload byte XOR mask[i % 4].
+  mu out := ""
+  mu i := 0
+  lp k in 0..1000 {
+    if i >= plen br
+    byte_val := bytes_at(payload_b, i) ^ bytes_at(mk, i % 4)
+    out = out + chr(byte_val)
+    i = i + 1
+  }
+  out
+}

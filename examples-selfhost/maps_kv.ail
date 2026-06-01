@@ -1,0 +1,24 @@
+// maps_kv.ail — Phase 4: {K:V} map generality + empty-{} usage inference.
+// counts is inferred {str:i64} from `counts[w] += 1`; sq is inferred {i64:i64}
+// from `sq[n] = n*n` (i64 key); names is {str:str}. No annotations needed.
+
+counts := {}
+words := ["a", "b", "a", "c", "a", "b"]
+lp w in words { counts[w] += 1 }
+println(len(counts))        // 3
+println(counts["a"])        // 3
+println(counts["b"])        // 2
+println(counts["z"])        // 0  (missing key → default)
+
+sq := {}
+lp n in 1..5 { sq[n] = n * n }
+println(sq[2])              // 4
+println(sq[4])              // 16
+println(has(sq, 3))         // true
+println(has(sq, 9))         // false
+
+names := {}
+names["x"] = "alpha"
+names["y"] = "beta"
+println(names["x"])         // alpha
+println(len(names))         // 2

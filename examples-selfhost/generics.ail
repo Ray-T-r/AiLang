@@ -1,0 +1,10 @@
+st Box { n: i64 }
+en Color { Red, Green, Blue }
+fn id<T>(x:T) -> T x
+fn pick<T>(a:T, b:T) -> T a
+println(id(99))            // 99
+println(id("ok"))          // ok
+println(id(Box(7)).n)      // 7
+c := id(Blue)
+println(mt c { Red => 0; Green => 1; Blue => 2 })   // 2
+println(pick(Box(3), Box(8)).n)                     // 3

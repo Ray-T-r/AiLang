@@ -1,0 +1,12 @@
+// std/str.ail — basic string helpers wrapping libc.
+
+ex fn strcmp(a:str, b:str) -> i32
+ex fn atoi(s:str) -> i32
+
+fn eq(a:str, b:str) -> bool {
+  strcmp(a, b) == 0
+}
+
+fn parse_int(s:str) {
+  atoi(s)
+}

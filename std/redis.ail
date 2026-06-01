@@ -1,0 +1,112 @@
+// std/redis.ail — minimal Redis client over the AiLang socket primitives.
+//
+// Talks the RESP protocol (text-based, line-delimited). No external
+// dependency beyond `tcp_connect` / `sock_send_str` / `sock_recv`.
+//
+// Public surface:
+//   redis_connect(host, port)   -> i64       (fd, -1 on error)
+//   redis_close(fd)             -> i64
+//   redis_ping(fd)              -> str       ("PONG" / "" on error)
+//   redis_set(fd, key, value)   -> str       ("OK" / "")
+//   redis_get(fd, key)          -> str       (value, "" if nil/error)
+//   redis_del(fd, key)          -> i64       (1 if deleted, 0 otherwise)
+//   redis_incr(fd, key)         -> i64       (new value after increment)
+//   redis_exists(fd, key)       -> bool
+
+fn redis_connect(host:str, port:i64) -> i64 {
+  tcp_connect(host, port)
+}
+
+fn redis_close(fd:i64) -> i64 {
+  sock_close(fd)
+}
+
+// Encode args as a RESP array: "*N\r\n$len\r\narg\r\n$len\r\narg\r\n..."
+// Binary-safe for the values; relies on length prefixes, not delimiters
+// in the data.
+fn redis_encode(args:[str]) -> str {
+  mu out := "*" + int_to_str(len(args)) + "\r\n"
+  lp a in args {
+    out = out + "$" + int_to_str(len(a)) + "\r\n" + a + "\r\n"
+  }
+  out
+}
+
+// Read one CRLF-terminated line (without the CRLF). One byte at a time —
+// slow but avoids over-reading into the next reply.
+fn redis_read_line(fd:i64) -> str {
+  mu buf := ""
+  lp i in 0..1000000 {
+    idx := index_of(buf, "\r\n")
+    if idx >= 0 rt substring(buf, 0, idx)
+    chunk := sock_recv(fd, 1)
+    if len(chunk) == 0 br
+    buf = buf + bytes_to_str(chunk)
+  }
+  buf
+}
+
+// Read exactly n bytes (followed by trailing \r\n which is also consumed).
+fn redis_read_bulk(fd:i64, n:i64) -> str {
+  if n < 0 rt ""
+  mu buf := ""
+  mu remaining := n
+  lp i in 0..10000 {
+    if remaining <= 0 br
+    chunk := sock_recv(fd, remaining)
+    if len(chunk) == 0 br
+    buf = buf + bytes_to_str(chunk)
+    remaining = remaining - len(chunk)
+  }
+  // Consume the trailing \r\n.
+  sock_recv(fd, 2)
+  buf
+}
+
+// Send a command and parse the reply, returning the body as a string.
+// For integer replies the integer is rendered as decimal. For nil
+// returns "". On error replies, returns "" (caller has no error channel
+// yet — could be added later as a Result type).
+fn redis_call(fd:i64, args:[str]) -> str {
+  cmd := redis_encode(args)
+  // Redis commands are small; sock_send_str is safe to use directly
+  // without the std/sock.ail send-loop wrapper.
+  sock_send_str(fd, cmd)
+  line := redis_read_line(fd)
+  if len(line) == 0 rt ""
+  prefix := substring(line, 0, 1)
+  rest := substring(line, 1, len(line))
+  if prefix == "+" rt rest
+  if prefix == "-" rt ""
+  if prefix == ":" rt rest
+  if prefix == "$" {
+    n := str_to_int(rest)
+    if n < 0 rt ""
+    rt redis_read_bulk(fd, n)
+  }
+  ""
+}
+
+fn redis_ping(fd:i64) -> str {
+  redis_call(fd, ["PING"])
+}
+
+fn redis_set(fd:i64, key:str, value:str) -> str {
+  redis_call(fd, ["SET", key, value])
+}
+
+fn redis_get(fd:i64, key:str) -> str {
+  redis_call(fd, ["GET", key])
+}
+
+fn redis_del(fd:i64, key:str) -> i64 {
+  str_to_int(redis_call(fd, ["DEL", key]))
+}
+
+fn redis_incr(fd:i64, key:str) -> i64 {
+  str_to_int(redis_call(fd, ["INCR", key]))
+}
+
+fn redis_exists(fd:i64, key:str) -> bool {
+  str_to_int(redis_call(fd, ["EXISTS", key])) > 0
+}

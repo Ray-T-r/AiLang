@@ -1,0 +1,7 @@
+nums := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+println(map(nums, fn(x) x * 2)[9])              // 20
+println(len(filter(nums, fn(x) x % 2 == 1)))    // 5
+println(reduce(nums, 0, fn(a, b) a + b))        // 55
+n := 3
+println(map(nums, fn(x) x * n)[1])              // 6  (capture)
+println(reduce(map(filter(nums, fn(x) x % 2 == 1), fn(x) x * x), 0, fn(a, b) a + b))  // 165

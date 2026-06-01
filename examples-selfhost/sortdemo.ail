@@ -1,0 +1,7 @@
+mu xs:[i64] := []
+xs = push(xs, 5); xs = push(xs, 2); xs = push(xs, 8); xs = push(xs, 1)
+ys := sort(xs)
+println(ys[0]); println(ys[3]); println(xs[0])   // 1 8 5 (xs unchanged)
+mu ss:[str] := []
+ss = push(ss, "pear"); ss = push(ss, "apple"); ss = push(ss, "kiwi")
+println(sort(ss)[0])                              // apple

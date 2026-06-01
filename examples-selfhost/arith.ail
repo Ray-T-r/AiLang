@@ -1,0 +1,5 @@
+println(1 + 2 * 3)
+println((1 + 2) * 3)
+println(100 - 4 * 5)
+println(2 * 3 + 4 * 5)
+println(20 / 4 - 1)

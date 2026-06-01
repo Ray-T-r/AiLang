@@ -1,0 +1,31 @@
+// std/tls.ail — TLS helpers built on the OpenSSL builtins.
+//
+// Pattern:
+//   ctx := tls_server_ctx("cert.pem", "key.pem")
+//   if ctx < 0 { ... handle error ... }
+//   fd := tcp_listen("0.0.0.0", 443)
+//   cli := tcp_accept(fd)
+//   ssl := tls_accept(ctx, cli)             // does the TLS handshake
+//   if ssl < 0 { sock_close(cli); ... }
+//   // use tls_send / tls_recv on `ssl` instead of sock_send / sock_recv
+//   tls_close(ssl)
+//   sock_close(cli)
+
+// tls_send_all(ssl, b) — keep calling tls_send until everything is out.
+fn tls_send_all(ssl:i64, b:bytes) -> i64 {
+  mu total := 0
+  mu remaining := b
+  lp i in 0..1000000 {
+    if len(remaining) == 0 rt total
+    n := tls_send(ssl, remaining)
+    if n < 0 rt -1
+    if n == 0 rt total
+    total = total + n
+    remaining = bytes_slice(remaining, n, len(remaining))
+  }
+  total
+}
+
+fn tls_send_str_all(ssl:i64, s:str) -> i64 {
+  tls_send_all(ssl, str_to_bytes(s))
+}

@@ -1,0 +1,20 @@
+mu env:{str:str} := {}
+env["name"] = "Ada"
+env["lang"] = "AiLang"
+println(env["name"])
+println(env["lang"])
+
+mu cnt:{str:i64} := {}
+cnt["a"] = 1
+cnt["b"] = 2
+cnt["a"] = cnt["a"] + 10
+println(cnt["a"])
+println(cnt["b"])
+if has(cnt, "a") {
+  println(1)
+}
+if has(cnt, "z") {
+  println(2)
+} el {
+  println(0)
+}

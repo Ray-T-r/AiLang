@@ -1,0 +1,32 @@
+// `bytes` — a binary buffer distinct from `str`, exercised end-to-end by the
+// self-hosted compiler (modeled on examples/bytes_demo.ail).
+
+// 1. str -> bytes -> str round-trip.
+s := "hello"
+b := str_to_bytes(s)
+println(len(b))               // 5
+println(bytes_at(b, 0))       // 104  ('h')
+println(bytes_at(b, 4))       // 111  ('o')
+println(bytes_to_str(b))      // hello
+
+// 2. Pretty-print: printable ASCII verbatim.
+println(b)                    // b"hello"
+
+// 3. Slicing.
+sl := bytes_slice(b, 1, 4)
+println(len(sl))              // 3
+println(bytes_to_str(sl))     // ell
+println(sl)                   // b"ell"
+
+// 4. Indexing via `b[i]`.
+println(b[1])                 // 101  ('e')
+
+// 5. File round-trip — write bytes, read bytes, verify.
+write_file_bytes("/tmp/ailang_selfhost_bytes.bin", b)
+got := read_file_bytes("/tmp/ailang_selfhost_bytes.bin")
+println(len(got))             // 5
+println(bytes_to_str(got))    // hello
+
+// 6. Empty bytes from a missing file.
+miss := read_file_bytes("/tmp/__definitely_not_a_real_file__.bin")
+println(len(miss))            // 0

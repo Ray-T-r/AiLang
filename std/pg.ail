@@ -1,0 +1,94 @@
+// std/pg.ail — convenience helpers over the libpq builtins.
+//
+// All builtins (`pg_connect`, `pg_exec`, `pg_value`, ...) are always in
+// scope. This module adds the common patterns:
+//   - `pg_must_connect` — connect-or-exit
+//   - `pg_one` — first cell of first row, "" if empty
+//   - `pg_first_col` — first column as [str]
+//   - `pg_print_table` — print a result set to stdout (debugging)
+//
+// `pg_value` and `pg_col_name` copy to the GC heap, so the strings stay
+// valid after `pg_clear(res)`.
+//
+// SECURITY: always use `pg_escape(conn, user_input)` before splicing
+// strings into SQL. Never concatenate raw user data into queries.
+
+// pg_must_connect(dsn) — connect, exit(1) with a clear error on failure.
+fn pg_must_connect(dsn:str) -> i64 {
+  c := pg_connect(dsn)
+  if pg_status(c) != 0 {
+    println("pg_connect failed: " + pg_error(c))
+    pg_close(c)
+    exit(1)
+  }
+  c
+}
+
+// pg_one(conn, sql) — first cell of first row as str. "" on no rows or error.
+fn pg_one(conn:i64, sql:str) -> str {
+  r := pg_exec(conn, sql)
+  if !pg_ok(r) {
+    pg_clear(r)
+    rt ""
+  }
+  if pg_nrows(r) == 0 {
+    pg_clear(r)
+    rt ""
+  }
+  v := pg_value(r, 0, 0)
+  pg_clear(r)
+  v
+}
+
+// pg_first_col(conn, sql) — first column of all rows as [str].
+// Returns an empty array on error or no rows.
+fn pg_first_col(conn:i64, sql:str) -> [str] {
+  r := pg_exec(conn, sql)
+  if !pg_ok(r) {
+    pg_clear(r)
+    rt slice([""], 1, 1)
+  }
+  n := pg_nrows(r)
+  mu out := [""]
+  mu i := 0
+  lp k in 0..1000000 {
+    if i >= n br
+    out = push(out, pg_value(r, i, 0))
+    i = i + 1
+  }
+  pg_clear(r)
+  slice(out, 1, len(out))
+}
+
+// pg_print_table(res) — pretty-print a result set for debugging.
+fn pg_print_table(res:i64) {
+  nc := pg_ncols(res)
+  nr := pg_nrows(res)
+  // Header row.
+  mu c := 0
+  lp k in 0..1000 {
+    if c >= nc br
+    if c > 0 print(" | ")
+    print(pg_col_name(res, c))
+    c = c + 1
+  }
+  println("")
+  // Data rows.
+  mu r := 0
+  lp k in 0..1000000 {
+    if r >= nr br
+    mu c2 := 0
+    lp k2 in 0..1000 {
+      if c2 >= nc br
+      if c2 > 0 print(" | ")
+      if pg_isnull(res, r, c2) {
+        print("NULL")
+      } el {
+        print(pg_value(res, r, c2))
+      }
+      c2 = c2 + 1
+    }
+    println("")
+    r = r + 1
+  }
+}

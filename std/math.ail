@@ -1,0 +1,55 @@
+// std/math.ail — seed math helpers wrapping libc + libm.
+//
+// `abs(x)` is now a polymorphic builtin (handles i64 and f64), so this
+// module no longer declares it. The libc `int abs(int)` is still on PATH
+// via the linker; if you need the i32-specific form, declare it locally:
+//     ex fn abs_i32(n:i32) -> i32 = "abs"
+// (Not provided here because i64 widens fine and the polymorphic name now
+// always means "absolute value of whatever you give me".)
+
+// integer
+ex fn rand() -> i32
+ex fn srand(seed:u32)
+
+// libm — driver always links `-lm`.
+ex fn sqrt(x:f64) -> f64
+ex fn pow(base:f64, exp:f64) -> f64
+ex fn sin(x:f64) -> f64
+ex fn cos(x:f64) -> f64
+ex fn tan(x:f64) -> f64
+ex fn log(x:f64) -> f64        // natural log (ln)
+ex fn log2(x:f64) -> f64
+ex fn log10(x:f64) -> f64
+ex fn exp(x:f64) -> f64
+ex fn floor(x:f64) -> f64
+ex fn ceil(x:f64) -> f64
+
+// Pure-AiLang helpers built on top.
+
+fn min(a, b) {
+  if a < b rt a
+  b
+}
+
+fn max(a, b) {
+  if a > b rt a
+  b
+}
+
+// Integer power, kept under the name `ipow` so it doesn't shadow libm `pow`.
+fn ipow(base, exp) {
+  mu r := 1
+  lp i in 0..exp {
+    r = r * base
+  }
+  r
+}
+
+fn gcd(a, b) {
+  lp b != 0 {
+    t := b
+    b = a % b
+    a = t
+  }
+  a
+}

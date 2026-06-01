@@ -1,0 +1,15 @@
+fn parse_pos(s:str) -> !i64 {
+  n := str_to_int(s)
+  if n <= 0 rt err_i64("not positive")
+  ok(n)
+}
+fn sum3(a:str, b:str, c:str) -> !i64 {
+  x := parse_pos(a)?
+  y := parse_pos(b)?
+  z := parse_pos(c)?
+  ok(x + y + z)
+}
+r := sum3("1", "2", "3")
+if is_ok(r) { println(unwrap(r)) } el { println(err_msg(r)) }   // 6
+r2 := sum3("4", "0", "5")
+if is_ok(r2) { println(unwrap(r2)) } el { println(err_msg(r2)) } // not positive

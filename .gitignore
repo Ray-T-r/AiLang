@@ -1,0 +1,31 @@
+# ---- Local-only (not shared via git) ----
+CLAUDE.md
+
+# ---- Editor / OS junk ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- Generic build output ----
+/target
+*.o
+*.ll
+*.bc
+
+# ---- compiler-generated artifacts (next to .ail sources) ----
+# Whitelist style: ignore everything in the dir, re-include the sources/fixtures
+# we track. New generated files (binaries, .c) get ignored automatically.
+
+# std/: only the .ail stdlib modules
+/std/*
+!/std/*.ail
+
+# examples-selfhost/: .ail sources + the expected/ output fixtures, not binaries
+/examples-selfhost/*
+!/examples-selfhost/*.ail
+!/examples-selfhost/expected/
+!/examples-selfhost/expected/*
+
+# selfhost/ bootstrap build outputs are covered by selfhost/.gitignore

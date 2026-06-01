@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selfhost:
+    name: bootstrap + verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The compiler emits C linked against Boehm GC, and its runtime prelude
+      # currently pulls in OpenSSL + libpq — install all three. No Rust needed.
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libgc-dev libssl-dev libpq-dev pkg-config
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bdw-gc openssl libpq pkg-config
+
+      - name: Bootstrap from the seed (no Rust) + verify
+        run: bash selfhost/verify.sh
