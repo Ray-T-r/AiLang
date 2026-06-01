@@ -1322,6 +1322,41 @@ fn is_enum_name(enums:[EnumDef], nm:str) -> bool {
   lp i < len(enums) { if enums[i].name == nm rt true   i += 1 }
   false
 }
+fn is_struct_name(structs:[StructDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(structs) { if structs[i].name == nm rt true   i += 1 }
+  false
+}
+fn is_prim_name(nm:str) -> bool {
+  nm == "i64" || nm == "i32" || nm == "u32" || nm == "f64" || nm == "bool" || nm == "str" || nm == "bytes" || nm == "i8" || nm == "i16" || nm == "u8" || nm == "u16" || nm == "u64" || nm == "f32" || nm == "void"
+}
+// Mark a bare unknown name (not a primitive, has no type prefix, and isn't a
+// declared struct/enum) as a C header type "@c:<name>" so it spells raw.
+fn mark_ctype(ty:str, structs:[StructDef], enums:[EnumDef]) -> str {
+  if len(ty) == 0 rt ty
+  c := ty[0]
+  // a type prefix ([ { * ! @ ( ) means it's already a known shape
+  if c == 91 || c == 123 || c == 42 || c == 33 || c == 64 || c == 40 rt ty
+  if is_prim_name(ty) rt ty
+  if is_struct_name(structs, ty) rt ty
+  if is_enum_name(enums, ty) rt ty
+  "@c:" + ty
+}
+// Post-pass: once all user structs/enums are known, mark each extern's return
+// type that names a C-header type (e.g. `ex fn div(...) -> div_t`). The return
+// flows into the call's value type, so the `r := div(...)` local spells `div_t`
+// (not `s_div_t`). Params left as-is (header-type params are rare).
+fn mark_extern_ctypes(externs:[Func], structs:[StructDef], enums:[EnumDef]) -> [Func] {
+  mu out:[Func] := []
+  mu i := 0
+  lp i < len(externs) {
+    f := externs[i]
+    nr := mark_ctype(f.ret, structs, enums)
+    out = push(out, Func(f.name, f.params, f.ptypes, nr, f.lib, f.tparams, f.body))
+    i += 1
+  }
+  out
+}
 // Post-pass (after ALL enums are known, so forward refs resolve): mark every
 // bare field typed as a different enum "@box:<Enum>" so two enums can reference
 // each other (mutual recursion). Self-refs are already "@self"; arrays `[Enum]`
@@ -1603,6 +1638,7 @@ fn parse_extern(p:*P) -> Func {
 // which widens i32/u32→int64_t for the wrapper. So `extern double sqrt(double);`
 // / `extern int rand(void);` match libc exactly (compatible with <stdlib.h> etc).
 fn cty_proto(ty:str) -> str {
+  if is_c_type_ann(ty) rt c_type_name(ty)        // header type → raw
   if ty == "i32" rt "int"
   if ty == "u32" rt "unsigned int"
   if ty == "f64" rt "double"
@@ -1713,7 +1749,14 @@ fn fkey(sname:str, fname:str) -> str { sname + "." + fname }
 fn arr_suffix(ety:str) -> str { if ety == "bool" { "i64" } el { ety } }   // bool reuses the i64 array/result runtime
 
 // The C type spelling for a bootstrap type name.
+// A C header type (from `cinc` + `ex fn`, e.g. `div_t`) is encoded "@c:<name>"
+// so it spells RAW in C (no `s_` prefix — it isn't an AiLang struct). Marked on
+// extern signatures by `mark_extern_ctypes` once all user structs/enums are known.
+fn is_c_type_ann(ty:str) -> bool { len(ty) >= 3 && ty[0] == 64 && ty[1] == 99 && ty[2] == 58 }  // "@c:"
+fn c_type_name(ty:str) -> str { substring(ty, 3, len(ty)) }
+
 fn cty(ty:str) -> str {
+  if is_c_type_ann(ty) rt c_type_name(ty)        // header type → raw, before the s_ fallback
   if ty == "i64" rt "int64_t"
   if ty == "bool" rt "int64_t"     // AiLang bool is a truthy int (true→1/false→0)
   if ty == "i32" rt "int64_t"      // libc-int extern returns widen to i64
@@ -4057,6 +4100,9 @@ fn compile_to_c(src:str) -> str {
   // Box bare cross-enum fields now that ALL enums are known (mutual recursion),
   // BEFORE the registry/codegen read their field types.
   enums = box_cross_enums(enums)
+  // Mark extern return types that name a C-header type (`-> div_t`) so they spell
+  // raw, now that all user structs/enums are known.
+  externs = mark_extern_ctypes(externs, structs, enums)
   // Enum registry: each variant → its enum + ";"-joined field types; plus a
   // per-enum "@order.<Enum>" → ";"-joined variant list (for tag indices).
   mu ei := 0
