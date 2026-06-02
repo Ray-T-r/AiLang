@@ -6909,6 +6909,10 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                             }
                         }
                     }
+                    if ((((int64_t)strlen(v_body)) == 0)) {
+                        printf("%s\n", scat(scat("error: cannot resolve import \"", v_imp), "\" — not found beside the source, in AILANG_STD, or next to ailc"));
+                        exit((int)(1));
+                    }
                     v_out = scat(scat(v_out, f_resolve_imports(v_body, v_bdir, v_seen)), "\n");
                 }
             } else {

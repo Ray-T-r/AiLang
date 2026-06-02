@@ -838,6 +838,14 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
               if len(ebody) > 0 { body = ebody; bdir = dirname(efull) }
             }
           }
+          if len(body) == 0 {
+            // Found nowhere — fail loudly instead of dropping the import (which
+            // left the importer's calls undefined and surfaced as a cryptic
+            // clang `f_<fn> undeclared`). main.ail's own imports always resolve
+            // via path (1), so this is dead code for the self-compile → fixpoint-safe.
+            println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
+            exit(1)
+          }
           out = out + resolve_imports(body, bdir, seen) + "\n"
         }
       } el {
