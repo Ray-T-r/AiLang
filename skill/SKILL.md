@@ -228,7 +228,8 @@ ex "z" fn zlibVersion() -> str           // "lib" → adds -lz
 | `str_to_int`/`int_to_str`/`str_to_float`/`float_to_str` | conversions |
 | `regex_match(pat,s)` / `regex_find(pat,s)` | POSIX extended |
 | `to_str(x)` | used by `${...}` interpolation |
-| socket/net builtins: `tcp_*`, `sock_*`, `tls_*`, `pg_*`, `now_ms`, `sha1`, ... | baked into codegen — no extern decls needed |
+| time / io: `now_ms()`, `mono_ms()`, `time_iso(ms)`, `sleep_ms(ms)`, `flush()`, `read_line()`, `get_env(name)` | **`time_iso` takes a ms timestamp** — current ISO time is `time_iso(now_ms())`, *not* `time_iso()`. `flush()` flushes stdout, needed for live output: `lp { print(time_iso(now_ms()) + "\r"); flush(); sleep_ms(1000) }` |
+| socket/net builtins: `tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1`, ... | baked into codegen — no extern decls needed; POSIX-only (need WSL on Windows) |
 
 ## Standard library (`im "std/<name>.ail"`)
 
