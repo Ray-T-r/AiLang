@@ -704,12 +704,15 @@ fn link_flags(cprog:str) -> str {
   out
 }
 
-// The directory prefix of a path (through the last '/'), or "" if none — used
-// to resolve `im` paths relative to the importing file.
+// The directory prefix of a path (through the last separator), or "" if none —
+// used to resolve `im` paths relative to the importing file. Splits on both '/'
+// and '\' so a Windows-style path (e.g. `ailc src\app.ail`, or a tab-completed
+// `.\sub\app.ail`) still resolves its sibling imports; otherwise dirname would
+// return "" and imports would be looked up against the cwd instead.
 fn dirname(path:str) -> str {
   mu last := 0 - 1
   mu i := 0
-  lp i < len(path) { if path[i] == 47 { last = i } i += 1 }   // '/'
+  lp i < len(path) { if path[i] == 47 || path[i] == 92 { last = i } i += 1 }   // '/' or '\' (Windows)
   if last < 0 rt ""
   substring(path, 0, last + 1)
 }

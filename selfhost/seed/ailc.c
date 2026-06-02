@@ -6686,7 +6686,7 @@ const char* f_dirname(const char* v_path) {
     v_last = (0 - 1);
     v_i = 0;
     while ((v_i < ((int64_t)strlen(v_path)))) {
-        if ((((int64_t)(unsigned char)(v_path)[v_i]) == 47)) {
+        if (((((int64_t)(unsigned char)(v_path)[v_i]) == 47) || (((int64_t)(unsigned char)(v_path)[v_i]) == 92))) {
             v_last = v_i;
         }
         v_i = (v_i + 1);

@@ -28,6 +28,10 @@ CLAUDE.md
 !/examples-selfhost/*.ail
 !/examples-selfhost/expected/
 !/examples-selfhost/expected/*
+# the imports sample's dependency lives in a subdir — re-include it too, or a
+# fresh clone can't compile imports.ail (verify.sh would fail on a clean checkout)
+!/examples-selfhost/lib/
+!/examples-selfhost/lib/*.ail
 
 # selfhost/ bootstrap build outputs are covered by selfhost/.gitignore
 
