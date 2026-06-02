@@ -65,7 +65,7 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~4,800 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **6,912 lines, byte-identical** |
+| strict fixpoint | `stage2.c == stage3.c` — **6,962 lines, byte-identical** |
 | sample programs | **32**, each output-verified against a frozen fixture |
 | standard library | 10 modules, all compiling |
 | Rust in the build | **none** |
@@ -121,9 +121,10 @@ ailc /tmp/hi.ail /tmp/hi && /tmp/hi          # → hello from ailang
 
 ### Windows
 
-AiLang's runtime is POSIX-only, so on Windows it runs inside **WSL2** (Ubuntu).
-The installer sets that up for you and adds `ailrun` / `ailexe` / `ailc`
-commands to your Windows `PATH`, so you never type `wsl` yourself.
+`ailc` runs **natively** on Windows and builds **self-contained `.exe`** files —
+no WSL, no reboot. (`ailc` emits C and compiles it with `clang`, so it needs the
+small MSYS2 **mingw64** toolchain — `clang` + Boehm GC — which the installer sets
+up for you.)
 
 **1. Run the installer in PowerShell:**
 
@@ -131,41 +132,29 @@ commands to your Windows `PATH`, so you never type `wsl` yourself.
 iwr -useb https://github.com/Ray-T-r/AiLang/releases/latest/download/install.ps1 | iex
 ```
 
-**2. First time only — if WSL isn't installed yet,** the script needs to
-install it (this part requires admin + a reboot):
+It installs the mingw64 toolchain (via `winget install MSYS2.MSYS2` if it's not
+already there), downloads `ailc.exe`, adds it + `mingw64\bin` to your `PATH`,
+installs an `ailrun` helper, and installs the AiLang skill for
+[Claude Code](https://claude.com/claude-code).
 
-  1. A **UAC prompt** appears → click **Yes**. An elevated window runs
-     `wsl --install -d Ubuntu`.
-  2. **Reboot** if Windows asks you to.
-  3. Launch **Ubuntu** once from the Start menu and create a Linux
-     **username + password** (remember the password — it's used for
-     installing dependencies).
-  4. **Re-run the same `iwr … | iex` line** (a normal PowerShell window is
-     fine now). It finishes installing AiLang inside WSL.
-
-  *(If WSL is already set up, step 1 installs everything in one go — skip
-  step 2.)*
-
-**3. Open a new terminal** (so `PATH` refreshes), then use AiLang like a
-native tool — from any cmd or PowerShell window:
+**2. Open a new terminal** (so `PATH` refreshes), then:
 
 ```
 echo 'println("hello")' > hi.ail
-ailrun hi.ail            # compile + run, output right here
-ailexe hi.ail hi.exe     # build a native, self-contained Windows .exe
-ailc   hi.ail prog       # Linux binary (run it with:  wsl ./prog)
+ailc   hi.ail hi        # build a native, self-contained hi.exe
+.\hi.exe                # → hello
+ailrun hi.ail           # or: compile + run in one step
 ```
 
 | command  | what you get | needs |
 |----------|--------------|-------|
-| `ailrun` | compile **and run**, output in your terminal | WSL only (installed above) |
-| `ailexe` | a **native `.exe`** — self-contained, runs with no WSL | WSL **+** MSYS2 mingw64 (`clang` + `gc`) |
-| `ailc`   | a Linux binary (run via `wsl ./prog`) | WSL only |
+| `ailc`   | a **native, self-contained `.exe`** (no WSL, no extra DLLs) | mingw64 `clang` + `gc` (installed above) |
+| `ailrun` | compile **and run** in one step, output in your terminal | same |
 
-`ailexe` compiles the generated C with mingw clang and links Boehm GC
-statically, producing a real native Windows executable (no DLLs, no WSL to
-run it) — it works for core AiLang programs. To enable it, install the
-toolchain once:
+The produced `.exe` depends only on Windows' own `KERNEL32` + `msvcrt` — copy it
+anywhere and it runs. `ailc` itself needs `clang` + Boehm GC on `PATH` to compile
+(that's the mingw64 toolchain the installer set up); if `clang` isn't installed
+yet:
 
 ```powershell
 winget install MSYS2.MSYS2
@@ -173,14 +162,11 @@ winget install MSYS2.MSYS2
 pacman -S --needed mingw-w64-x86_64-clang mingw-w64-x86_64-gc
 ```
 
-Programs that use the networking/regex stdlib (sockets, HTTP, TLS, Postgres,
-Redis, regex) stay POSIX-only for now — run those with `ailrun`.
-
-> **Why WSL?** AiLang's compiler runtime uses POSIX APIs (BSD sockets,
-> `fork()`, POSIX regex) with no native Windows equivalent, so the compiler
-> itself can't run natively on Windows yet. A native Winsock port may come
-> later; until then, WSL gives you the full language and `ailexe` covers the
-> "I want a `.exe`" case for ordinary programs.
+> **Networking & regex → WSL.** The compiler runs natively, but programs that use
+> the POSIX-only stdlib (sockets, HTTP, TLS, Postgres, Redis, regex) can't be
+> built into a native `.exe` yet — their runtime needs BSD sockets / `fork()` /
+> POSIX regex. Build and run those inside **WSL** (`bash install.sh` there gives
+> you the full language). Everything else is native.
 
 ## Build it — from nothing but C
 

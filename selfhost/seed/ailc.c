@@ -5,19 +5,29 @@
 #include <stdarg.h>
 #include <gc.h>
 #include <time.h>
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#endif
+#ifndef _WIN32
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#endif
+#ifndef _WIN32
 #include <regex.h>
+#endif
+#ifndef _WIN32
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/sha.h>
+#endif
+#ifndef _WIN32
 #include <libpq-fe.h>
+#endif
 static const char* scat(const char* a, const char* b){ size_t la=strlen(a), lb=strlen(b); char* r=(char*)GC_MALLOC(la+lb+1); memcpy(r,a,la); memcpy(r+la,b,lb); r[la+lb]=0; return r; }
 static const char* i2s(long long v){ char* r=(char*)GC_MALLOC(24); snprintf(r,24,"%lld",v); return r; }
 static const char* substr(const char* s, int64_t a, int64_t b){ int64_t n=(int64_t)strlen(s); if(a<0)a=0; if(b>n)b=n; if(b<a)b=a; int64_t L=b-a; char* r=(char*)GC_MALLOC(L+1); memcpy(r,s+a,L); r[L]=0; return r; }
@@ -59,7 +69,14 @@ static int64_t now_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME
 static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }
 static int64_t mono_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }
 static void sleep_ms(int64_t ms){ if(ms<=0) return; struct timespec ts; ts.tv_sec=(time_t)(ms/1000); ts.tv_nsec=(long)((ms%1000)*1000000); while(nanosleep(&ts,&ts)==-1){} }
-static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv; if(!gmtime_r(&sec,&tmv)) return ""; char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,"%Y-%m-%dT%H:%M:%SZ",&tmv); if(n==0){ buf[0]=0; } return buf; }
+static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv;
+#ifdef _WIN32
+ if(gmtime_s(&tmv,&sec)!=0) return "";
+#else
+ if(!gmtime_r(&sec,&tmv)) return "";
+#endif
+ char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,"%Y-%m-%dT%H:%M:%SZ",&tmv); if(n==0){ buf[0]=0; } return buf; }
+#ifndef _WIN32
 static int64_t tcp_listen(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; int yes=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)); struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(host[0]==0||strcmp(host,"0.0.0.0")==0){ addr.sin_addr.s_addr=htonl(INADDR_ANY); } else if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ close(fd); return -1; } if(bind(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } if(listen(fd,128)<0){ close(fd); return -1; } return (int64_t)fd; }
 static int64_t tcp_accept(int64_t fd){ struct sockaddr_in addr; socklen_t len=sizeof(addr); int client=accept((int)fd,(struct sockaddr*)&addr,&len); if(client<0) return -1; return (int64_t)client; }
 static int64_t tcp_connect(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ struct addrinfo hints; memset(&hints,0,sizeof(hints)); hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM; struct addrinfo* res=0; if(getaddrinfo(host,0,&hints,&res)!=0||!res){ close(fd); return -1; } addr.sin_addr=((struct sockaddr_in*)res->ai_addr)->sin_addr; freeaddrinfo(res); } if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } return (int64_t)fd; }
@@ -67,12 +84,18 @@ static int64_t sock_send(int64_t fd, ailang_bytes b){ if(fd<0) return -1; if(b.l
 static int64_t sock_send_str(int64_t fd, const char* s){ if(fd<0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; ssize_t n=send((int)fd,s,len,0); return (int64_t)n; }
 static ailang_bytes sock_recv(int64_t fd, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)""; if(fd<0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); ssize_t n=recv((int)fd,buf,(size_t)max,0); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }
 static int64_t sock_close(int64_t fd){ if(fd<0) return 0; return (int64_t)close((int)fd); }
+#endif
+#ifndef _WIN32
 static int64_t proc_fork(void){ pid_t p=fork(); return (int64_t)p; }
 static int64_t proc_getpid(void){ return (int64_t)getpid(); }
 static void proc_no_zombies(void){ struct sigaction sa; memset(&sa,0,sizeof(sa)); sa.sa_handler=SIG_IGN; sigemptyset(&sa.sa_mask); sa.sa_flags=SA_NOCLDWAIT; sigaction(SIGCHLD,&sa,0); }
 static int64_t proc_reap(void){ int64_t n=0; while(waitpid(-1,0,WNOHANG)>0) n++; return n; }
+#endif
+#ifndef _WIN32
 static int64_t regex_match(const char* pat, const char* text){ if(!pat||!text) return 0; regex_t re; if(regcomp(&re,pat,REG_EXTENDED|REG_NOSUB)!=0) return 0; int rc=regexec(&re,text,0,0,0); regfree(&re); return rc==0; }
 static const char* regex_find(const char* pat, const char* text){ if(!pat||!text) return ""; regex_t re; if(regcomp(&re,pat,REG_EXTENDED)!=0) return ""; regmatch_t m; int rc=regexec(&re,text,1,&m,0); regfree(&re); if(rc!=0||m.rm_so<0) return ""; size_t len=(size_t)(m.rm_eo-m.rm_so); char* o=(char*)GC_MALLOC(len+1); memcpy(o,text+m.rm_so,len); o[len]=0; return o; }
+#endif
+#ifndef _WIN32
 static int ailang_tls_init_done_=0;
 static void ailang_tls_init_(void){ if(ailang_tls_init_done_) return; SSL_library_init(); SSL_load_error_strings(); OpenSSL_add_ssl_algorithms(); ailang_tls_init_done_=1; }
 static int64_t tls_server_ctx(const char* cert, const char* key){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_new(TLS_server_method()); if(!ctx) return -1; if(!cert||SSL_CTX_use_certificate_file(ctx,cert,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } if(!key||SSL_CTX_use_PrivateKey_file(ctx,key,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } return (int64_t)(intptr_t)ctx; }
@@ -86,6 +109,8 @@ static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0;
 static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }
 static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return ""; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }
 static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:""), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }
+#endif
+#ifndef _WIN32
 static int64_t pg_connect(const char* conninfo){ PGconn* c=PQconnectdb(conninfo?conninfo:""); return (int64_t)(intptr_t)c; }
 static int64_t pg_status(int64_t conn){ if(conn==0) return -1; return (int64_t)PQstatus((PGconn*)(intptr_t)conn); }
 static const char* pg_error(int64_t conn){ if(conn==0) return "(null connection)"; const char* msg=PQerrorMessage((PGconn*)(intptr_t)conn); return msg?msg:""; }
@@ -101,6 +126,7 @@ static int64_t pg_isnull(int64_t res, int64_t row, int64_t col){ if(res==0) retu
 static const char* pg_col_name(int64_t res, int64_t col){ if(res==0) return ""; const char* nm=PQfname((PGresult*)(intptr_t)res,(int)col); if(!nm) return ""; size_t l=strlen(nm); char* o=(char*)GC_MALLOC(l+1); memcpy(o,nm,l+1); return o; }
 static int64_t pg_affected(int64_t res){ if(res==0) return 0; const char* s=PQcmdTuples((PGresult*)(intptr_t)res); if(!s||!*s) return 0; return (int64_t)atoll(s); }
 static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return "''"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return "''"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }
+#endif
 static int g_argc=0; static char** g_argv=0;
 
 typedef struct s_Token s_Token;
@@ -6299,19 +6325,19 @@ const char* f_compile_to_c(const char* v_src) {
         v_out = scat(v_out, "#include <time.h>\n");
     }
     if (v_needs_sock) {
-        v_out = scat(v_out, "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n");
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n");
     }
     if (v_needs_proc) {
-        v_out = scat(v_out, "#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n");
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n");
     }
     if (v_needs_regex) {
-        v_out = scat(v_out, "#include <regex.h>\n");
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <regex.h>\n#endif\n");
     }
     if (v_needs_tls) {
-        v_out = scat(v_out, "#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n");
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n");
     }
     if (v_needs_pg) {
-        v_out = scat(v_out, "#include <libpq-fe.h>\n");
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n");
     }
     v_ci = 0;
     while ((v_ci < arr_str_len(v_cincs))) {
@@ -6360,9 +6386,10 @@ const char* f_compile_to_c(const char* v_src) {
         v_out = scat(v_out, "static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }\n");
         v_out = scat(v_out, "static int64_t mono_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n");
         v_out = scat(v_out, "static void sleep_ms(int64_t ms){ if(ms<=0) return; struct timespec ts; ts.tv_sec=(time_t)(ms/1000); ts.tv_nsec=(long)((ms%1000)*1000000); while(nanosleep(&ts,&ts)==-1){} }\n");
-        v_out = scat(v_out, "static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv; if(!gmtime_r(&sec,&tmv)) return \"\"; char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,\"%Y-%m-%dT%H:%M:%SZ\",&tmv); if(n==0){ buf[0]=0; } return buf; }\n");
+        v_out = scat(v_out, "static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv;\n#ifdef _WIN32\n if(gmtime_s(&tmv,&sec)!=0) return \"\";\n#else\n if(!gmtime_r(&sec,&tmv)) return \"\";\n#endif\n char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,\"%Y-%m-%dT%H:%M:%SZ\",&tmv); if(n==0){ buf[0]=0; } return buf; }\n");
     }
     if (v_needs_sock) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
         v_out = scat(v_out, "static int64_t tcp_listen(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; int yes=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)); struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(host[0]==0||strcmp(host,\"0.0.0.0\")==0){ addr.sin_addr.s_addr=htonl(INADDR_ANY); } else if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ close(fd); return -1; } if(bind(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } if(listen(fd,128)<0){ close(fd); return -1; } return (int64_t)fd; }\n");
         v_out = scat(v_out, "static int64_t tcp_accept(int64_t fd){ struct sockaddr_in addr; socklen_t len=sizeof(addr); int client=accept((int)fd,(struct sockaddr*)&addr,&len); if(client<0) return -1; return (int64_t)client; }\n");
         v_out = scat(v_out, "static int64_t tcp_connect(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ struct addrinfo hints; memset(&hints,0,sizeof(hints)); hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM; struct addrinfo* res=0; if(getaddrinfo(host,0,&hints,&res)!=0||!res){ close(fd); return -1; } addr.sin_addr=((struct sockaddr_in*)res->ai_addr)->sin_addr; freeaddrinfo(res); } if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } return (int64_t)fd; }\n");
@@ -6370,18 +6397,24 @@ const char* f_compile_to_c(const char* v_src) {
         v_out = scat(v_out, "static int64_t sock_send_str(int64_t fd, const char* s){ if(fd<0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; ssize_t n=send((int)fd,s,len,0); return (int64_t)n; }\n");
         v_out = scat(v_out, "static ailang_bytes sock_recv(int64_t fd, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(fd<0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); ssize_t n=recv((int)fd,buf,(size_t)max,0); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n");
         v_out = scat(v_out, "static int64_t sock_close(int64_t fd){ if(fd<0) return 0; return (int64_t)close((int)fd); }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     if (v_needs_proc) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
         v_out = scat(v_out, "static int64_t proc_fork(void){ pid_t p=fork(); return (int64_t)p; }\n");
         v_out = scat(v_out, "static int64_t proc_getpid(void){ return (int64_t)getpid(); }\n");
         v_out = scat(v_out, "static void proc_no_zombies(void){ struct sigaction sa; memset(&sa,0,sizeof(sa)); sa.sa_handler=SIG_IGN; sigemptyset(&sa.sa_mask); sa.sa_flags=SA_NOCLDWAIT; sigaction(SIGCHLD,&sa,0); }\n");
         v_out = scat(v_out, "static int64_t proc_reap(void){ int64_t n=0; while(waitpid(-1,0,WNOHANG)>0) n++; return n; }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     if (v_needs_regex) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
         v_out = scat(v_out, "static int64_t regex_match(const char* pat, const char* text){ if(!pat||!text) return 0; regex_t re; if(regcomp(&re,pat,REG_EXTENDED|REG_NOSUB)!=0) return 0; int rc=regexec(&re,text,0,0,0); regfree(&re); return rc==0; }\n");
         v_out = scat(v_out, "static const char* regex_find(const char* pat, const char* text){ if(!pat||!text) return \"\"; regex_t re; if(regcomp(&re,pat,REG_EXTENDED)!=0) return \"\"; regmatch_t m; int rc=regexec(&re,text,1,&m,0); regfree(&re); if(rc!=0||m.rm_so<0) return \"\"; size_t len=(size_t)(m.rm_eo-m.rm_so); char* o=(char*)GC_MALLOC(len+1); memcpy(o,text+m.rm_so,len); o[len]=0; return o; }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     if (v_needs_tls) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
         v_out = scat(v_out, "static int ailang_tls_init_done_=0;\n");
         v_out = scat(v_out, "static void ailang_tls_init_(void){ if(ailang_tls_init_done_) return; SSL_library_init(); SSL_load_error_strings(); OpenSSL_add_ssl_algorithms(); ailang_tls_init_done_=1; }\n");
         v_out = scat(v_out, "static int64_t tls_server_ctx(const char* cert, const char* key){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_new(TLS_server_method()); if(!ctx) return -1; if(!cert||SSL_CTX_use_certificate_file(ctx,cert,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } if(!key||SSL_CTX_use_PrivateKey_file(ctx,key,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } return (int64_t)(intptr_t)ctx; }\n");
@@ -6395,8 +6428,10 @@ const char* f_compile_to_c(const char* v_src) {
         v_out = scat(v_out, "static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }\n");
         v_out = scat(v_out, "static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return \"\"; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }\n");
         v_out = scat(v_out, "static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:\"\"), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     if (v_needs_pg) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
         v_out = scat(v_out, "static int64_t pg_connect(const char* conninfo){ PGconn* c=PQconnectdb(conninfo?conninfo:\"\"); return (int64_t)(intptr_t)c; }\n");
         v_out = scat(v_out, "static int64_t pg_status(int64_t conn){ if(conn==0) return -1; return (int64_t)PQstatus((PGconn*)(intptr_t)conn); }\n");
         v_out = scat(v_out, "static const char* pg_error(int64_t conn){ if(conn==0) return \"(null connection)\"; const char* msg=PQerrorMessage((PGconn*)(intptr_t)conn); return msg?msg:\"\"; }\n");
@@ -6412,6 +6447,7 @@ const char* f_compile_to_c(const char* v_src) {
         v_out = scat(v_out, "static const char* pg_col_name(int64_t res, int64_t col){ if(res==0) return \"\"; const char* nm=PQfname((PGresult*)(intptr_t)res,(int)col); if(!nm) return \"\"; size_t l=strlen(nm); char* o=(char*)GC_MALLOC(l+1); memcpy(o,nm,l+1); return o; }\n");
         v_out = scat(v_out, "static int64_t pg_affected(int64_t res){ if(res==0) return 0; const char* s=PQcmdTuples((PGresult*)(intptr_t)res); if(!s||!*s) return 0; return (int64_t)atoll(s); }\n");
         v_out = scat(v_out, "static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return \"''\"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return \"''\"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(v_out, "static int g_argc=0; static char** g_argv=0;\n");
     if ((arr_Func_len((v_base).lams) > 0)) {
@@ -6838,6 +6874,8 @@ int main(int argc, char** argv){
     map_str_str v_seen;
     const char* v_cprog;
     const char* v_cpath;
+    int64_t v_win;
+    const char* v_outexe;
     const char* v_cmd;
     int64_t v_rc;
     v_av = ailang_args();
@@ -6891,22 +6929,34 @@ int main(int argc, char** argv){
     v_cprog = f_compile_to_c(v_src);
     v_cpath = scat(v_outbin, ".c");
     write_file_c(v_cpath, v_cprog);
-    v_cmd = scat(scat("clang -O2 ", v_cpath), " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)");
-    if ((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1("))) {
-        v_cmd = scat(v_cmd, " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)");
+    v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+    v_outexe = v_outbin;
+    v_cmd = "";
+    if (v_win) {
+        v_outexe = scat(v_outbin, ".exe");
+        v_cmd = scat(scat(scat(scat(scat(scat("clang -O2 -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -static -lgc -lm -o \""), v_outexe), "\"");
+    } else {
+        v_cmd = scat(scat("clang -O2 ", v_cpath), " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)");
+        if ((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1("))) {
+            v_cmd = scat(v_cmd, " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)");
+        }
+        if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
+            v_cmd = scat(v_cmd, " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)");
+        }
+        v_cmd = scat(scat(scat(v_cmd, f_link_flags(v_cprog)), " -lm -o "), v_outbin);
     }
-    if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
-        v_cmd = scat(v_cmd, " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)");
-    }
-    v_cmd = scat(scat(scat(v_cmd, f_link_flags(v_cprog)), " -lm -o "), v_outbin);
     v_rc = f_system(v_cmd);
     if ((v_rc != 0)) {
         printf("%s\n", "clang failed");
         exit((int)(1));
     }
     if ((v_keepc == (1 != 1))) {
-        f_system(scat("rm -f ", v_cpath));
+        if (v_win) {
+            f_system(scat(scat("del /f /q \"", v_cpath), "\""));
+        } else {
+            f_system(scat("rm -f ", v_cpath));
+        }
     }
-    printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outbin));
+    printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));
     return 0;
 }

@@ -1,203 +1,176 @@
-# AiLang installer (Windows / PowerShell) — via WSL2, with native-feeling shims.
+# AiLang installer (Windows / PowerShell) — NATIVE, no WSL.
 #
-# The AiLang compiler's runtime is POSIX-only (BSD sockets, fork(), POSIX
-# regex), so there is no native Windows build of the COMPILER. On Windows,
-# AiLang runs inside WSL2 — and this installer adds shims to your Windows PATH
-# so you never type `wsl` yourself:
-#
-#     ailrun foo.ail            # compile + run, output in your Windows terminal
-#     ailc   foo.ail out        # produce a binary (Linux ELF, run via WSL)
-#     ailexe foo.ail foo.exe    # build a NATIVE, self-contained Windows .exe *
-#
-#   * ailexe needs the MSYS2 mingw64 toolchain (clang + Boehm GC) on Windows;
-#     it compiles the generated C to a static native .exe. It works for core
-#     AiLang programs (the networking/regex stdlib is POSIX-only). ailrun needs
-#     nothing beyond WSL.
+# AiLang now has a native Windows compiler: `ailc.exe` runs directly on Windows
+# and produces self-contained native `.exe` files. No WSL, no reboot, no Ubuntu
+# user. (`ailc` emits C and builds it with clang, so it needs the small MSYS2
+# mingw64 toolchain — clang + Boehm GC — which this installer sets up for you.)
 #
 # What it does:
-#   1. ensures WSL2 + a Linux distro (installs it if missing),
-#   2. runs the Linux installer inside WSL (ailc + deps + skill, in WSL),
-#   3. installs ailc / ailrun / ailexe shims on the Windows PATH,
-#   4. drops the AiLang skill on the Windows side too.
+#   1. ensures the mingw64 C toolchain (clang + Boehm GC) `ailc` compiles with,
+#      installing MSYS2 via winget if it's missing,
+#   2. downloads the native ailc.exe to %LOCALAPPDATA%\Programs\ailc,
+#   3. adds that + mingw64\bin to your PATH and installs an `ailrun` helper,
+#   4. installs the AiLang skill for Claude Code,
+#   5. compiles + runs a hello program to prove it works.
 #
 # One-liner:
 #   iwr -useb https://github.com/Ray-T-r/AiLang/releases/latest/download/install.ps1 | iex
 #
-# Flags:  -NoSkill   skip installing the Claude Code skill on the Windows side
+# Flags / params:
+#   -NoSkill          skip installing the Claude Code skill
+#   -NoToolchain      don't check/install MSYS2 (you provide clang + gc yourself)
+#   -ExeSource <p>    install ailc.exe from a local path or custom URL instead of
+#                     the GitHub release (offline / self-built installs, CI)
+#
+# Note: programs using the networking/regex stdlib (sockets/HTTP/TLS/Postgres/
+# Redis/regex) are POSIX-only and won't build natively — run those under WSL.
+# Re-run any time; every step is idempotent.
 
 [CmdletBinding()]
-param([switch]$NoSkill)
+param([switch]$NoSkill, [switch]$NoToolchain, [string]$ExeSource)
 $ErrorActionPreference = 'Stop'
 
 $Repo      = 'Ray-T-r/AiLang'
 $BaseUrl   = "https://github.com/$Repo/releases/latest/download"
+$ExeAsset  = 'ailc-windows-x86_64.exe'
 $SkillDir  = Join-Path $env:USERPROFILE '.claude\skills\ailang'
 $SkillPath = Join-Path $SkillDir 'SKILL.md'
-$ShimDir   = Join-Path $env:LOCALAPPDATA 'Programs\ailc'
+$BinDir    = Join-Path $env:LOCALAPPDATA 'Programs\ailc'
+$ExePath   = Join-Path $BinDir 'ailc.exe'
+$Msys2Root = if ($env:MSYS2_ROOT) { $env:MSYS2_ROOT } else { 'C:\msys64' }
+$Mingw     = Join-Path $Msys2Root 'mingw64'
+$MingwBin  = Join-Path $Mingw 'bin'
 
 function Log  ($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function OK   ($m) { Write-Host "   ok $m" -ForegroundColor Green }
 function Warn ($m) { Write-Host "   !! $m" -ForegroundColor Yellow }
 function Die  ($m) { Write-Host "ERROR $m" -ForegroundColor Red; exit 1 }
-function Test-Admin {
-    try {
-        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-        (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
-    } catch { $false }
-}
 
-Log 'AiLang on Windows runs inside WSL2, fronted by native ailc/ailrun/ailexe shims.'
+Log 'Installing native AiLang for Windows (ailc.exe — no WSL).'
 
-# -------- 1. is WSL usable (installed + a distro with bash)? --------
-$wslReady = $false
-if (Get-Command wsl -ErrorAction SilentlyContinue) {
-    try { if ((wsl -e bash -c "echo __ailang_wsl_ok__" 2>$null) -match '__ailang_wsl_ok__') { $wslReady = $true } } catch { }
-}
-if (-not $wslReady) {
-    Warn 'WSL2 with a Linux distro is not installed yet.'
-    # `wsl --install` enables a Windows feature → requires administrator rights.
-    if (Test-Admin) {
-        Log 'Installing WSL2 + Ubuntu: wsl --install -d Ubuntu'
-        try { wsl --install -d Ubuntu } catch { Warn "wsl --install failed: $_" }
-    } else {
-        Warn 'Installing WSL needs administrator rights — opening an elevated window.'
-        Log  'Approve the UAC prompt; it will run: wsl --install -d Ubuntu'
-        try {
-            Start-Process -FilePath 'powershell' -Verb RunAs -ArgumentList @(
-                '-NoExit','-NoProfile','-Command',
-                'Write-Host "Installing WSL2 + Ubuntu..." -ForegroundColor Cyan; wsl --install -d Ubuntu'
-            ) | Out-Null
-            OK 'elevated WSL install launched in a separate window'
-        } catch {
-            Warn 'auto-elevation was declined/failed. Open PowerShell as Administrator and run:'
-            Warn '    wsl --install -d Ubuntu'
+# -------- 1. mingw64 toolchain (clang + Boehm GC) that ailc compiles with ------
+$haveClang = Test-Path (Join-Path $MingwBin 'clang.exe')
+$haveGc    = (Test-Path (Join-Path $Mingw 'include\gc.h')) -and `
+             ((Test-Path (Join-Path $Mingw 'lib\libgc.a')) -or (Test-Path (Join-Path $Mingw 'lib\libgc.dll.a')))
+
+if ($NoToolchain) {
+    Log 'Skipping toolchain check (-NoToolchain). Ensure clang + Boehm GC are available.'
+} elseif ($haveClang -and $haveGc) {
+    OK "mingw64 toolchain present ($MingwBin)"
+} else {
+    Log 'Setting up the mingw64 toolchain (clang + Boehm GC) via MSYS2'
+    $bash = Join-Path $Msys2Root 'usr\bin\bash.exe'
+    if (-not (Test-Path $bash)) {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Log 'Installing MSYS2 (winget install MSYS2.MSYS2)'
+            winget install -e --id MSYS2.MSYS2 --accept-source-agreements --accept-package-agreements
+        } else {
+            Die "MSYS2 not found and winget is unavailable. Install MSYS2 from https://www.msys2.org, then re-run."
         }
     }
-    Write-Host @"
-
-WSL is installing (in the elevated window if one opened). After it finishes:
-  1. Reboot if Windows asks you to.
-  2. Launch "Ubuntu" once from the Start menu; create your Linux username/password.
-  3. Re-run this installer (a normal terminal is fine for the rest):
-       iwr -useb $BaseUrl/install.ps1 | iex
-
-"@ -ForegroundColor Yellow
-    exit 0
+    if (-not (Test-Path $bash)) { Die "MSYS2 bash not found at $bash after install. Install MSYS2 manually, then re-run." }
+    Log 'Installing mingw-w64-x86_64-clang + mingw-w64-x86_64-gc (pacman)'
+    & $bash -lc 'pacman -Sy --noconfirm; pacman -S --needed --noconfirm mingw-w64-x86_64-clang mingw-w64-x86_64-gc'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $MingwBin 'clang.exe'))) {
+        Warn 'pacman did not complete (mirror/network?). Open "MSYS2 MINGW64" and run:'
+        Warn '    pacman -S --needed mingw-w64-x86_64-clang mingw-w64-x86_64-gc'
+        Warn '  (in mainland China, set a fast mirror first:'
+        Warn "     echo 'Server = https://mirrors.tuna.tsinghua.edu.cn/msys2/mingw/x86_64' | Out-File -Encoding ascii $Msys2Root\etc\pacman.d\mirrorlist.mingw64 )"
+        Die  'toolchain incomplete — install clang + gc as above, then re-run.'
+    }
+    OK 'mingw64 toolchain installed'
 }
-OK 'WSL is ready'
 
-# -------- 2. run the Linux installer inside WSL --------
-Log 'Installing ailc inside WSL (native deps + the skill, in WSL)'
-wsl -e bash -lc "sudo -v && curl -fsSL $BaseUrl/install.sh | bash"
-if ($LASTEXITCODE -ne 0) { Warn "the in-WSL install returned exit code $LASTEXITCODE — check the output above." } else { OK 'ailc installed inside WSL' }
-
-# -------- 3. native-feeling shims on the Windows PATH --------
-Log 'Installing ailc / ailrun / ailexe shims on the Windows PATH'
-$wslHome = (wsl -e bash -lc 'echo $HOME').Trim()
-if (-not $wslHome) { $wslHome = '/root' }
-
-# 3a. WSL forwarders (cwd + path translation, then run ailc).
-$winrun = @"
-#!/usr/bin/env bash
-export PATH="`$HOME/.local/bin:`$PATH"
-cwd="`$1"; shift
-cd "`$(wslpath -u "`$cwd" 2>/dev/null)" 2>/dev/null || true
-args=()
-for a in "`$@"; do case "`$a" in [A-Za-z]:\\*|*\\*) args+=("`$(wslpath -u "`$a")");; *) args+=("`$a");; esac; done
-exec ailc "`${args[@]}"
-"@
-$ailrunSh = @"
-#!/usr/bin/env bash
-export PATH="`$HOME/.local/bin:`$PATH"
-cwd="`$1"; shift
-cd "`$(wslpath -u "`$cwd" 2>/dev/null)" 2>/dev/null || true
-[ `$# -ge 1 ] || { echo "usage: ailrun <file.ail> [args...]" >&2; exit 2; }
-src="`$1"; shift
-case "`$src" in [A-Za-z]:\\*|*\\*) src="`$(wslpath -u "`$src")";; esac
-out="`$(mktemp)"
-if ! ailc "`$src" "`$out" >/tmp/ailrun.err 2>&1; then cat /tmp/ailrun.err >&2; exit 1; fi
-"`$out" "`$@"
-"@
-function Push-ToWsl([string]$content, [string]$dest) {
-    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($content -replace "`r`n","`n")))
-    wsl -e bash -lc "echo $b64 | base64 -d > '$dest' && chmod +x '$dest'"
-}
-Push-ToWsl $winrun   "$wslHome/.local/bin/ailc-winrun"
-Push-ToWsl $ailrunSh "$wslHome/.local/bin/ailrun-win"
-
-# 3b. ailexe helper (Windows side): AiLang -> C (in WSL) -> native static .exe (mingw clang).
-$ailexeImpl = @'
-param([string]$WinCwd, [string]$Src, [string]$OutExe)
-$ErrorActionPreference = 'Stop'
-function To-WslPath([string]$p){ $d=$p.Substring(0,1).ToLower(); $r=$p.Substring(2) -replace '\\','/'; "/mnt/$d$r" }
-function Die($m){ Write-Host "ailexe: $m" -ForegroundColor Red; exit 1 }
-if (-not $Src) { Write-Host "usage: ailexe <file.ail> [out.exe]"; exit 2 }
-if (-not [IO.Path]::IsPathRooted($Src)) { $Src = Join-Path $WinCwd $Src }
-if (-not (Test-Path $Src)) { Die "not found: $Src" }
-$srcFull = (Resolve-Path $Src).Path
-$dir = Split-Path $srcFull
-$stem = [IO.Path]::GetFileNameWithoutExtension($srcFull)
-if (-not $OutExe) { $OutExe = Join-Path $dir "$stem.exe" }
-elseif (-not [IO.Path]::IsPathRooted($OutExe)) { $OutExe = Join-Path $WinCwd $OutExe }
-if (-not $OutExe.ToLower().EndsWith('.exe')) { $OutExe = "$OutExe.exe" }
-$cbase = Join-Path $dir "$($stem)__ailexe"; $cfile = "$cbase.c"
-$mingw = if ($env:MSYS2_ROOT) { Join-Path $env:MSYS2_ROOT 'mingw64' } else { 'C:\msys64\mingw64' }
-$clang = Join-Path $mingw 'bin\clang.exe'
-if (-not (Test-Path $clang)) { Die "native .exe needs the MSYS2 mingw64 toolchain (clang + Boehm GC).`n  Install:  winget install MSYS2.MSYS2`n  Then in the MSYS2 shell:  pacman -S --needed mingw-w64-x86_64-clang mingw-w64-x86_64-gc`n  (ailrun works without this.)" }
-$srcW = To-WslPath $srcFull; $cbaseW = To-WslPath $cbase
-wsl -e bash -lc "export PATH=`$HOME/.local/bin:`$PATH; ailc --keep-c '$srcW' '$cbaseW' >/tmp/ailexe.err 2>&1" | Out-Null
-if (-not (Test-Path $cfile)) { Die ("codegen failed`n" + (wsl -e bash -lc "cat /tmp/ailexe.err 2>/dev/null")) }
-& $clang $cfile -o $OutExe -DGC_NOT_DLL -static "-I$mingw\include" "-L$mingw\lib" -lgc -O2 2>$null
-$rc = $LASTEXITCODE
-Remove-Item -Force $cfile, $cbase -ErrorAction SilentlyContinue
-if ($rc -ne 0) { Die "C compile failed. Programs using the networking/regex stdlib (sockets/http/tls/pg/redis/regex) can't be native .exe yet -- run them with 'ailrun' instead." }
-Write-Host "built $OutExe" -ForegroundColor Green
-'@
-
-# 3c. Windows .cmd shims.
-New-Item -ItemType Directory -Force -Path $ShimDir | Out-Null
-[IO.File]::WriteAllText((Join-Path $ShimDir 'ailc.cmd'),    "@echo off`r`nwsl -e $wslHome/.local/bin/ailc-winrun `"%CD%`" %*`r`n")
-[IO.File]::WriteAllText((Join-Path $ShimDir 'ailrun.cmd'),  "@echo off`r`nwsl -e $wslHome/.local/bin/ailrun-win `"%CD%`" %*`r`n")
-[IO.File]::WriteAllText((Join-Path $ShimDir 'ailexe-impl.ps1'), $ailexeImpl)
-[IO.File]::WriteAllText((Join-Path $ShimDir 'ailexe.cmd'),  "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0ailexe-impl.ps1`" `"%CD%`" %*`r`n")
-OK "shims -> $ShimDir (ailc, ailrun, ailexe)"
-
-# 3d. PATH.
-$up = [Environment]::GetEnvironmentVariable('Path','User'); if (-not $up) { $up = '' }
-if (($up -split ';') -notcontains $ShimDir) {
-    [Environment]::SetEnvironmentVariable('Path', ($up.TrimEnd(';') + ';' + $ShimDir), 'User')
-    OK "added $ShimDir to user PATH"
-    Warn 'open a NEW terminal for PATH changes to take effect.'
-} else { OK 'shim dir already on PATH' }
-
-# 3e. ailexe toolchain check (optional feature).
-$mingwClang = if ($env:MSYS2_ROOT) { Join-Path $env:MSYS2_ROOT 'mingw64\bin\clang.exe' } else { 'C:\msys64\mingw64\bin\clang.exe' }
-if (Test-Path $mingwClang) {
-    OK 'ailexe ready (MSYS2 mingw64 clang found)'
+# -------- 2. download (or copy) the native ailc.exe ---------------------------
+New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+if ($ExeSource) {
+    if (Test-Path $ExeSource) {
+        Log "Installing ailc.exe from local source: $ExeSource"
+        Copy-Item -Force -LiteralPath $ExeSource -Destination $ExePath
+    } else {
+        Log "Downloading ailc.exe from $ExeSource"
+        Invoke-WebRequest -Uri $ExeSource -OutFile $ExePath -UseBasicParsing
+    }
 } else {
-    Warn 'ailexe (native .exe) needs MSYS2 mingw64 clang + gc:'
-    Warn '    winget install MSYS2.MSYS2'
-    Warn '    then in the MSYS2 shell:  pacman -S --needed mingw-w64-x86_64-clang mingw-w64-x86_64-gc'
-    Warn '  (ailc / ailrun work without it.)'
+    Log "Downloading $ExeAsset"
+    try { Invoke-WebRequest -Uri "$BaseUrl/$ExeAsset" -OutFile $ExePath -UseBasicParsing }
+    catch { Die "could not download $BaseUrl/$ExeAsset ($_). Has the Windows binary been published to the release yet?" }
+}
+if (-not (Test-Path $ExePath) -or (Get-Item $ExePath).Length -lt 1000) { Die "ailc.exe is missing or too small after install." }
+OK "ailc.exe -> $ExePath"
+
+# Remove stale shims from the old WSL-based installer (ailc.exe now replaces them).
+foreach ($old in 'ailc.cmd','ailexe.cmd','ailexe-impl.ps1') {
+    $p = Join-Path $BinDir $old
+    if (Test-Path $p) { Remove-Item -Force $p; OK "removed stale $old (superseded by native ailc.exe)" }
 }
 
-# -------- 4. Windows-side skill --------
+# -------- 3. `ailrun` convenience (compile + run in one step) -----------------
+$ailrunImpl = @'
+# ailrun — compile a .ail with ailc, run the resulting .exe, then clean it up.
+param([Parameter(Mandatory=$true)][string]$Src,
+      [Parameter(ValueFromRemainingArguments=$true)]$Rest)
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $env:TEMP ('ailrun_' + [IO.Path]::GetRandomFileName().Replace('.',''))
+& ailc $Src $out
+if ($LASTEXITCODE -ne 0) { exit 1 }
+$exe = "$out.exe"
+try { & $exe @Rest; $rc = $LASTEXITCODE } finally { Remove-Item -Force $exe -ErrorAction SilentlyContinue }
+exit $rc
+'@
+[IO.File]::WriteAllText((Join-Path $BinDir 'ailrun-impl.ps1'), $ailrunImpl)
+[IO.File]::WriteAllText((Join-Path $BinDir 'ailrun.cmd'),
+    "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0ailrun-impl.ps1`" %*`r`n")
+OK 'ailrun helper installed (compile + run)'
+
+# -------- 4. PATH: ailc dir + mingw64\bin (ailc shells out to clang) ----------
+$up = [Environment]::GetEnvironmentVariable('Path','User'); if (-not $up) { $up = '' }
+$parts = $up -split ';'
+$added = @()
+foreach ($d in @($BinDir, $MingwBin)) {
+    if ($parts -notcontains $d) { $up = $up.TrimEnd(';') + ';' + $d; $added += $d }
+}
+if ($added.Count) {
+    [Environment]::SetEnvironmentVariable('Path', $up, 'User')
+    foreach ($d in $added) { OK "added to PATH: $d" }
+    Warn 'open a NEW terminal for the PATH change to take effect.'
+} else { OK 'PATH already has the ailc + mingw64 dirs' }
+
+# -------- 5. the Claude Code skill -------------------------------------------
 if (-not $NoSkill) {
-    Log 'Installing the AiLang skill on the Windows side (for Windows-native Claude Code)'
+    Log 'Installing the AiLang skill for Claude Code'
     New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
     try { Invoke-WebRequest -Uri "$BaseUrl/SKILL.md" -OutFile $SkillPath -UseBasicParsing; OK "skill -> $SkillPath" }
-    catch { Warn "could not download SKILL.md for the Windows side: $_" }
+    catch { Warn "could not download SKILL.md (ailc itself is installed fine): $_" }
 }
+
+# -------- 6. verify: compile + run a hello program ---------------------------
+Log 'Verifying: compiling and running a hello program'
+$env:Path = "$BinDir;$MingwBin;$env:Path"   # this process only; user PATH already set above
+$tmp = Join-Path $env:TEMP ('ailhello_' + [IO.Path]::GetRandomFileName().Replace('.',''))
+$ail = "$tmp.ail"
+[IO.File]::WriteAllText($ail, "println(`"hello from native ailc on windows`")`n", (New-Object Text.UTF8Encoding($false)))
+$exitOk = $false
+try {
+    & $ExePath $ail $tmp | Out-Null
+    if ((Test-Path "$tmp.exe")) {
+        $out = (& "$tmp.exe" | Out-String).Trim()
+        if ($out -match 'hello from native ailc on windows') { OK "ran: $out"; $exitOk = $true }
+        else { Warn "compiled, but unexpected output: $out" }
+    } else { Warn 'compile produced no .exe — is clang on PATH? (open a new terminal and retry)' }
+} catch { Warn "verification step failed: $_" }
+finally { Remove-Item -Force $ail, "$tmp.exe" -ErrorAction SilentlyContinue }
 
 Write-Host @"
 
 Done. Open a NEW terminal (so PATH refreshes), then:
 
     echo 'println("hello")' > hi.ail
-    ailrun hi.ail              # compile + run, output right here (needs only WSL)
-    ailexe hi.ail hi.exe       # build a native, self-contained Windows .exe
-    ailc   hi.ail prog         # Linux binary (run with: wsl ./prog)
+    ailc   hi.ail hi        # build a native, self-contained Windows hi.exe
+    .\hi.exe                # run it
+    ailrun hi.ail           # or: compile + run in one step
 
-ailrun/ailc forward into WSL transparently. ailexe additionally needs the MSYS2
-mingw64 toolchain (clang + gc) and works for core AiLang programs.
+ailc produces a standalone .exe (no WSL, no DLLs beyond Windows' own). Programs
+that use the networking/regex stdlib (sockets/HTTP/TLS/Postgres/Redis/regex) are
+POSIX-only — build and run those under WSL.
 "@ -ForegroundColor Green

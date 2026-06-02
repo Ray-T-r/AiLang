@@ -79,14 +79,27 @@ cprog := compile_to_c(src)
 cpath := outbin + ".c"
 write_file(cpath, cprog)
 
-// GC flags via pkg-config (mirrors the driver's bdw-gc discovery); fallback -lgc.
-mu cmd := "clang -O2 " + cpath + " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
-// OpenSSL / libpq when the emitted C references them (mirrors the driver's symbol
-// scan + env/pkg-config/brew discovery; libpq is keg-only so pkg-config misses it
-// → brew fallback).
-if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") { cmd = cmd + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
-if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { cmd = cmd + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
-cmd = cmd + link_flags(cprog) + " -lm -o " + outbin
+// The clang line is host-specific. Native Windows runs it through cmd.exe (no
+// $(...) / backticks / `rm`), can't link the POSIX-only stdlib (sockets/regex/
+// TLS/pg are #ifndef _WIN32'd out of the prelude), and wants a self-contained
+// .exe — so we statically link Boehm GC (-DGC_NOT_DLL -static). POSIX hosts keep
+// pkg-config/brew discovery plus the OpenSSL/libpq sections.
+win := get_env("OS") == "Windows_NT"
+mu outexe := outbin
+mu cmd := ""
+if win {
+  outexe = outbin + ".exe"
+  cmd = "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outexe + "\""
+} el {
+  // GC flags via pkg-config (mirrors the driver's bdw-gc discovery); fallback -lgc.
+  cmd = "clang -O2 " + cpath + " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
+  // OpenSSL / libpq when the emitted C references them (mirrors the driver's symbol
+  // scan + env/pkg-config/brew discovery; libpq is keg-only so pkg-config misses it
+  // → brew fallback).
+  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") { cmd = cmd + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
+  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { cmd = cmd + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+  cmd = cmd + link_flags(cprog) + " -lm -o " + outbin
+}
 rc := system(cmd)
 if rc != 0 {
   println("clang failed")
@@ -94,5 +107,7 @@ if rc != 0 {
 }
 // The generated C is a build intermediate — delete it unless `--keep-c`. On a
 // clang failure we already exited above, leaving it for inspection.
-if keepc == false { system("rm -f " + cpath) }
-println("compiled " + input + " -> " + outbin)
+if keepc == false {
+  if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
+}
+println("compiled " + input + " -> " + outexe)

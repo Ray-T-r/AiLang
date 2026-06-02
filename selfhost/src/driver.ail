@@ -405,11 +405,11 @@ fn compile_to_c(src:str) -> str {
   needs_pg := has_sub(src, "pg_")
   out = out + "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n"
   if needs_time { out = out + "#include <time.h>\n" }
-  if needs_sock { out = out + "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n" }
-  if needs_proc { out = out + "#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n" }
-  if needs_regex { out = out + "#include <regex.h>\n" }
-  if needs_tls { out = out + "#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n" }
-  if needs_pg { out = out + "#include <libpq-fe.h>\n" }
+  if needs_sock { out = out + "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n" }
+  if needs_proc { out = out + "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n" }
+  if needs_regex { out = out + "#ifndef _WIN32\n#include <regex.h>\n#endif\n" }
+  if needs_tls { out = out + "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n" }
+  if needs_pg { out = out + "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n" }
   mu ci := 0
   lp ci < len(cincs) { out = out + "#include \"" + cincs[ci] + "\"\n"; ci += 1 }
   out = out + "static const char* scat(const char* a, const char* b){ size_t la=strlen(a), lb=strlen(b); char* r=(char*)GC_MALLOC(la+lb+1); memcpy(r,a,la); memcpy(r+la,b,lb); r[la+lb]=0; return r; }\n"
@@ -461,9 +461,10 @@ fn compile_to_c(src:str) -> str {
     out = out + "static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }\n"
     out = out + "static int64_t mono_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n"
     out = out + "static void sleep_ms(int64_t ms){ if(ms<=0) return; struct timespec ts; ts.tv_sec=(time_t)(ms/1000); ts.tv_nsec=(long)((ms%1000)*1000000); while(nanosleep(&ts,&ts)==-1){} }\n"
-    out = out + "static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv; if(!gmtime_r(&sec,&tmv)) return \"\"; char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,\"%Y-%m-%dT%H:%M:%SZ\",&tmv); if(n==0){ buf[0]=0; } return buf; }\n"
+    out = out + "static const char* time_iso(int64_t ms){ time_t sec=(time_t)(ms/1000); struct tm tmv;\n#ifdef _WIN32\n if(gmtime_s(&tmv,&sec)!=0) return \"\";\n#else\n if(!gmtime_r(&sec,&tmv)) return \"\";\n#endif\n char* buf=(char*)GC_MALLOC(32); size_t n=strftime(buf,32,\"%Y-%m-%dT%H:%M:%SZ\",&tmv); if(n==0){ buf[0]=0; } return buf; }\n"
   }
   if needs_sock {
+    out = out + "#ifndef _WIN32\n"
     out = out + "static int64_t tcp_listen(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; int yes=1; setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)); struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(host[0]==0||strcmp(host,\"0.0.0.0\")==0){ addr.sin_addr.s_addr=htonl(INADDR_ANY); } else if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ close(fd); return -1; } if(bind(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } if(listen(fd,128)<0){ close(fd); return -1; } return (int64_t)fd; }\n"
     out = out + "static int64_t tcp_accept(int64_t fd){ struct sockaddr_in addr; socklen_t len=sizeof(addr); int client=accept((int)fd,(struct sockaddr*)&addr,&len); if(client<0) return -1; return (int64_t)client; }\n"
     out = out + "static int64_t tcp_connect(const char* host, int64_t port){ if(!host||port<=0||port>65535) return -1; int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return -1; struct sockaddr_in addr; memset(&addr,0,sizeof(addr)); addr.sin_family=AF_INET; addr.sin_port=htons((uint16_t)port); if(inet_pton(AF_INET,host,&addr.sin_addr)!=1){ struct addrinfo hints; memset(&hints,0,sizeof(hints)); hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM; struct addrinfo* res=0; if(getaddrinfo(host,0,&hints,&res)!=0||!res){ close(fd); return -1; } addr.sin_addr=((struct sockaddr_in*)res->ai_addr)->sin_addr; freeaddrinfo(res); } if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))<0){ close(fd); return -1; } return (int64_t)fd; }\n"
@@ -471,19 +472,25 @@ fn compile_to_c(src:str) -> str {
     out = out + "static int64_t sock_send_str(int64_t fd, const char* s){ if(fd<0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; ssize_t n=send((int)fd,s,len,0); return (int64_t)n; }\n"
     out = out + "static ailang_bytes sock_recv(int64_t fd, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(fd<0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); ssize_t n=recv((int)fd,buf,(size_t)max,0); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n"
     out = out + "static int64_t sock_close(int64_t fd){ if(fd<0) return 0; return (int64_t)close((int)fd); }\n"
+    out = out + "#endif\n"
   }
   if needs_proc {
+    out = out + "#ifndef _WIN32\n"
     out = out + "static int64_t proc_fork(void){ pid_t p=fork(); return (int64_t)p; }\n"
     out = out + "static int64_t proc_getpid(void){ return (int64_t)getpid(); }\n"
     out = out + "static void proc_no_zombies(void){ struct sigaction sa; memset(&sa,0,sizeof(sa)); sa.sa_handler=SIG_IGN; sigemptyset(&sa.sa_mask); sa.sa_flags=SA_NOCLDWAIT; sigaction(SIGCHLD,&sa,0); }\n"
     out = out + "static int64_t proc_reap(void){ int64_t n=0; while(waitpid(-1,0,WNOHANG)>0) n++; return n; }\n"
+    out = out + "#endif\n"
   }
   if needs_regex {
+    out = out + "#ifndef _WIN32\n"
     out = out + "static int64_t regex_match(const char* pat, const char* text){ if(!pat||!text) return 0; regex_t re; if(regcomp(&re,pat,REG_EXTENDED|REG_NOSUB)!=0) return 0; int rc=regexec(&re,text,0,0,0); regfree(&re); return rc==0; }\n"
     out = out + "static const char* regex_find(const char* pat, const char* text){ if(!pat||!text) return \"\"; regex_t re; if(regcomp(&re,pat,REG_EXTENDED)!=0) return \"\"; regmatch_t m; int rc=regexec(&re,text,1,&m,0); regfree(&re); if(rc!=0||m.rm_so<0) return \"\"; size_t len=(size_t)(m.rm_eo-m.rm_so); char* o=(char*)GC_MALLOC(len+1); memcpy(o,text+m.rm_so,len); o[len]=0; return o; }\n"
+    out = out + "#endif\n"
   }
   // ===== Phase 3 optional native sections: TLS (OpenSSL) + Postgres (libpq) =====
   if needs_tls {
+    out = out + "#ifndef _WIN32\n"
     out = out + "static int ailang_tls_init_done_=0;\n"
     out = out + "static void ailang_tls_init_(void){ if(ailang_tls_init_done_) return; SSL_library_init(); SSL_load_error_strings(); OpenSSL_add_ssl_algorithms(); ailang_tls_init_done_=1; }\n"
     out = out + "static int64_t tls_server_ctx(const char* cert, const char* key){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_new(TLS_server_method()); if(!ctx) return -1; if(!cert||SSL_CTX_use_certificate_file(ctx,cert,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } if(!key||SSL_CTX_use_PrivateKey_file(ctx,key,SSL_FILETYPE_PEM)<=0){ SSL_CTX_free(ctx); return -1; } return (int64_t)(intptr_t)ctx; }\n"
@@ -497,8 +504,10 @@ fn compile_to_c(src:str) -> str {
     out = out + "static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }\n"
     out = out + "static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return \"\"; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }\n"
     out = out + "static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:\"\"), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }\n"
+    out = out + "#endif\n"
   }
   if needs_pg {
+    out = out + "#ifndef _WIN32\n"
     out = out + "static int64_t pg_connect(const char* conninfo){ PGconn* c=PQconnectdb(conninfo?conninfo:\"\"); return (int64_t)(intptr_t)c; }\n"
     out = out + "static int64_t pg_status(int64_t conn){ if(conn==0) return -1; return (int64_t)PQstatus((PGconn*)(intptr_t)conn); }\n"
     out = out + "static const char* pg_error(int64_t conn){ if(conn==0) return \"(null connection)\"; const char* msg=PQerrorMessage((PGconn*)(intptr_t)conn); return msg?msg:\"\"; }\n"
@@ -514,6 +523,7 @@ fn compile_to_c(src:str) -> str {
     out = out + "static const char* pg_col_name(int64_t res, int64_t col){ if(res==0) return \"\"; const char* nm=PQfname((PGresult*)(intptr_t)res,(int)col); if(!nm) return \"\"; size_t l=strlen(nm); char* o=(char*)GC_MALLOC(l+1); memcpy(o,nm,l+1); return o; }\n"
     out = out + "static int64_t pg_affected(int64_t res){ if(res==0) return 0; const char* s=PQcmdTuples((PGresult*)(intptr_t)res); if(!s||!*s) return 0; return (int64_t)atoll(s); }\n"
     out = out + "static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return \"''\"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return \"''\"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }\n"
+    out = out + "#endif\n"
   }
   out = out + "static int g_argc=0; static char** g_argv=0;\n"
   // Closure value type — only when the program actually has first-class lambdas,
