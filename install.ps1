@@ -9,7 +9,7 @@
 #   1. ensures the mingw64 C toolchain (clang + Boehm GC) `ailc` compiles with,
 #      installing MSYS2 via winget if it's missing,
 #   2. downloads the native ailc.exe to %LOCALAPPDATA%\Programs\ailc,
-#   3. adds that + mingw64\bin to your PATH and installs an `ailrun` helper,
+#   3. adds that + mingw64\bin to your PATH,
 #   4. installs the AiLang skill for Claude Code,
 #   5. compiles + runs a hello program to prove it works.
 #
@@ -123,31 +123,14 @@ if ($gotStd) {
     } else { Warn "std bundle extracted but std\time.ail is missing — check the archive layout." }
 }
 
-# Remove stale shims from the old WSL-based installer (ailc.exe now replaces them).
-foreach ($old in 'ailc.cmd','ailexe.cmd','ailexe-impl.ps1') {
+# `ailc` is the only command, matching the macOS/Linux install. Remove helper
+# shims left by older installers (the WSL ailc.cmd/ailexe, and the ailrun wrapper).
+foreach ($old in 'ailc.cmd','ailexe.cmd','ailexe-impl.ps1','ailrun.cmd','ailrun-impl.ps1') {
     $p = Join-Path $BinDir $old
-    if (Test-Path $p) { Remove-Item -Force $p; OK "removed stale $old (superseded by native ailc.exe)" }
+    if (Test-Path $p) { Remove-Item -Force $p; OK "removed stale $old (ailc.exe is the only command)" }
 }
 
-# -------- 3. `ailrun` convenience (compile + run in one step) -----------------
-$ailrunImpl = @'
-# ailrun — compile a .ail with ailc, run the resulting .exe, then clean it up.
-param([Parameter(Mandatory=$true)][string]$Src,
-      [Parameter(ValueFromRemainingArguments=$true)]$Rest)
-$ErrorActionPreference = 'Stop'
-$out = Join-Path $env:TEMP ('ailrun_' + [IO.Path]::GetRandomFileName().Replace('.',''))
-& ailc $Src $out
-if ($LASTEXITCODE -ne 0) { exit 1 }
-$exe = "$out.exe"
-try { & $exe @Rest; $rc = $LASTEXITCODE } finally { Remove-Item -Force $exe -ErrorAction SilentlyContinue }
-exit $rc
-'@
-[IO.File]::WriteAllText((Join-Path $BinDir 'ailrun-impl.ps1'), $ailrunImpl)
-[IO.File]::WriteAllText((Join-Path $BinDir 'ailrun.cmd'),
-    "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0ailrun-impl.ps1`" %*`r`n")
-OK 'ailrun helper installed (compile + run)'
-
-# -------- 4. PATH: ailc dir + mingw64\bin (ailc shells out to clang) ----------
+# -------- 3. PATH: ailc dir + mingw64\bin (ailc shells out to clang) ----------
 $up = [Environment]::GetEnvironmentVariable('Path','User'); if (-not $up) { $up = '' }
 $parts = $up -split ';'
 $added = @()
@@ -160,7 +143,7 @@ if ($added.Count) {
     Warn 'open a NEW terminal for the PATH change to take effect.'
 } else { OK 'PATH already has the ailc + mingw64 dirs' }
 
-# -------- 5. the Claude Code skill -------------------------------------------
+# -------- 4. the Claude Code skill -------------------------------------------
 if (-not $NoSkill) {
     Log 'Installing the AiLang skill for Claude Code'
     New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
@@ -168,7 +151,7 @@ if (-not $NoSkill) {
     catch { Warn "could not download SKILL.md (ailc itself is installed fine): $_" }
 }
 
-# -------- 6. verify: compile + run a hello program ---------------------------
+# -------- 5. verify: compile + run a hello program ---------------------------
 Log 'Verifying: compiling and running a hello program'
 $env:Path = "$BinDir;$MingwBin;$env:Path"   # this process only; user PATH already set above
 $tmp = Join-Path $env:TEMP ('ailhello_' + [IO.Path]::GetRandomFileName().Replace('.',''))
@@ -190,9 +173,8 @@ Write-Host @"
 Done. Open a NEW terminal (so PATH refreshes), then:
 
     echo 'println("hello")' > hi.ail
-    ailc   hi.ail hi        # build a native, self-contained Windows hi.exe
+    ailc hi.ail hi          # build a native, self-contained Windows hi.exe
     .\hi.exe                # run it
-    ailrun hi.ail           # or: compile + run in one step
 
 ailc produces a standalone .exe (no WSL, no DLLs beyond Windows' own). Programs
 that use the networking/regex stdlib (sockets/HTTP/TLS/Postgres/Redis/regex) are

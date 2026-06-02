@@ -29,8 +29,8 @@ ailc -k hi.ail && cat hi.c   # inspect generated C
 ### On Windows
 
 `ailc` runs natively and writes a **`.exe`**: `ailc hi.ail hi` produces `hi.exe`, run it
-with `.\hi.exe` (not `./hi`). `ailrun hi.ail` compiles **and** runs in one step. The
-`.exe` is self-contained (depends only on `KERNEL32`/`msvcrt`). Networking/regex
+with `.\hi.exe` (not `./hi`). The `.exe` is self-contained (depends only on
+`KERNEL32`/`msvcrt`). Networking/regex
 programs (sockets/HTTP/TLS/Postgres/Redis/`regex_*`) are POSIX-only — build and run
 those under WSL, not native `ailc`.
 
