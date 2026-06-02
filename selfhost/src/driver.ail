@@ -420,7 +420,12 @@ fn compile_to_c(src:str) -> str {
   // f64 <-> str: %g formatting (matches AiLang's float print) / strtod parse.
   out = out + "static const char* f2s(double v){ char* r=(char*)GC_MALLOC(32); snprintf(r,32,\"%g\",v); return r; }\n"
   out = out + "static double s2f(const char* s){ return strtod(s,0); }\n"
-  out = out + "static const char* read_file_c(const char* path){ FILE* f=fopen(path,\"rb\"); if(!f) return \"\"; fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET); char* b=(char*)GC_MALLOC(n+1); if(n>0) fread(b,1,n,f); b[n]=0; fclose(f); return b; }\n"
+  // Source files created on Windows often carry a BOM (PowerShell `>` writes
+  // UTF-16 LE) — transcode UTF-16→UTF-8 and strip a UTF-8 BOM so any editor/shell
+  // works. Plain UTF-8 (no BOM, e.g. all in-repo .ail) is returned untouched, so
+  // the self-compile is byte-identical and the fixpoint is unaffected.
+  out = out + "static const char* ail_u16to8(const unsigned char* p, long n, int be){ char* o=(char*)GC_MALLOC((size_t)(n*2+4)); size_t k=0; long i=0; while(i+1<n){ unsigned cu=be?((unsigned)p[i]<<8|p[i+1]):((unsigned)p[i]|(unsigned)p[i+1]<<8); i+=2; unsigned cp=cu; if(cu>=0xD800&&cu<=0xDBFF&&i+1<n){ unsigned lo=be?((unsigned)p[i]<<8|p[i+1]):((unsigned)p[i]|(unsigned)p[i+1]<<8); if(lo>=0xDC00&&lo<=0xDFFF){ cp=0x10000u+((cu-0xD800u)<<10)+(lo-0xDC00u); i+=2; } } if(cp<0x80){ o[k++]=(char)cp; } else if(cp<0x800){ o[k++]=(char)(0xC0|(cp>>6)); o[k++]=(char)(0x80|(cp&0x3F)); } else if(cp<0x10000){ o[k++]=(char)(0xE0|(cp>>12)); o[k++]=(char)(0x80|((cp>>6)&0x3F)); o[k++]=(char)(0x80|(cp&0x3F)); } else { o[k++]=(char)(0xF0|(cp>>18)); o[k++]=(char)(0x80|((cp>>12)&0x3F)); o[k++]=(char)(0x80|((cp>>6)&0x3F)); o[k++]=(char)(0x80|(cp&0x3F)); } } o[k]=0; return o; }\n"
+  out = out + "static const char* read_file_c(const char* path){ FILE* f=fopen(path,\"rb\"); if(!f) return \"\"; fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET); unsigned char* b=(unsigned char*)GC_MALLOC(n+1); if(n>0) fread(b,1,n,f); b[n]=0; fclose(f); if(n>=3&&b[0]==0xEF&&b[1]==0xBB&&b[2]==0xBF){ memmove(b,b+3,(size_t)(n-3)+1); return (const char*)b; } if(n>=2&&b[0]==0xFF&&b[1]==0xFE){ return ail_u16to8(b+2,n-2,0); } if(n>=2&&b[0]==0xFE&&b[1]==0xFF){ return ail_u16to8(b+2,n-2,1); } return (const char*)b; }\n"
   out = out + "static int64_t write_file_c(const char* path, const char* content){ FILE* f=fopen(path,\"wb\"); if(!f) return 0; fwrite(content,1,strlen(content),f); fclose(f); return 1; }\n"
   // bytes — a binary buffer {len, data} distinct from str (may hold embedded \0).
   out = out + "typedef struct { int64_t len; const uint8_t* data; } ailang_bytes;\n"
