@@ -4,5 +4,7 @@
 cinc "zlib.h"
 ex "z" fn zlibVersion() -> str
 v := zlibVersion()
-println(v)
-println(len(v) > 0)    // 1 — non-empty version string
+// The version string itself is platform-specific (macOS 1.2.12, Linux 1.3.x, …),
+// so only assert that zlib linked and returned a non-empty version — keeps the
+// output (and the verify.sh fixture) identical across platforms.
+println(len(v) > 0)    // 1
