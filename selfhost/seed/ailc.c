@@ -6836,6 +6836,11 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     const char* v_line;
     const char* v_imp;
     const char* v_full;
+    const char* v_body;
+    const char* v_bdir;
+    const char* v_root;
+    const char* v_gfull;
+    const char* v_gbody;
     if ((f_has_import(v_src) == (1 != 1))) {
         return v_src;
     }
@@ -6850,7 +6855,20 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                 v_full = scat(v_dir, v_imp);
                 if ((map_str_str_has(v_seen, v_full) == (1 != 1))) {
                     map_str_str_set(v_seen, v_full, "1");
-                    v_out = scat(scat(v_out, f_resolve_imports(read_file_c(v_full), f_dirname(v_full), v_seen)), "\n");
+                    v_body = read_file_c(v_full);
+                    v_bdir = f_dirname(v_full);
+                    if ((((int64_t)strlen(v_body)) == 0)) {
+                        v_root = get_env("AILANG_STD");
+                        if ((((int64_t)strlen(v_root)) > 0)) {
+                            v_gfull = scat(scat(v_root, "/"), v_imp);
+                            v_gbody = read_file_c(v_gfull);
+                            if ((((int64_t)strlen(v_gbody)) > 0)) {
+                                v_body = v_gbody;
+                                v_bdir = f_dirname(v_gfull);
+                            }
+                        }
+                    }
+                    v_out = scat(scat(v_out, f_resolve_imports(v_body, v_bdir, v_seen)), "\n");
                 }
             } else {
                 v_out = scat(scat(v_out, v_line), "\n");

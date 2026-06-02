@@ -803,7 +803,20 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
         full := dir + imp
         if has(seen, full) == false {
           seen[full] = "1"
-          out = out + resolve_imports(read_file(full), dirname(full), seen) + "\n"
+          mu body := read_file(full)
+          mu bdir := dirname(full)
+          if len(body) == 0 {
+            // Not found next to the source — fall back to the global library dir
+            // ($AILANG_STD, set by the installer) so `im "std/…"` works anywhere,
+            // not just when std/ happens to sit beside the source file.
+            root := get_env("AILANG_STD")
+            if len(root) > 0 {
+              gfull := root + "/" + imp
+              gbody := read_file(gfull)
+              if len(gbody) > 0 { body = gbody; bdir = dirname(gfull) }
+            }
+          }
+          out = out + resolve_imports(body, bdir, seen) + "\n"
         }
       } el {
         out = out + line + "\n"
