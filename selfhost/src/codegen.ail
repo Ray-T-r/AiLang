@@ -687,6 +687,7 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "mono_ms" && len(args) == 0 { rt "mono_ms()" }
   if fname == "sleep_ms" && len(args) == 1 { rt "sleep_ms(" + gen_expr(sy, args[0]) + ")" }
   if fname == "time_iso" && len(args) == 1 { rt "time_iso(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "flush" && len(args) == 0 { rt "fflush(stdout)" }   // flush stdout — for live output (print without newline, clocks, prompts)
   if fname == "tcp_listen" && len(args) == 2 { rt "tcp_listen(" + gen_args(sy, args) + ")" }
   if fname == "tcp_accept" && len(args) == 1 { rt "tcp_accept(" + gen_args(sy, args) + ")" }
   if fname == "tcp_connect" && len(args) == 2 { rt "tcp_connect(" + gen_args(sy, args) + ")" }

@@ -4000,7 +4000,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if ((strcmp(v_fname, "split") == 0)) {
         return "[str]";
     }
-    if (((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0))) {
+    if ((((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0))) {
         return "i64";
     }
     if ((strcmp(v_fname, "time_iso") == 0)) {
@@ -4840,6 +4840,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "time_iso") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("time_iso(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ")");
+    }
+    if (((strcmp(v_fname, "flush") == 0) && (arr_Expr_len(v_args) == 0))) {
+        return "fflush(stdout)";
     }
     if (((strcmp(v_fname, "tcp_listen") == 0) && (arr_Expr_len(v_args) == 2))) {
         return scat(scat("tcp_listen(", f_gen_args(v_sy, v_args)), ")");

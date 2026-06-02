@@ -236,7 +236,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "get_env" || fname == "format" || fname == "join" rt "str"
   if fname == "split" rt "[str]"
   // Phase 2 native builtins: time / sockets / process / regex.
-  if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" rt "i64"
+  if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" rt "i64"
   if fname == "time_iso" rt "str"
   if fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" rt "i64"
   if fname == "sock_recv" rt "bytes"
