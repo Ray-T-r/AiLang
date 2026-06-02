@@ -21,18 +21,20 @@
 #   -NoToolchain      don't check/install MSYS2 (you provide clang + gc yourself)
 #   -ExeSource <p>    install ailc.exe from a local path or custom URL instead of
 #                     the GitHub release (offline / self-built installs, CI)
+#   -StdSource <p>    same, for the standard library bundle (ailc-std.tar.gz)
 #
 # Note: programs using the networking/regex stdlib (sockets/HTTP/TLS/Postgres/
 # Redis/regex) are POSIX-only and won't build natively — run those under WSL.
 # Re-run any time; every step is idempotent.
 
 [CmdletBinding()]
-param([switch]$NoSkill, [switch]$NoToolchain, [string]$ExeSource)
+param([switch]$NoSkill, [switch]$NoToolchain, [string]$ExeSource, [string]$StdSource)
 $ErrorActionPreference = 'Stop'
 
 $Repo      = 'Ray-T-r/AiLang'
 $BaseUrl   = "https://github.com/$Repo/releases/latest/download"
 $ExeAsset  = 'ailc-windows-x86_64.exe'
+$StdAsset  = 'ailc-std.tar.gz'
 $SkillDir  = Join-Path $env:USERPROFILE '.claude\skills\ailang'
 $SkillPath = Join-Path $SkillDir 'SKILL.md'
 $BinDir    = Join-Path $env:LOCALAPPDATA 'Programs\ailc'
@@ -98,6 +100,28 @@ if ($ExeSource) {
 }
 if (-not (Test-Path $ExePath) -or (Get-Item $ExePath).Length -lt 1000) { Die "ailc.exe is missing or too small after install." }
 OK "ailc.exe -> $ExePath"
+
+# -------- 2b. standard library (so `im "std/..."` works from anywhere) --------
+# The compiler falls back to $AILANG_STD when an import isn't found next to the
+# source, so we drop std/ here and point AILANG_STD at this dir.
+$StdTmp = Join-Path $env:TEMP 'ailc-std.tar.gz'
+$gotStd = $false
+try {
+    if ($StdSource -and (Test-Path $StdSource)) { Copy-Item -Force -LiteralPath $StdSource -Destination $StdTmp; $gotStd = $true }
+    elseif ($StdSource) { Invoke-WebRequest -Uri $StdSource -OutFile $StdTmp -UseBasicParsing; $gotStd = $true }
+    else { Invoke-WebRequest -Uri "$BaseUrl/$StdAsset" -OutFile $StdTmp -UseBasicParsing; $gotStd = $true }
+} catch { Warn "could not fetch the std library ($_) — `im `"std/...`"` won't work until it's installed." }
+if ($gotStd) {
+    $StdDir = Join-Path $BinDir 'std'
+    if (Test-Path $StdDir) { Remove-Item -Recurse -Force $StdDir }
+    tar -xzf $StdTmp -C $BinDir          # bundle contains std/ → extracts to $BinDir\std
+    Remove-Item -Force $StdTmp -ErrorAction SilentlyContinue
+    if (Test-Path (Join-Path $StdDir 'time.ail')) {
+        [Environment]::SetEnvironmentVariable('AILANG_STD', $BinDir, 'User')
+        $env:AILANG_STD = $BinDir
+        OK "std library -> $StdDir   (AILANG_STD=$BinDir)"
+    } else { Warn "std bundle extracted but std\time.ail is missing — check the archive layout." }
+}
 
 # Remove stale shims from the old WSL-based installer (ailc.exe now replaces them).
 foreach ($old in 'ailc.cmd','ailexe.cmd','ailexe-impl.ps1') {

@@ -43,6 +43,11 @@ cp skill/SKILL.md dist/SKILL.md
 cp install.sh     dist/install.sh
 cp install.ps1    dist/install.ps1
 
+echo "==> Staging dist/ailc-std.tar.gz (the standard library)"
+# Platform-independent: the installers drop this into $AILANG_STD so `im "std/..."`
+# resolves anywhere. Contains a top-level std/ dir. Upload once (like the scripts).
+tar -czf dist/ailc-std.tar.gz std
+
 echo "==> dist/ ready:"
 ls -la dist/
 echo

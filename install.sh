@@ -24,6 +24,8 @@ BIN_DIR="${HOME}/.local/bin"
 BIN_PATH="${BIN_DIR}/ailc"
 SKILL_DIR="${HOME}/.claude/skills/ailang"
 SKILL_PATH="${SKILL_DIR}/SKILL.md"
+STD_ROOT="${HOME}/.local/share/ailang"     # holds std/ ; AILANG_STD points here
+STD_ASSET="ailc-std.tar.gz"
 
 INSTALL_DEPS=1
 INSTALL_SKILL=1
@@ -158,6 +160,21 @@ if [[ "$OS_NAME" == "Darwin" ]]; then
 fi
 ok "installed to $BIN_PATH"
 
+# -------- 3b. standard library (so `im "std/..."` works from anywhere) --------
+# The compiler falls back to $AILANG_STD when an import isn't found next to the
+# source; we drop std/ here and export AILANG_STD below.
+log "Installing the standard library"
+if curl -fL -s -o "${TMP_DIR}/${STD_ASSET}" "${BASE_URL}/${STD_ASSET}"; then
+    rm -rf "${STD_ROOT}/std"; mkdir -p "$STD_ROOT"
+    if tar -xzf "${TMP_DIR}/${STD_ASSET}" -C "$STD_ROOT" && [[ -f "${STD_ROOT}/std/time.ail" ]]; then
+        ok "std library → ${STD_ROOT}/std"
+    else
+        warn "could not extract the std library (im \"std/...\" may not work)"
+    fi
+else
+    warn "could not download the std library (im \"std/...\" won't work until installed)"
+fi
+
 # -------- 4. install the Claude Code skill --------
 if (( INSTALL_SKILL )); then
     log "Installing AiLang skill for Claude Code"
@@ -197,6 +214,22 @@ case ":${PATH}:" in
         fi
         ;;
 esac
+
+# -------- 5b. AILANG_STD (so the compiler finds the std library) --------
+export AILANG_STD="${STD_ROOT}"
+STD_LINE="export AILANG_STD=\"${STD_ROOT}\""
+SHELL_NAME="$(basename "${SHELL:-bash}")"
+case "$SHELL_NAME" in zsh) RC2="${HOME}/.zshrc" ;; bash) RC2="${HOME}/.bashrc" ;; *) RC2="" ;; esac
+if [[ -n "$RC2" ]]; then
+    if [[ -f "$RC2" ]] && grep -Fq 'AILANG_STD=' "$RC2"; then
+        ok "AILANG_STD already set in ${RC2}"
+    else
+        printf '# Added by AiLang installer\n%s\n' "$STD_LINE" >> "$RC2"
+        ok "appended AILANG_STD to ${RC2}"
+    fi
+else
+    warn "set this in your shell rc:  ${STD_LINE}"
+fi
 
 cat <<EOF
 
