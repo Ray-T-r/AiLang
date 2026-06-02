@@ -22,17 +22,19 @@
 #   -ExeSource <p>    install ailc.exe from a local path or custom URL instead of
 #                     the GitHub release (offline / self-built installs, CI)
 #   -StdSource <p>    same, for the standard library bundle (ailc-std.tar.gz)
+#   -Version <tag>    install a specific release (e.g. v0.4.3-beta) instead of latest
 #
 # Note: programs using the networking/regex stdlib (sockets/HTTP/TLS/Postgres/
 # Redis/regex) are POSIX-only and won't build natively — run those under WSL.
 # Re-run any time; every step is idempotent.
 
 [CmdletBinding()]
-param([switch]$NoSkill, [switch]$NoToolchain, [string]$ExeSource, [string]$StdSource)
+param([switch]$NoSkill, [switch]$NoToolchain, [string]$ExeSource, [string]$StdSource, [string]$Version)
 $ErrorActionPreference = 'Stop'
 
 $Repo      = 'Ray-T-r/AiLang'
-$BaseUrl   = "https://github.com/$Repo/releases/latest/download"
+# -Version <tag> pins a specific release (e.g. a beta); default is the latest release.
+$BaseUrl   = if ($Version) { "https://github.com/$Repo/releases/download/$Version" } else { "https://github.com/$Repo/releases/latest/download" }
 $ExeAsset  = 'ailc-windows-x86_64.exe'
 $StdAsset  = 'ailc-std.tar.gz'
 $SkillDir  = Join-Path $env:USERPROFILE '.claude\skills\ailang'
