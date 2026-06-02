@@ -233,7 +233,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   // Phase 1 builtins: predicates/indices → i64; string transforms → str.
   if fname == "starts_with" || fname == "ends_with" || fname == "contains" || fname == "str_to_bool" || fname == "has" rt "bool"
   if fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" rt "i64"
-  if fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "get_env" || fname == "format" || fname == "join" rt "str"
+  if fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "get_env" || fname == "exe_dir" || fname == "format" || fname == "join" rt "str"
   if fname == "split" rt "[str]"
   // Phase 2 native builtins: time / sockets / process / regex.
   if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" rt "i64"
