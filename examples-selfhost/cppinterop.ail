@@ -1,0 +1,20 @@
+// C++ library interop via an `extern "C"` shim (POSIX-only; Windows gates this
+// off in the current release). `csrc "shim.cpp"` compiles the C++ translation
+// unit with clang++ and links it in; `ex fn` declares the C-ABI entry points the
+// shim exposes — no `cinc` header needed, the extern prototype is self-sufficient.
+// Opaque C++ objects ride across the boundary as i64 handles.
+csrc "shim.cpp"
+
+ex fn cpp_max3(a:i64, b:i64, c:i64) -> i64    // wraps std::max
+ex fn Acc_new() -> i64                         // new Accumulator → handle
+ex fn Acc_add(h:i64, x:i64)
+ex fn Acc_sum(h:i64) -> i64
+ex fn Acc_free(h:i64)                          // delete — Boehm GC won't reclaim C++ `new`
+
+println(cpp_max3(3, 9, 5))     // 9
+
+a := Acc_new()
+Acc_add(a, 10)
+Acc_add(a, 32)
+println(Acc_sum(a))            // 42
+Acc_free(a)

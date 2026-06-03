@@ -79,6 +79,14 @@ en Stmt {
 
 st Func { name:str; params:[str]; ptypes:[str]; ret:str; lib:str; tparams:[str]; body:[Stmt] }
 
+// A user class `cl Name [: Base] { f:T; [vt] fn m(self,…){…} }`. Fields mirror
+// StructDef (parallel name/type arrays). `methods` holds each own method as a
+// Func (method name bare; `self:*Name` already injected as params[0] by the
+// parser). `vflags[i]` is "1" if methods[i] is virtual (`vt`), "0" if static.
+// `parent` is the single base class name, "" if none. Lowered to a StructDef +
+// top-level Funcs by lower_classes (driver) — classes are not a codegen IR node.
+st ClassDef { name:str; parent:str; fnames:[str]; ftypes:[str]; methods:[Func]; vflags:[str] }
+
 // ===== parser state =========================================================
 st P { toks: [Token]; pos: i64; src: str }
 st Binds { names:[str]; vals:[Expr] }   // match-arm bindings: name → matched scrutinee component

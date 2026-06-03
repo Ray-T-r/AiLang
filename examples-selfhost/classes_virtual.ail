@@ -1,0 +1,25 @@
+// Stage B3: explicit virtual methods + single inheritance + override + super.
+// A `vt` method gets a vtable slot; a same-named `vt` method in a subclass
+// overrides that slot. `doubled` is a NON-virtual method on Shape that calls the
+// virtual `area` through self — calling it on a Circle dispatches dynamically to
+// Circle::area (the vtable mk_Circle installed), proving it isn't static.
+cl Shape {
+  tag:i64
+  vt fn area(self) -> i64 { 0 }
+  vt fn name(self) -> str { "shape" }
+  fn describe(self) -> i64 { self.tag }            // static (no vt)
+  fn doubled(self) -> i64 { self.area() * 2 }       // static, but calls a virtual
+}
+cl Circle : Shape {
+  r:i64
+  vt fn area(self) -> i64 { 3 * self.r * self.r }        // override
+  vt fn name(self) -> str { "circle/" ++ super.name() }  // override + super
+}
+
+mu sh := Shape(9)
+mu c := Circle(1, 5)             // tag=1 (inherited), r=5
+println(c.area())                // 75    virtual → Circle::area
+println(c.name())                // circle/shape   override + super
+println(c.describe())            // 1     inherited static method
+println(sh.doubled())            // 0     Shape::area * 2
+println(c.doubled())             // 150   dynamic: inherited doubled() → Circle::area * 2

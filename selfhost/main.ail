@@ -86,21 +86,55 @@ write_file(cpath, cprog)
 // pkg-config/brew discovery plus the OpenSSL/libpq sections.
 win := get_env("OS") == "Windows_NT"
 mu outexe := outbin
-mu cmd := ""
+
+// C++ shims declared via `csrc "..."` (paths are relative to the input .ail, so
+// resolve each against its dirname). Absent for virtually every program —
+// including main.ail's own self-compile — which then take the unchanged
+// single-clang path below, keeping the build (and the fixpoint) untouched.
+shims0 := csrc_list(cprog)
+mu shims:[str] := []
+mu ri := 0
+lp ri < len(shims0) { shims = push(shims, dirname(input) + shims0[ri]); ri += 1 }
+
+mu rc := 0
 if win {
   outexe = outbin + ".exe"
-  cmd = "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outexe + "\""
+  if len(shims) == 0 {
+    cmd := "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outexe + "\""
+    rc = system(cmd)
+  } el {
+    // Static libc++/libstdc++ + static GC + unwinding tables is unreliable on the
+    // cmd.exe/`-static` Windows path — gate C++ interop off in this release.
+    println("error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux")
+    exit(1)
+  }
 } el {
-  // GC flags via pkg-config (mirrors the driver's bdw-gc discovery); fallback -lgc.
-  cmd = "clang -O2 " + cpath + " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
-  // OpenSSL / libpq when the emitted C references them (mirrors the driver's symbol
-  // scan + env/pkg-config/brew discovery; libpq is keg-only so pkg-config misses it
-  // → brew fallback).
-  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") { cmd = cmd + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
-  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { cmd = cmd + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
-  cmd = cmd + link_flags(cprog) + " -lm -o " + outbin
+  // Discovery tail — identical substrings to the legacy single command: GC via
+  // pkg-config (fallback -lgc), OpenSSL/libpq when referenced, then `ex "lib"`
+  // link flags and -lm. Hoisted so the no-shim command is byte-identical to before.
+  mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
+  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
+  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+  extra = extra + link_flags(cprog) + " -lm"
+
+  if len(shims) == 0 {
+    // Unchanged single-clang command, byte-identical to the legacy path
+    // (`" -lm" + " -o "` == `" -lm -o "`).
+    cmd := "clang -O2 " + cpath + extra + " -o " + outbin
+    rc = system(cmd)
+  } el {
+    // C++ interop: one clang++ invocation. `-x c` keeps the AiLang TU in C
+    // semantics; `-x c++` compiles the shims as C++. The clang++ driver links the
+    // C++ runtime (libc++ on macOS / libstdc++ on Linux) automatically — more
+    // portable than hardcoding -lc++ vs -lstdc++. The shims expose `extern "C"`
+    // symbols, so the AiLang TU's C prototypes bind with no name mangling.
+    mu shimline := ""
+    mu si := 0
+    lp si < len(shims) { shimline = shimline + " " + shims[si]; si += 1 }
+    cmd := "clang++ -O2 -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
+    rc = system(cmd)
+  }
 }
-rc := system(cmd)
 if rc != 0 {
   println("clang failed")
   exit(1)

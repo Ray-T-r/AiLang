@@ -66,6 +66,7 @@ fn is_c_type_ann(ty:str) -> bool { len(ty) >= 3 && ty[0] == 64 && ty[1] == 99 &&
 fn c_type_name(ty:str) -> str { substring(ty, 3, len(ty)) }
 
 fn cty(ty:str) -> str {
+  if ty == "@vtp" rt "void*"                     // hidden class vtable pointer (the __vt field)
   if is_c_type_ann(ty) rt c_type_name(ty)        // header type → raw, before the s_ fallback
   if ty == "i64" rt "int64_t"
   if ty == "bool" rt "int64_t"     // AiLang bool is a truthy int (true→1/false→0)
@@ -188,6 +189,19 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
     gt := generic_T(sy, f, args)
     if is_tparam(f, f.ret) rt gt
     rt f.ret
+  }
+  // super.m(…) inside a method → the parent impl's return type (needs @curclass).
+  if len(args) >= 1 && var_name(args[0]) == "super" && has(sy.evar, "@curclass") {
+    pdef := defining_class(sy, class_parent(sy, sy.evar["@curclass"]), fname)
+    if has(sy.frets, pdef + "_" + fname) rt sy.frets[pdef + "_" + fname]
+  }
+  // class method `obj.m(…)` → the (defining class's) mangled method return type.
+  if len(args) >= 1 {
+    rcv := under_ptr(type_of_expr(sy, args[0]))
+    if has(sy.evar, "@class." + rcv) && is_class_method(sy, rcv, fname) {
+      mk := defining_class(sy, rcv, fname) + "_" + fname
+      if has(sy.frets, mk) rt sy.frets[mk]
+    }
   }
   // HOFs: map → [body-type] (param typed from the array elem first); filter →
   // same array type; reduce → the accumulator/init type.
