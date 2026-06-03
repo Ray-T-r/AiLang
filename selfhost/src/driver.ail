@@ -269,7 +269,7 @@ fn slot_has(slots:str, m:str) -> bool {
   false
 }
 
-fn compile_to_c(src:str) -> str {
+fn compile_to_c(src:str, dir:str) -> str {
   toks := lex(src)
   mu p := P(toks, 0, src)
 
@@ -293,7 +293,14 @@ fn compile_to_c(src:str) -> str {
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cinc" {
       adv(&p); cincs = push(cincs, ctext(&p)); adv(&p)   // cinc "header.h"
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "csrc" {
-      adv(&p); csrcs = push(csrcs, ctext(&p)); adv(&p)   // csrc "shim.cpp" — C++ shim, compiled with clang++ and linked in
+      adv(&p)
+      if ckind(&p) == TK_RAWSTR() {                       // csrc `…inline C++…` → write a temp .cpp beside the input
+        fname := "__ailinline_" + int_to_str(len(csrcs)) + ".cpp"
+        write_file(dir + fname, ctext(&p)); adv(&p)
+        csrcs = push(csrcs, fname)                        // same one-file UX as csrc "shim.cpp"
+      } el {                                              // csrc "shim.cpp" → external file path
+        csrcs = push(csrcs, ctext(&p)); adv(&p)
+      }
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "ex" {
       externs = push(externs, parse_extern(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "fn" {

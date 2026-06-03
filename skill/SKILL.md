@@ -241,7 +241,15 @@ csrc "shim.cpp"                          // C++ interop (POSIX only): compile a 
 ex fn Acc_new() -> i64                    //   shim with clang++ & link it; bind its
 ex fn Acc_free(h:i64)                     //   extern "C" fns. C++ objects = i64 handles
 ```
-`csrc` links a C++ shim: write a small `.cpp` exposing `extern "C"` functions, declare them with `ex fn`, pass opaque C++ objects across as `i64` handles (`reinterpret_cast`). macOS/Linux only — on Windows a `csrc` program errors clearly.
+`csrc` links a C++ shim: expose `extern "C"` functions, declare them with `ex fn`, pass opaque C++ objects across as `i64` handles (`reinterpret_cast`). macOS/Linux only — on Windows a `csrc` program errors clearly. Two forms — external file `csrc "shim.cpp"`, or **inline in one file** with a backtick block (the C++ is extracted, compiled with clang++, and cleaned up):
+
+```
+csrc `
+#include <set>
+extern "C" { int64_t set_new(){ return (int64_t)new std::set<int64_t>(); } }
+`
+ex fn set_new() -> i64
+```
 
 ## Builtins (always in scope — no `im`)
 

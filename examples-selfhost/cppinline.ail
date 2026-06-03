@@ -1,0 +1,32 @@
+// C++ interop in ONE file: the C++ shim is inlined in a `csrc` backtick block
+// (no separate .cpp). The compiler extracts it to a temp .cpp, compiles it with
+// clang++, links it, then cleans up. Here we drive std::set<int64_t> — a real STL
+// container that auto-sorts and de-duplicates — through an i64 handle. POSIX only.
+csrc `
+#include <cstdint>
+#include <set>
+#include <iterator>
+extern "C" {
+  int64_t set_new()                     { return (int64_t) new std::set<int64_t>(); }
+  void    set_add(int64_t h, int64_t x) { ((std::set<int64_t>*)h)->insert(x); }
+  int64_t set_size(int64_t h)           { return (int64_t)((std::set<int64_t>*)h)->size(); }
+  int64_t set_at(int64_t h, int64_t i)  { auto* s=(std::set<int64_t>*)h; auto it=s->begin(); std::advance(it,i); return *it; }
+  void    set_free(int64_t h)           { delete (std::set<int64_t>*)h; }
+}
+`
+
+ex fn set_new() -> i64
+ex fn set_add(h:i64, x:i64)
+ex fn set_size(h:i64) -> i64
+ex fn set_at(h:i64, i:i64) -> i64
+ex fn set_free(h:i64)
+
+mu nums := [5, 3, 5, 1, 4, 1, 9, 3]
+s := set_new()
+lp x in nums { set_add(s, x) }
+println("unique count: ${set_size(s)}")
+mu out := "sorted unique:"
+mu i := 0
+lp i < set_size(s) { out = out + " " + to_str(set_at(s, i)); i += 1 }
+println(out)
+set_free(s)

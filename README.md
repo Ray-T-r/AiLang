@@ -24,7 +24,8 @@ heap-boxed self-references), real generics, closures with capture, `[T]` arrays
 and `{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
 multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), `cinc` C-header interop,
-C++ library interop (`csrc` + an `extern "C"` shim, POSIX), variadic externs
+C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or an
+external `.cpp`, POSIX), variadic externs
 (`ex fn printf(fmt, ...)`), and the 10 `std/*` modules — sockets, HTTP, TLS,
 Postgres, Redis, WebSocket, JSON, time, str, math — pulled in via `im`.
 

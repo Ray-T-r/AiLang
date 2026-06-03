@@ -963,6 +963,7 @@ int64_t f_TK_PIPEGT(void);
 int64_t f_TK_CHAR(void);
 int64_t f_TK_CONCAT(void);
 int64_t f_TK_QQ(void);
+int64_t f_TK_RAWSTR(void);
 int64_t f_TK_ERR(void);
 int64_t f_is_digit(int64_t v_c);
 int64_t f_is_alpha(int64_t v_c);
@@ -1255,7 +1256,7 @@ int64_t f_seed_one(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 int64_t f_seed_decl_s(s_Syms* v_sy, s_Stmt v_s);
 arr_Stmt f_stamp_empty_maps(s_Syms* v_sy, arr_Stmt v_body);
 int64_t f_slot_has(const char* v_slots, const char* v_m);
-const char* f_compile_to_c(const char* v_src);
+const char* f_compile_to_c(const char* v_src, const char* v_dir);
 const char* f_link_flags(const char* v_cprog);
 arr_str f_csrc_list(const char* v_cprog);
 const char* f_dirname(const char* v_path);
@@ -1433,6 +1434,10 @@ int64_t f_TK_QQ(void) {
     return 42;
 }
 
+int64_t f_TK_RAWSTR(void) {
+    return 43;
+}
+
 int64_t f_TK_ERR(void) {
     return 31;
 }
@@ -1499,6 +1504,18 @@ arr_Token f_lex(const char* v_src) {
                 v_j = (v_j + 1);
             }
             v_toks = arr_Token_push(v_toks, mk_Token(f_TK_STR(), substr(v_src, (v_i + 1), v_j), v_i));
+            v_i = (v_j + 1);
+            continue;
+        }
+        if ((v_c == 96)) {
+            v_j = (v_i + 1);
+            while ((v_j < ((int64_t)strlen(v_src)))) {
+                if ((((int64_t)(unsigned char)(v_src)[v_j]) == 96)) {
+                    break;
+                }
+                v_j = (v_j + 1);
+            }
+            v_toks = arr_Token_push(v_toks, mk_Token(f_TK_RAWSTR(), substr(v_src, (v_i + 1), v_j), v_i));
             v_i = (v_j + 1);
             continue;
         }
@@ -6525,7 +6542,7 @@ int64_t f_slot_has(const char* v_slots, const char* v_m) {
     return (1 != 1);
 }
 
-const char* f_compile_to_c(const char* v_src) {
+const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     arr_Token v_toks;
     s_P v_p;
     arr_StructDef v_structs;
@@ -6536,6 +6553,7 @@ const char* f_compile_to_c(const char* v_src) {
     arr_str v_csrcs;
     arr_ClassDef v_classes;
     arr_Stmt v_mains;
+    const char* v_fname;
     arr_Func v_gfuncs;
     arr_Func v_rfuncs;
     int64_t v_gi;
@@ -6645,8 +6663,15 @@ const char* f_compile_to_c(const char* v_src) {
                     } else {
                         if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "csrc") == 0))) {
                             f_adv((&v_p));
-                            v_csrcs = arr_str_push(v_csrcs, f_ctext((&v_p)));
-                            f_adv((&v_p));
+                            if ((f_ckind((&v_p)) == f_TK_RAWSTR())) {
+                                v_fname = scat(scat("__ailinline_", i2s(arr_str_len(v_csrcs))), ".cpp");
+                                write_file_c(scat(v_dir, v_fname), f_ctext((&v_p)));
+                                f_adv((&v_p));
+                                v_csrcs = arr_str_push(v_csrcs, v_fname);
+                            } else {
+                                v_csrcs = arr_str_push(v_csrcs, f_ctext((&v_p)));
+                                f_adv((&v_p));
+                            }
                         } else {
                             if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "ex") == 0))) {
                                 v_externs = arr_Func_push(v_externs, f_parse_extern((&v_p)));
@@ -7537,6 +7562,7 @@ int main(int argc, char** argv){
     const char* v_extra;
     const char* v_shimline;
     int64_t v_si;
+    int64_t v_ci2;
     v_av = ailang_args();
     v_keepc = (1 != 1);
     v_pos = ({ arr_str __a = arr_str_new(); __a; });
@@ -7585,7 +7611,7 @@ int main(int argc, char** argv){
         v_seen = map_str_str_new();
         v_src = f_resolve_imports(v_src, f_dirname(v_input), v_seen);
     }
-    v_cprog = f_compile_to_c(v_src);
+    v_cprog = f_compile_to_c(v_src, f_dirname(v_input));
     v_cpath = scat(v_outbin, ".c");
     write_file_c(v_cpath, v_cprog);
     v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
@@ -7639,6 +7665,13 @@ int main(int argc, char** argv){
             f_system(scat(scat("del /f /q \"", v_cpath), "\""));
         } else {
             f_system(scat("rm -f ", v_cpath));
+        }
+        v_ci2 = 0;
+        while ((v_ci2 < arr_str_len(v_shims))) {
+            if (f_has_sub(arr_str_get(v_shims, v_ci2), "__ailinline_")) {
+                f_system(scat("rm -f ", arr_str_get(v_shims, v_ci2)));
+            }
+            v_ci2 = (v_ci2 + 1);
         }
     }
     printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));

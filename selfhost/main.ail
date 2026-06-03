@@ -74,7 +74,7 @@ if has_import(src) {
   mu seen:{str:str} := {}
   src = resolve_imports(src, dirname(input), seen)
 }
-cprog := compile_to_c(src)
+cprog := compile_to_c(src, dirname(input))
 
 cpath := outbin + ".c"
 write_file(cpath, cprog)
@@ -143,5 +143,11 @@ if rc != 0 {
 // clang failure we already exited above, leaving it for inspection.
 if keepc == false {
   if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
+  // also remove inline-C++ temp shims extracted from `csrc \`…\`` (POSIX-only path)
+  mu ci2 := 0
+  lp ci2 < len(shims) {
+    if has_sub(shims[ci2], "__ailinline_") { system("rm -f " + shims[ci2]) }
+    ci2 += 1
+  }
 }
 println("compiled " + input + " -> " + outexe)
