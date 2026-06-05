@@ -425,6 +425,22 @@ fn chk_assign(funcs:[Func], sy:*Syms, name:str, e:Expr, pos:i64, src:str) -> i64
   check_expr(funcs, sy, e, pos, src)
   0
 }
+// `rt expr` — when the enclosing fn has an EXPLICIT `-> T` (stashed as @chkret by
+// check_fn), flag a confidently-incompatible returned value. Implicit-return fns
+// (no annotation) have no @chkret, so they're skipped (their type IS the return).
+fn chk_return(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 {
+    if has(sy.vty, "@chkret") {
+      want := sy.vty["@chkret"]
+      got := type_confident(sy, e)
+      if confident(got) && incompatible(want, got) {
+        report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+      }
+    }
+  }
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
 fn chk_if(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], src:str) -> i64 {
   check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); check_stmts(funcs, sy, eb, src); 0
 }
@@ -444,8 +460,8 @@ fn check_stmt(funcs:[Func], sy:*Syms, s:Stmt, src:str) -> i64 {
     SAssign(name,e,pos)      => chk_assign(funcs, sy, name, e, pos, src);
     SIdxAssign(obj,idx,e)    => chk3(funcs, sy, obj, idx, e, -1, src);
     SFieldAssign(obj,fnm,e)  => chk2(funcs, sy, obj, e, -1, src);
-    SReturn(e)               => check_expr(funcs, sy, e, -1, src);
-    SPrint(e)                => check_expr(funcs, sy, e, -1, src);
+    SReturn(e,pos)           => chk_return(funcs, sy, e, pos, src);
+    SPrint(e,pos)            => check_expr(funcs, sy, e, pos, src);
     SIf(c,b,eb)              => chk_if(funcs, sy, c, b, eb, src);
     SLoop(c,b)               => chk_body(funcs, sy, c, b, src);
     SLoopIn(vnm,coll,b)      => chk_coll(funcs, sy, coll, b, src);
@@ -464,6 +480,7 @@ fn check_stmts(funcs:[Func], sy:*Syms, body:[Stmt], src:str) -> i64 {
 fn check_fn(funcs:[Func], base:*Syms, f:Func, src:str) -> i64 {
   mu sy := seed_fn(base, f)
   hd := hoist_decls(&sy, f.body, "    ")             // discard string; populates sy.vty for locals
+  if len(f.ret) > 0 { set_ty(&sy, "@chkret", f.ret) }   // explicit `-> T` → enable the return-type check
   check_stmts(funcs, &sy, f.body, src)
   0
 }

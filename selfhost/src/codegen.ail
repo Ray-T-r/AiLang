@@ -1765,7 +1765,7 @@ fn register_lam(base:*Syms, sy:*Syms, ps:[str], pts:[str], b:Expr, id:i64) -> i6
   rty := type_of_expr(sy, b)               // body typed with the params seeded above
   mu noTp:[str] := []
   mu lbody:[Stmt] := []
-  lbody = push(lbody, SReturn(b))
+  lbody = push(lbody, SReturn(b, -1))
   base.lams = push(base.lams, Func(idstr, ps, pts, rty, "", noTp, lbody))
   collect_lams_expr(base, sy, b)           // nested first-class lambdas inside b
   0

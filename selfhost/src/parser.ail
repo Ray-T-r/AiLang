@@ -688,7 +688,7 @@ fn parse_stmt(p:*P) -> Stmt {
 
   if k == TK_IDENT() && t == "rt" {
     adv(p)
-    rt SReturn(parse_expr(p))
+    rt SReturn(parse_expr(p), spos)
   }
   if k == TK_IDENT() && t == "br" { adv(p); rt SBreak }
   if k == TK_IDENT() && t == "ct" { adv(p); rt SContinue }
@@ -748,7 +748,7 @@ fn parse_stmt(p:*P) -> Stmt {
     eat(p, TK_LPAREN())
     e := parse_expr(p)
     eat(p, TK_RPAREN())
-    rt SPrint(e)
+    rt SPrint(e, spos)
   }
   // `mu name [:Type] := expr` — mutable declaration. The annotation pins an
   // empty array literal's element type (`mu xs:[Token] := []`).
