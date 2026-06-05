@@ -60,9 +60,9 @@ st StructDef { name:str; fnames:[str]; ftypes:[str] }
 st EnumDef { name:str; vnames:[str]; vftypes:[str] }
 
 en Stmt {
-  SDecl(name:str, e:Expr),       // name := expr  (or  mu name := expr)  — declares
+  SDecl(name:str, e:Expr, pos:i64),       // name := expr  (or  mu name := expr)  — declares; pos = byte offset of the stmt (-1 if synthetic)
   SDestructure(names:[str], e:Expr),  // a, b := expr — destructure a tuple ("_" slot ignores)
-  SAssign(name:str, e:Expr),     // name = expr   — reassigns an existing binding
+  SAssign(name:str, e:Expr, pos:i64),     // name = expr   — reassigns an existing binding; pos = byte offset (-1 if synthetic)
   SIdxAssign(obj:Expr, idx:Expr, e:Expr),  // obj[idx] = expr
   SFieldAssign(obj:Expr, fname:str, e:Expr), // obj.field = expr
   SReturn(e:Expr),               // rt expr
@@ -74,7 +74,7 @@ en Stmt {
   SLoopRange(vnm:str, lo:Expr, hi:Expr, body:[Stmt]),  // lp i in lo..hi { body }
   SBreak,                        // br  — break out of the enclosing loop
   SContinue,                     // ct  — continue the enclosing loop
-  SExpr(e:Expr),                 // bare expression statement
+  SExpr(e:Expr, pos:i64),                 // bare expression statement; pos = byte offset (-1 if synthetic)
 }
 
 st Func { name:str; params:[str]; ptypes:[str]; ret:str; lib:str; tparams:[str]; body:[Stmt] }

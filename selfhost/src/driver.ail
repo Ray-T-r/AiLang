@@ -200,13 +200,13 @@ fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
 fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
   if is_empty_maplit(e) {
     t := map_assign_type(sy, body, name)
-    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()))   // typing handled by pass-1 + hoist
+    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), -1)   // typing handled by pass-1 + hoist; -1 = synthetic (codegen-only, checker already ran)
   }
   if is_empty_array(e) {
     et := array_elem_from_push(sy, body, name)
-    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et))              // pin elem type from first push
+    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et), -1)              // pin elem type from first push; -1 = synthetic
   }
-  SDecl(name, e)
+  SDecl(name, e, -1)
 }
 fn stamp_decl(sy:*Syms, body:[Stmt], s:Stmt) -> Stmt {
   mt s {
@@ -267,6 +267,214 @@ fn slot_has(slots:str, m:str) -> bool {
   mu i := 0
   lp i < len(parts) { if parts[i] == m rt true; i += 1 }
   false
+}
+
+// ===== conservative type checker =============================================
+// A read-only pass (mutates nothing observable by codegen) that walks every
+// function body + the implicit main, and reports CONFIDENT type mismatches at
+// the originating .ail line via report_at (which prints `error L:C:` + caret and
+// exits 1). It runs AFTER the symbol tables are fully populated and BEFORE
+// emission, so it can't change the generated C. Every check fires only when the
+// types involved are confidently known and clearly incompatible (see
+// type_confident / incompatible) — never on an unknown — so it cannot reject any
+// program that compiles today. Walkers mirror the collect_lams family: each
+// returns a dummy i64 (AiLang `mt` is expression-valued), effects via report_at.
+
+// A user function's index by name, or -1. Built-ins / externs / ctors / generics
+// are NOT in `funcs`, so a hit here means "a non-generic user function".
+fn find_func_i(funcs:[Func], name:str) -> i64 {
+  mu i := 0
+  lp i < len(funcs) { if funcs[i].name == name { rt i } i += 1 }
+  -1
+}
+// A str / array / map / struct / enum operand makes arithmetic & bitwise ops bogus.
+fn bad_in_arith(t:str) -> bool {
+  c := ty_cat(t)
+  c == "str" || c == "arr" || c == "map" || c == "agg" || c == "bytes"
+}
+fn arith_or_bit_nonadd(op:i64) -> bool {
+  op == OP_SUB() || op == OP_MUL() || op == OP_DIV() || op == OP_MOD() || op == OP_SHL() || op == OP_SHR() || op == OP_BAND() || op == OP_BXOR() || op == OP_BOR()
+}
+fn binop_check(sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  lt := type_confident(sy, l)
+  rr := type_confident(sy, r)
+  if confident(lt) == false || confident(rr) == false rt 0
+  if op == OP_ADD() {
+    bothstr := lt == "str" && rr == "str"           // str + str is concat — fine
+    if bothstr == false && (bad_in_arith(lt) || bad_in_arith(rr)) {
+      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+    }
+    rt 0
+  }
+  if arith_or_bit_nonadd(op) {
+    if bad_in_arith(lt) || bad_in_arith(rr) {
+      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+    }
+  }
+  0
+}
+fn callarg_check(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  fi := find_func_i(funcs, fname)
+  if fi < 0 rt 0                                     // not a non-generic user fn → skip
+  if len(funcs[fi].tparams) > 0 rt 0                 // belt-and-braces: never a generic
+  pts := funcs[fi].ptypes
+  mu i := 0
+  lp i < len(args) {
+    if i < len(pts) {
+      at := type_confident(sy, args[i])
+      if confident(at) && incompatible(pts[i], at) {
+        report_at(src, pos, "type mismatch: argument " + int_to_str(i + 1) + " to '" + fname + "' expects " + pts[i] + ", got " + at)
+      }
+    }
+    i += 1
+  }
+  0
+}
+fn field_check(sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  ot := type_confident(sy, obj)
+  if ot == "?" rt 0
+  sty := under_ptr(ot)
+  if is_ctor(sy, sty) {                              // a known struct/class (incl. flattened inherited fields)
+    if has(sy.fld, fkey(sty, fname)) == false {
+      report_at(src, pos, "unknown field '." + fname + "' on " + sty)
+    }
+    rt 0
+  }
+  report_at(src, pos, "type error: field '." + fname + "' on non-struct value of type " + ot)
+  0
+}
+fn index_check(sy:*Syms, obj:Expr, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  t := type_confident(sy, obj)
+  if t == "?" rt 0
+  if is_array_ann(t) rt 0
+  if is_map_ann(t) rt 0
+  if t == "str" rt 0
+  if t == "bytes" rt 0
+  report_at(src, pos, "type error: cannot index value of type " + t)
+  0
+}
+
+fn chk2(funcs:[Func], sy:*Syms, a:Expr, b:Expr, pos:i64, src:str) -> i64 {
+  check_expr(funcs, sy, a, pos, src); check_expr(funcs, sy, b, pos, src); 0
+}
+fn chk3(funcs:[Func], sy:*Syms, a:Expr, b:Expr, c:Expr, pos:i64, src:str) -> i64 {
+  check_expr(funcs, sy, a, pos, src); check_expr(funcs, sy, b, pos, src); check_expr(funcs, sy, c, pos, src); 0
+}
+fn chk_args(funcs:[Func], sy:*Syms, args:[Expr], pos:i64, src:str) -> i64 {
+  mu i := 0
+  lp i < len(args) { check_expr(funcs, sy, args[i], pos, src); i += 1 }
+  0
+}
+fn chk_kv(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+  chk_args(funcs, sy, ks, pos, src); chk_args(funcs, sy, vs, pos, src); 0
+}
+fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, bd:[Expr], pos:i64, src:str) -> i64 {
+  check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); 0
+}
+fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
+  binop_check(sy, op, l, r, pos, src)
+  check_expr(funcs, sy, l, pos, src); check_expr(funcs, sy, r, pos, src); 0
+}
+fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  callarg_check(funcs, sy, fname, args, pos, src)
+  chk_args(funcs, sy, args, pos, src); 0
+}
+fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
+  field_check(sy, obj, fname, pos, src)
+  check_expr(funcs, sy, obj, pos, src); 0
+}
+fn chk_index(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, pos:i64, src:str) -> i64 {
+  index_check(sy, obj, pos, src)
+  check_expr(funcs, sy, obj, pos, src); check_expr(funcs, sy, idx, pos, src); 0
+}
+fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
+  mt e {
+    Bin(op,l,r)         => chk_bin(funcs, sy, op, l, r, pos, src);
+    Call(fname,args)    => chk_call(funcs, sy, fname, args, pos, src);
+    Field(obj,fnm)      => chk_field(funcs, sy, obj, fnm, pos, src);
+    Index(obj,idx)      => chk_index(funcs, sy, obj, idx, pos, src);
+    Unary(op,x)         => check_expr(funcs, sy, x, pos, src);
+    Addr(x)             => check_expr(funcs, sy, x, pos, src);
+    Array(elems,ety)    => chk_args(funcs, sy, elems, pos, src);
+    MapLit(mty,mks,mvs) => chk_kv(funcs, sy, mks, mvs, pos, src);
+    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, bd, pos, src);
+    IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
+    Try(x)              => check_expr(funcs, sy, x, pos, src);
+    Tuple(elems)        => chk_args(funcs, sy, elems, pos, src);
+    BlockE(bb)          => check_stmts(funcs, sy, bb, src);
+    Lambda(ps,pts,b,id) => check_expr(funcs, sy, b, pos, src);
+    Num(v)              => 0;
+    Flt(s)              => 0;
+    Str(s)              => 0;
+    Var(n)              => 0;
+    Bad                 => 0;
+  }
+}
+fn chk_assign(funcs:[Func], sy:*Syms, name:str, e:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 {
+    lt := tcon_var(sy, name)
+    rr := type_confident(sy, e)
+    if confident(lt) && confident(rr) && incompatible(lt, rr) {
+      report_at(src, pos, "type mismatch: cannot assign " + rr + " to '" + name + "' of type " + lt)
+    }
+  }
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+fn chk_if(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); check_stmts(funcs, sy, eb, src); 0
+}
+fn chk_body(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn chk_coll(funcs:[Func], sy:*Syms, coll:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, coll, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn chk_range(funcs:[Func], sy:*Syms, lo:Expr, hi:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, lo, -1, src); check_expr(funcs, sy, hi, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn check_stmt(funcs:[Func], sy:*Syms, s:Stmt, src:str) -> i64 {
+  mt s {
+    SDecl(name,e,pos)        => check_expr(funcs, sy, e, pos, src);
+    SDestructure(names,e)    => check_expr(funcs, sy, e, -1, src);
+    SAssign(name,e,pos)      => chk_assign(funcs, sy, name, e, pos, src);
+    SIdxAssign(obj,idx,e)    => chk3(funcs, sy, obj, idx, e, -1, src);
+    SFieldAssign(obj,fnm,e)  => chk2(funcs, sy, obj, e, -1, src);
+    SReturn(e)               => check_expr(funcs, sy, e, -1, src);
+    SPrint(e)                => check_expr(funcs, sy, e, -1, src);
+    SIf(c,b,eb)              => chk_if(funcs, sy, c, b, eb, src);
+    SLoop(c,b)               => chk_body(funcs, sy, c, b, src);
+    SLoopIn(vnm,coll,b)      => chk_coll(funcs, sy, coll, b, src);
+    SLoopKV(kn,vn,coll,b)    => chk_coll(funcs, sy, coll, b, src);
+    SLoopRange(v,lo,hi,b)    => chk_range(funcs, sy, lo, hi, b, src);
+    SBreak                   => 0;
+    SContinue                => 0;
+    SExpr(e,pos)             => check_expr(funcs, sy, e, pos, src);
+  }
+}
+fn check_stmts(funcs:[Func], sy:*Syms, body:[Stmt], src:str) -> i64 {
+  mu i := 0
+  lp i < len(body) { check_stmt(funcs, sy, body[i], src); i += 1 }
+  0
+}
+fn check_fn(funcs:[Func], base:*Syms, f:Func, src:str) -> i64 {
+  mu sy := seed_fn(base, f)
+  hd := hoist_decls(&sy, f.body, "    ")             // discard string; populates sy.vty for locals
+  check_stmts(funcs, &sy, f.body, src)
+  0
+}
+fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
+  mu i := 0
+  lp i < len(funcs) { check_fn(funcs, base, funcs[i], src); i += 1 }
+  mu msy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  msy.vty = {}
+  mhd := hoist_decls(&msy, mains, "    ")
+  check_stmts(funcs, &msy, mains, src)
+  0
 }
 
 fn compile_to_c(src:str, dir:str) -> str {
@@ -477,6 +685,12 @@ fn compile_to_c(src:str, dir:str) -> str {
   csm.vty = {}
   cmdecls := hoist_decls(&csm, mains, "    ")
   collect_lams(&base, &csm, mains)
+
+  // Type-check pass: report confident type mismatches at the .ail source line,
+  // BEFORE any C is emitted. base is fully populated above; conservative + additive
+  // (see type_confident/incompatible), so it never rejects code that compiles today
+  // and leaves the generated C byte-identical (fixpoint-safe). report_at exits(1).
+  check_program(funcs, &base, mains, src)
 
   // Link-flag marker: one comment line listing the libs from `ex "lib"` decls,
   // read back by the driver to append `-l<lib>` to clang. Absent when nothing

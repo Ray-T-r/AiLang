@@ -283,3 +283,122 @@ fn field_type(sy:*Syms, obj:Expr, fname:str) -> str {
 
 fn expr_is_str(e:Expr, sy:*Syms) -> bool { type_of_expr(sy, e) == "str" }
 
+// ----- CONFIDENT static type (for the type checker only) --------------------
+// `type_confident` mirrors `type_of_expr` but returns the sentinel "?" whenever
+// the type cannot be determined for sure — so the checker fires ONLY on
+// definitely-known mismatches and NEVER on a value that today falls back to i64.
+// These functions are brand-new and called ONLY by the checker pass; the existing
+// `type_of_expr` (and the i64 fallbacks codegen relies on) is left untouched, so
+// the generated C stays byte-identical and the self-host fixpoint holds.
+fn confident(t:str) -> bool { t != "?" }
+// All integer widths + floats + bool are ONE numeric category — the widths are
+// cosmetic (cty lowers i8..u64 to int*/uint*, f32/f64 to double, bool to int),
+// and AiLang freely mixes them. Treating them as one keeps the checker from
+// firing on e.g. an i32 extern result assigned to an i64 local.
+fn is_num(t:str) -> bool {
+  t == "i64" || t == "i32" || t == "i16" || t == "i8" || t == "u64" || t == "u32" || t == "u16" || t == "u8" || t == "f64" || t == "f32" || t == "bool"
+}
+
+fn tcon_var(sy:*Syms, name:str) -> str {
+  if has(sy.vty, name) rt sy.vty[name]
+  if is_variant(sy, name) rt sy.evar[name]     // a bare nullary variant → its enum
+  "?"                                           // unknown identifier → NOT confident (vs ty_of's i64)
+}
+fn tcon_call(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if is_ctor(sy, fname) rt fname               // a struct ctor → that struct
+  if is_variant(sy, fname) rt sy.evar[fname]   // a variant ctor → its enum
+  if is_generic(sy, fname) rt "?"              // generic return may be a type-param
+  if is_native_call(fname) rt "?"             // native helpers aren't user fns
+  if has(sy.frets, fname) rt sy.frets[fname]   // a non-generic user fn / extern return type
+  "?"                                           // builtins / closures / unknown → not sure (v1)
+}
+fn tcon_field(sy:*Syms, obj:Expr, fname:str) -> str {
+  ot := type_confident(sy, obj)
+  if ot == "?" rt "?"
+  sty := under_ptr(ot)
+  k := fkey(sty, fname)
+  if has(sy.fld, k) rt sy.fld[k]
+  "?"                                           // non-struct receiver or unknown field
+}
+fn tcon_index(sy:*Syms, obj:Expr) -> str {
+  t := type_confident(sy, obj)
+  if t == "?" rt "?"
+  if is_array_ann(t) rt elem_of_ann(t)
+  if is_map_ann(t) rt map_vtype(t)
+  if t == "str" rt "i64"
+  if t == "bytes" rt "i64"
+  "?"
+}
+fn tcon_bin(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
+  if op == OP_CAT() rt "str"                    // `++` always concatenates
+  if op >= OP_LT() && op <= OP_OR() rt "bool"   // comparisons / logic → bool
+  lt := type_confident(sy, l)
+  rr := type_confident(sy, r)
+  if op == OP_QQ() rt lt                         // `m[k] ?? d` → the value type
+  if lt == "?" || rr == "?" rt "?"
+  if op == OP_ADD() && lt == "str" && rr == "str" rt "str"
+  if is_num(lt) && is_num(rr) {
+    if lt == "f64" || rr == "f64" rt "f64"
+    rt "i64"
+  }
+  "?"
+}
+fn tcon_addr(sy:*Syms, x:Expr) -> str {
+  it := type_confident(sy, x)
+  if it == "?" rt "?"
+  "*" + it
+}
+fn type_confident(sy:*Syms, e:Expr) -> str {
+  mt e {
+    Num(v)           => "i64";
+    Flt(fs)          => "f64";
+    Str(s)           => "str";
+    Var(name)        => tcon_var(sy, name);
+    Bin(op,l,r)      => tcon_bin(sy, op, l, r);
+    Unary(op,x)      => "i64";
+    Call(fname,args) => tcon_call(sy, fname, args);
+    Field(obj,fnm)   => tcon_field(sy, obj, fnm);
+    Index(obj,idx)   => tcon_index(sy, obj);
+    Array(elems,ety) => "?";
+    MapLit(mty,mks,mvs) => "?";
+    Addr(x)          => tcon_addr(sy, x);
+    Match(sc,vn,vb,bd) => "?";
+    IfE(c,t,el2)     => "?";
+    Try(e)           => "?";
+    Lambda(ps,pts,b,id)  => "?";
+    Tuple(elems)     => "?";
+    BlockE(body)     => "?";
+    Bad              => "?";
+  }
+}
+
+// ----- conservative category-based incompatibility --------------------------
+// Two CONFIDENTLY-KNOWN types are `incompatible` only when they sit in clearly
+// different value categories. Returns false whenever either side is unknown
+// ("?") or a pointer/closure/tuple/result/C-header type (too subtle to judge),
+// and treats the whole numeric family (i64/bool/f64) as one category — so the
+// checker never fires on values AiLang legitimately mixes. Two different
+// struct/enum names share the "agg" category and are tolerated in v1.
+fn ty_cat(t:str) -> str {
+  if is_num(t) rt "num"
+  if t == "str" rt "str"
+  if t == "bytes" rt "bytes"
+  if is_array_ann(t) rt "arr"
+  if is_map_ann(t) rt "map"
+  if is_ptr_ann(t) rt "skip"
+  if is_fn_ann(t) rt "skip"
+  if is_tuple_ann(t) rt "skip"
+  if is_result_ann(t) rt "skip"
+  if is_c_type_ann(t) rt "skip"
+  if t == "?" rt "skip"
+  "agg"                                          // a struct / enum name
+}
+fn incompatible(a:str, b:str) -> bool {
+  if a == b rt false
+  ca := ty_cat(a)
+  cb := ty_cat(b)
+  if ca == "skip" || cb == "skip" rt false
+  if ca == cb rt false
+  true
+}
+

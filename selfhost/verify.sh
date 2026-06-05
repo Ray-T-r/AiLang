@@ -44,6 +44,9 @@ for src in examples-selfhost/*.ail; do
   rm -f "/tmp/vf_$name" "/tmp/vf_$name.out" "/tmp/vf_$name.c"
 done
 
+echo "==> C. type checker catches mistakes (negative tests)"
+AILC="$AILC" bash selfhost/tests/neg/neg.sh || fail=1
+
 rm -f selfhost/ailc
 if [ "$fail" -eq 0 ]; then
   echo "==> ✅ self-hosting verified: $n samples match their fixtures AND the seed is the strict fixpoint of main.ail (no Rust involved)"

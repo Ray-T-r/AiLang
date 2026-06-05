@@ -1,0 +1,4 @@
+// EXPECT: unknown field '.y' on P
+st P { x:i64 }
+p := P(1)
+p.y
