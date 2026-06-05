@@ -477,10 +477,56 @@ fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> 
   binop_check(sy, op, l, r, pos, src)
   check_expr(funcs, sy, l, pos, src); check_expr(funcs, sy, r, pos, src); 0
 }
+// The parameter count of a lambda-literal arg, or -1 if it isn't a lambda.
+// (lam_params can't tell a 0-param lambda from a non-lambda; this can, so the
+// collection/init args of a HOF are never mistaken for a 0-param callback.)
+fn lambda_arity(e:Expr) -> i64 {
+  mt e {
+    Lambda(ps,pts,b,id) => len(ps);
+    Num(v)             => -1;
+    Flt(fs)            => -1;
+    Str(s)             => -1;
+    Var(n)             => -1;
+    Bin(o,a,b2)        => -1;
+    Unary(o,x)         => -1;
+    Call(f,a)          => -1;
+    Field(o,f)         => -1;
+    Index(o,ix)        => -1;
+    Array(es,et)       => -1;
+    MapLit(ml,mks,mvs) => -1;
+    Addr(x)            => -1;
+    Match(sc,vn,vb,bd) => -1;
+    IfE(c,t,el2)       => -1;
+    Try(e2)            => -1;
+    Tuple(tes)         => -1;
+    BlockE(bb)         => -1;
+    Bad                => -1;
+  }
+}
+// `map`/`filter` take a 1-param callback, `reduce` a 2-param one. Fires only when
+// an arg is confidently a lambda literal of the wrong arity, so it never touches
+// the collection/init args or a callback passed by name (those stay "?").
+fn hof_arity_check(fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu want := -1
+  if fname == "map" || fname == "filter" { want = 1 }
+  if fname == "reduce" { want = 2 }
+  if want < 0 rt 0
+  mu i := 0
+  lp i < len(args) {
+    np := lambda_arity(args[i])
+    if np >= 0 && np != want {
+      report_at(src, pos, "'" + fname + "' callback takes " + int_to_str(want) + " parameter(s), got " + int_to_str(np))
+    }
+    i += 1
+  }
+  0
+}
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
+  hof_arity_check(fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
 }
 fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
