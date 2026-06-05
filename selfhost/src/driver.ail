@@ -1091,6 +1091,13 @@ fn compile_to_c(src:str, dir:str) -> str {
   needs_time := has_sub(src, "now_ms") || has_sub(src, "now_us") || has_sub(src, "mono_ms") || has_sub(src, "sleep_ms") || has_sub(src, "time_iso")
   needs_sock := has_sub(src, "tcp_listen") || has_sub(src, "tcp_connect") || has_sub(src, "tcp_accept") || has_sub(src, "sock_send") || has_sub(src, "sock_recv") || has_sub(src, "sock_close")
   needs_proc := has_sub(src, "proc_fork") || has_sub(src, "proc_getpid") || has_sub(src, "proc_no_zombies") || has_sub(src, "proc_reap")
+  // OS threads + mutex (pthread). Like sockets/proc this is POSIX-only (#ifndef
+  // _WIN32), but unlike them it needs the threaded Boehm GC (`#define GC_THREADS`
+  // before <gc.h>, so pthread_create→GC_pthread_create scans the new thread's
+  // stack) and the -lpthread link flag (added in main() when "pthread_" shows up
+  // in the C). main.ail mentions these names so its self-compile pulls the
+  // section in — harmless (the compiler stays single-threaded) and fixpoint-safe.
+  needs_thread := has_sub(src, "thread_spawn") || has_sub(src, "thread_join") || has_sub(src, "mutex_new") || has_sub(src, "mutex_lock") || has_sub(src, "mutex_unlock") || has_sub(src, "chan_new") || has_sub(src, "chan_send") || has_sub(src, "chan_recv") || has_sub(src, "chan_close")
   needs_regex := has_sub(src, "regex_match") || has_sub(src, "regex_find")
   // TLS (OpenSSL) + Postgres (libpq) — unlike the libc sections above these need
   // external libs, so the clang cmd in main() adds -lssl/-lcrypto / -lpq when the
@@ -1102,6 +1109,10 @@ fn compile_to_c(src:str, dir:str) -> str {
   // ships beside the ailc binary; gated, so user programs that never call it
   // (and main.ail's self-compile DOES, via the string below) decide on their own.
   needs_exedir := has_sub(src, "exe_dir")
+  // Threaded GC must be requested before <gc.h> so it pulls in <pthread.h> and
+  // redirects pthread_create→GC_pthread_create. Prepended (no header reorder) so
+  // non-thread programs emit byte-identical C; POSIX-only so Windows stays plain.
+  if needs_thread { out = out + "#ifndef _WIN32\n#define GC_THREADS\n#endif\n" }
   out = out + "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n"
   if needs_time { out = out + "#include <time.h>\n" }
   if needs_sock { out = out + "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n" }
@@ -1236,7 +1247,27 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static int g_argc=0; static char** g_argv=0;\n"
   // Closure value type — only when the program actually has first-class lambdas,
   // so the existing samples + main.ail emit byte-identical C (fixpoint safe).
-  if len(base.lams) > 0 { out = out + "typedef struct { void* fn; void* env; } closure_t;\n" }
+  // Also forced on for threads: thread_spawn takes a closure_t by value.
+  if len(base.lams) > 0 || needs_thread { out = out + "typedef struct { void* fn; void* env; } closure_t;\n" }
+  // OS threads + mutex (pthread, POSIX-only). A thread handle is a GC-allocated
+  // {pthread_t, closure_t} block returned as an i64 — the handle keeps the
+  // closure (fn+env) reachable for the GC while the thread runs, so no extra
+  // root bookkeeping is needed. A `fn()->i64` lambda already lowers to
+  // __lam_<id>(void* env, …), exactly a pthread start-routine, so the trampoline
+  // just calls clo.fn(clo.env); thread_join returns the thread's i64 result.
+  // Mutexes are pthread_mutex_t* behind an i64 handle (Boehm retains it
+  // conservatively, like the TLS/PG handles above).
+  if needs_thread {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "typedef struct { pthread_t th; closure_t clo; } ail_thread_t;\n"
+    out = out + "static void* ail_thread_tramp(void* p){ closure_t* c=(closure_t*)p; return (void*)(intptr_t)((int64_t(*)(void*))c->fn)(c->env); }\n"
+    out = out + "static int64_t thread_spawn(closure_t clo){ ail_thread_t* t=(ail_thread_t*)GC_MALLOC(sizeof(ail_thread_t)); t->clo=clo; if(pthread_create(&t->th,0,ail_thread_tramp,&t->clo)!=0) return 0; return (int64_t)(intptr_t)t; }\n"
+    out = out + "static int64_t thread_join(int64_t h){ if(h==0) return 0; ail_thread_t* t=(ail_thread_t*)(intptr_t)h; void* rv=0; pthread_join(t->th,&rv); return (int64_t)(intptr_t)rv; }\n"
+    out = out + "static int64_t mutex_new(void){ pthread_mutex_t* m=(pthread_mutex_t*)GC_MALLOC(sizeof(pthread_mutex_t)); pthread_mutex_init(m,0); return (int64_t)(intptr_t)m; }\n"
+    out = out + "static int64_t mutex_lock(int64_t h){ if(h) pthread_mutex_lock((pthread_mutex_t*)(intptr_t)h); return 0; }\n"
+    out = out + "static int64_t mutex_unlock(int64_t h){ if(h) pthread_mutex_unlock((pthread_mutex_t*)(intptr_t)h); return 0; }\n"
+    out = out + "#endif\n"
+  }
   out = out + "\n"
 
   // ===== 4-phase aggregate emission (order matters for incomplete types) =====

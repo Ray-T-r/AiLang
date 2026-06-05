@@ -255,6 +255,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" rt "i64"
   if fname == "sock_recv" rt "bytes"
   if fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" rt "i64"
+  if fname == "thread_spawn" || fname == "thread_join" || fname == "mutex_new" || fname == "mutex_lock" || fname == "mutex_unlock" || fname == "chan_new" || fname == "chan_send" || fname == "chan_recv" || fname == "chan_close" rt "i64"
   if fname == "regex_match" rt "bool"
   if fname == "regex_find" rt "str"
   if fname == "abs" && len(args) > 0 rt type_of_expr(sy, args[0])   // i64 or f64
@@ -309,7 +310,7 @@ fn tcon_var(sy:*Syms, name:str) -> str {
 // arg-dependent builtins (abs/push/pop/slice/reverse/sort/keys/values/map/filter/
 // reduce/ok/unwrap and the err_<T> family), which must stay "?".
 fn builtin_fixed_ret(fname:str) -> str {
-  if fname == "len" || fname == "str_to_int" || fname == "bytes_at" || fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" || fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" || fname == "write_file_bytes" || fname == "abs_i64" || fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" || fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" rt "i64"
+  if fname == "len" || fname == "str_to_int" || fname == "bytes_at" || fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" || fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" || fname == "write_file_bytes" || fname == "abs_i64" || fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" || fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" || fname == "thread_spawn" || fname == "thread_join" || fname == "mutex_new" || fname == "mutex_lock" || fname == "mutex_unlock" || fname == "chan_new" || fname == "chan_send" || fname == "chan_recv" || fname == "chan_close" rt "i64"
   if fname == "to_str" || fname == "cstr" || fname == "int_to_str" || fname == "float_to_str" || fname == "substring" || fname == "read_file" || fname == "bytes_to_str" || fname == "err_msg" || fname == "time_iso" || fname == "regex_find" || fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "get_env" || fname == "exe_dir" || fname == "format" || fname == "join" rt "str"
   if fname == "str_to_float" || fname == "abs_f64" rt "f64"
   if fname == "starts_with" || fname == "ends_with" || fname == "contains" || fname == "str_to_bool" || fname == "has" || fname == "is_ok" || fname == "is_err" || fname == "regex_match" || fname == "write_file" rt "bool"
