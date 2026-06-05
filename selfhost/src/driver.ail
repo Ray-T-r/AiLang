@@ -372,6 +372,44 @@ fn chk_args(funcs:[Func], sy:*Syms, args:[Expr], pos:i64, src:str) -> i64 {
 fn chk_kv(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
   chk_args(funcs, sy, ks, pos, src); chk_args(funcs, sy, vs, pos, src); 0
 }
+// `e?` is only valid inside a function whose return type is `!T` — seed_fn sets
+// @ret exactly for those, so its absence means `?` is misplaced (e.g. in plain
+// fns or the implicit main). Valid `?` code always has @ret, so no false positive.
+fn chk_try(funcs:[Func], sy:*Syms, x:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 && has(sy.vty, "@ret") == false {
+    report_at(src, pos, "'?' used outside a function returning !T")
+  }
+  check_expr(funcs, sy, x, pos, src)
+  0
+}
+// A literal's confidently-known elements must all share one category — AiLang
+// arrays/maps are monomorphic. Numerics (i64/f64/bool) count as one category
+// (matches codegen tolerance), and any "?" element is ignored.
+fn homog_check(sy:*Syms, elems:[Expr], msg:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu base := "?"
+  mu i := 0
+  lp i < len(elems) {
+    t := type_confident(sy, elems[i])
+    if confident(t) {
+      if base == "?" { base = t } el if incompatible(base, t) { report_at(src, pos, msg + " " + base + " and " + t) }
+    }
+    i += 1
+  }
+  0
+}
+fn chk_array(funcs:[Func], sy:*Syms, elems:[Expr], pos:i64, src:str) -> i64 {
+  homog_check(sy, elems, "array literal mixes", pos, src)
+  chk_args(funcs, sy, elems, pos, src)
+  0
+}
+fn chk_maplit(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+  homog_check(sy, ks, "map literal mixes key types", pos, src)
+  homog_check(sy, vs, "map literal mixes value types", pos, src)
+  chk_args(funcs, sy, ks, pos, src)
+  chk_args(funcs, sy, vs, pos, src)
+  0
+}
 fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, bd:[Expr], pos:i64, src:str) -> i64 {
   check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); 0
 }
@@ -400,11 +438,11 @@ fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     Index(obj,idx)      => chk_index(funcs, sy, obj, idx, pos, src);
     Unary(op,x)         => check_expr(funcs, sy, x, pos, src);
     Addr(x)             => check_expr(funcs, sy, x, pos, src);
-    Array(elems,ety)    => chk_args(funcs, sy, elems, pos, src);
-    MapLit(mty,mks,mvs) => chk_kv(funcs, sy, mks, mvs, pos, src);
+    Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
+    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
     Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, bd, pos, src);
     IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
-    Try(x)              => check_expr(funcs, sy, x, pos, src);
+    Try(x)              => chk_try(funcs, sy, x, pos, src);
     Tuple(elems)        => chk_args(funcs, sy, elems, pos, src);
     BlockE(bb)          => check_stmts(funcs, sy, bb, src);
     Lambda(ps,pts,b,id) => check_expr(funcs, sy, b, pos, src);
@@ -487,7 +525,10 @@ fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
   if has(sy.evar, "@fldn." + fname) == false rt 0
   n := str_to_int(sy.evar["@fldn." + fname])
-  if len(args) != n rt 0
+  if len(args) != n {
+    report_at(src, pos, "constructor '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
+    rt 0
+  }
   mu i := 0
   lp i < len(args) {
     k := "@fld." + fname + "." + int_to_str(i)

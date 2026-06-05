@@ -1,0 +1,4 @@
+// EXPECT: '?' used outside a function returning !T
+x := ok(5)
+y := x?
+println(y)

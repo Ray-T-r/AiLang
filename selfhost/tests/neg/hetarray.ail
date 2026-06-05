@@ -1,0 +1,3 @@
+// EXPECT: array literal mixes i64 and str
+xs := [1, "two", 3]
+println(len(xs))
