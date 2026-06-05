@@ -522,11 +522,31 @@ fn hof_arity_check(fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   }
   0
 }
+// A call to a user generic fn (`fn id<T>(…)`) — inlined at its call sites, so it
+// is NOT in `funcs` and escapes callarg_check. Its T-polymorphic params can't be
+// type-checked, but arity is exact: count the registered generic's params (sy.gfns
+// is the [Func] of generics, carried through every seed_fn).
+fn generic_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu gi := 0
+  lp gi < len(sy.gfns) {
+    if sy.gfns[gi].name == fname {
+      np := len(sy.gfns[gi].params)
+      if len(args) != np {
+        report_at(src, pos, "generic function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+      }
+      rt 0
+    }
+    gi += 1
+  }
+  0
+}
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
   hof_arity_check(fname, args, pos, src)
+  generic_arity_check(sy, fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
 }
 fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {

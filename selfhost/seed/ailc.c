@@ -1292,6 +1292,7 @@ int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vname
 int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_lambda_arity(s_Expr v_e);
 int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
 int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, int64_t v_pos, const char* v_src);
@@ -7153,11 +7154,32 @@ int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, c
     return 0;
 }
 
+int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    int64_t v_gi;
+    int64_t v_np;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    v_gi = 0;
+    while ((v_gi < arr_Func_len((v_sy)->gfns))) {
+        if ((strcmp((arr_Func_get((v_sy)->gfns, v_gi)).name, v_fname) == 0)) {
+            v_np = arr_str_len((arr_Func_get((v_sy)->gfns, v_gi)).params);
+            if ((arr_Expr_len(v_args) != v_np)) {
+                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("generic function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
+            }
+            return 0;
+        }
+        v_gi = (v_gi + 1);
+    }
+    return 0;
+}
+
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_hof_arity_check(v_fname, v_args, v_pos, v_src);
+    f_generic_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
     return 0;
 }

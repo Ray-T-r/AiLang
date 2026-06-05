@@ -1,0 +1,3 @@
+// EXPECT: generic function 'id' expects 1 arguments, got 2
+fn id<T>(x:T) -> T x
+println(id(1, 2))
