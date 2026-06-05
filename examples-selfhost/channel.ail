@@ -1,0 +1,21 @@
+// Bounded blocking channel (pthread mutex + two condvars). A producer thread
+// sends 1..100 through a capacity-8 channel — blocking whenever the buffer is
+// full — then closes it. The main thread receives all 100 values and sums them.
+// The small capacity forces real backpressure between the two threads, yet the
+// total is deterministic.  Expected output:  5050
+ch := chan_new(8)
+
+producer := thread_spawn(fn() {
+  mu i := 1
+  lp i <= 100 {
+    chan_send(ch, i)     // blocks when the ring buffer is full
+    i = i + 1
+  }
+  chan_close(ch)
+  0
+})
+
+mu total := 0
+lp k in 0..100 { total = total + chan_recv(ch) }   // blocks when empty
+thread_join(producer)
+println(total)     // 5050

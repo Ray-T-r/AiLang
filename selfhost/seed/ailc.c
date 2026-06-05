@@ -157,6 +157,11 @@ static int64_t thread_join(int64_t h){ if(h==0) return 0; ail_thread_t* t=(ail_t
 static int64_t mutex_new(void){ pthread_mutex_t* m=(pthread_mutex_t*)GC_MALLOC(sizeof(pthread_mutex_t)); pthread_mutex_init(m,0); return (int64_t)(intptr_t)m; }
 static int64_t mutex_lock(int64_t h){ if(h) pthread_mutex_lock((pthread_mutex_t*)(intptr_t)h); return 0; }
 static int64_t mutex_unlock(int64_t h){ if(h) pthread_mutex_unlock((pthread_mutex_t*)(intptr_t)h); return 0; }
+typedef struct { pthread_mutex_t m; pthread_cond_t ne, nf; int64_t* buf; int64_t cap, head, tail, cnt; int closed; } ail_chan_t;
+static int64_t chan_new(int64_t cap){ if(cap<1) cap=1; ail_chan_t* c=(ail_chan_t*)GC_MALLOC(sizeof(ail_chan_t)); pthread_mutex_init(&c->m,0); pthread_cond_init(&c->ne,0); pthread_cond_init(&c->nf,0); c->buf=(int64_t*)GC_MALLOC(sizeof(int64_t)*(size_t)cap); c->cap=cap; c->head=0; c->tail=0; c->cnt=0; c->closed=0; return (int64_t)(intptr_t)c; }
+static int64_t chan_send(int64_t h, int64_t v){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==c->cap && !c->closed) pthread_cond_wait(&c->nf,&c->m); if(c->closed){ pthread_mutex_unlock(&c->m); return 0; } c->buf[c->tail]=v; c->tail=(c->tail+1)%c->cap; c->cnt++; pthread_cond_signal(&c->ne); pthread_mutex_unlock(&c->m); return 1; }
+static int64_t chan_recv(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==0 && !c->closed) pthread_cond_wait(&c->ne,&c->m); if(c->cnt==0 && c->closed){ pthread_mutex_unlock(&c->m); return 0; } int64_t v=c->buf[c->head]; c->head=(c->head+1)%c->cap; c->cnt--; pthread_cond_signal(&c->nf); pthread_mutex_unlock(&c->m); return v; }
+static int64_t chan_close(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); c->closed=1; pthread_cond_broadcast(&c->ne); pthread_cond_broadcast(&c->nf); pthread_mutex_unlock(&c->m); return 0; }
 #endif
 
 typedef struct s_Token s_Token;
@@ -5589,6 +5594,18 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "mutex_unlock") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("mutex_unlock(", f_gen_args(v_sy, v_args)), ")");
     }
+    if (((strcmp(v_fname, "chan_new") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_new(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_send") == 0) && (arr_Expr_len(v_args) == 2))) {
+        return scat(scat("chan_send(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_recv") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_recv(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_close") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_close(", f_gen_args(v_sy, v_args)), ")");
+    }
     if (((strcmp(v_fname, "regex_match") == 0) && (arr_Expr_len(v_args) == 2))) {
         return scat(scat("regex_match(", f_gen_args(v_sy, v_args)), ")");
     }
@@ -8035,6 +8052,11 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static int64_t mutex_new(void){ pthread_mutex_t* m=(pthread_mutex_t*)GC_MALLOC(sizeof(pthread_mutex_t)); pthread_mutex_init(m,0); return (int64_t)(intptr_t)m; }\n");
         v_out = scat(v_out, "static int64_t mutex_lock(int64_t h){ if(h) pthread_mutex_lock((pthread_mutex_t*)(intptr_t)h); return 0; }\n");
         v_out = scat(v_out, "static int64_t mutex_unlock(int64_t h){ if(h) pthread_mutex_unlock((pthread_mutex_t*)(intptr_t)h); return 0; }\n");
+        v_out = scat(v_out, "typedef struct { pthread_mutex_t m; pthread_cond_t ne, nf; int64_t* buf; int64_t cap, head, tail, cnt; int closed; } ail_chan_t;\n");
+        v_out = scat(v_out, "static int64_t chan_new(int64_t cap){ if(cap<1) cap=1; ail_chan_t* c=(ail_chan_t*)GC_MALLOC(sizeof(ail_chan_t)); pthread_mutex_init(&c->m,0); pthread_cond_init(&c->ne,0); pthread_cond_init(&c->nf,0); c->buf=(int64_t*)GC_MALLOC(sizeof(int64_t)*(size_t)cap); c->cap=cap; c->head=0; c->tail=0; c->cnt=0; c->closed=0; return (int64_t)(intptr_t)c; }\n");
+        v_out = scat(v_out, "static int64_t chan_send(int64_t h, int64_t v){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==c->cap && !c->closed) pthread_cond_wait(&c->nf,&c->m); if(c->closed){ pthread_mutex_unlock(&c->m); return 0; } c->buf[c->tail]=v; c->tail=(c->tail+1)%c->cap; c->cnt++; pthread_cond_signal(&c->ne); pthread_mutex_unlock(&c->m); return 1; }\n");
+        v_out = scat(v_out, "static int64_t chan_recv(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==0 && !c->closed) pthread_cond_wait(&c->ne,&c->m); if(c->cnt==0 && c->closed){ pthread_mutex_unlock(&c->m); return 0; } int64_t v=c->buf[c->head]; c->head=(c->head+1)%c->cap; c->cnt--; pthread_cond_signal(&c->nf); pthread_mutex_unlock(&c->m); return v; }\n");
+        v_out = scat(v_out, "static int64_t chan_close(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); c->closed=1; pthread_cond_broadcast(&c->ne); pthread_cond_broadcast(&c->nf); pthread_mutex_unlock(&c->m); return 0; }\n");
         v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(v_out, "\n");

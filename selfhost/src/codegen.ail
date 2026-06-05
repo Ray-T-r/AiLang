@@ -827,6 +827,10 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "mutex_new" && len(args) == 0 { rt "mutex_new()" }
   if fname == "mutex_lock" && len(args) == 1 { rt "mutex_lock(" + gen_args(sy, args) + ")" }
   if fname == "mutex_unlock" && len(args) == 1 { rt "mutex_unlock(" + gen_args(sy, args) + ")" }
+  if fname == "chan_new" && len(args) == 1 { rt "chan_new(" + gen_args(sy, args) + ")" }
+  if fname == "chan_send" && len(args) == 2 { rt "chan_send(" + gen_args(sy, args) + ")" }
+  if fname == "chan_recv" && len(args) == 1 { rt "chan_recv(" + gen_args(sy, args) + ")" }
+  if fname == "chan_close" && len(args) == 1 { rt "chan_close(" + gen_args(sy, args) + ")" }
   if fname == "regex_match" && len(args) == 2 { rt "regex_match(" + gen_args(sy, args) + ")" }
   if fname == "regex_find" && len(args) == 2 { rt "regex_find(" + gen_args(sy, args) + ")" }
   if fname == "format" && len(args) >= 1 { rt "format(" + gen_args(sy, args) + ")" }
