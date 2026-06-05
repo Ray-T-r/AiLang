@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 8,500 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 8,608 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -67,10 +67,10 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~6,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **8,500 lines, byte-identical** |
+| strict fixpoint | `stage2.c == stage3.c` — **8,608 lines, byte-identical** |
 | sample programs | **37**, each output-verified against a frozen fixture |
 | standard library | 10 modules, all compiling |
-| type checking | conservative — reports confident mismatches at the `.ail` `line:col` |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types, `mt` exhaustiveness & variants, and call/callback/generic arity |
 | Rust in the build | **none** |
 
 ## Layout
