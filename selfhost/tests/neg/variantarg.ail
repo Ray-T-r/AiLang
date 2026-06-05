@@ -1,0 +1,4 @@
+// EXPECT: field 1 of variant 'A' expects i64, got str
+en E { A(x:i64), B }
+e := A("no")
+println(0)

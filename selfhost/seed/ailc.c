@@ -1273,6 +1273,7 @@ int64_t f_slot_has(const char* v_slots, const char* v_m);
 int64_t f_find_func_i(arr_Func v_funcs, const char* v_name);
 int64_t f_bad_in_arith(const char* v_t);
 int64_t f_arith_or_bit_nonadd(int64_t v_op);
+int64_t f_is_cmp_op(int64_t v_op);
 int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_field_check(s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
@@ -1297,6 +1298,7 @@ int64_t f_chk_field_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const c
 const char* f_idx_slot_type(s_Syms* v_sy, s_Expr v_obj);
 int64_t f_chk_idx_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, s_Expr v_e, int64_t v_pos, const char* v_src);
 int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_variant_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_check_tail_expr(s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_want, const char* v_src);
 int64_t f_check_tail_if(s_Syms* v_sy, arr_Stmt v_b, arr_Stmt v_eb, const char* v_want, const char* v_src);
 int64_t f_check_tail_stmt(s_Syms* v_sy, s_Stmt v_s, const char* v_want, const char* v_src);
@@ -6859,6 +6861,10 @@ int64_t f_arith_or_bit_nonadd(int64_t v_op) {
     return (((((((((v_op == f_OP_SUB()) || (v_op == f_OP_MUL())) || (v_op == f_OP_DIV())) || (v_op == f_OP_MOD())) || (v_op == f_OP_SHL())) || (v_op == f_OP_SHR())) || (v_op == f_OP_BAND())) || (v_op == f_OP_BXOR())) || (v_op == f_OP_BOR()));
 }
 
+int64_t f_is_cmp_op(int64_t v_op) {
+    return ((((((v_op == f_OP_EQ()) || (v_op == f_OP_NE())) || (v_op == f_OP_LT())) || (v_op == f_OP_GT())) || (v_op == f_OP_LE())) || (v_op == f_OP_GE()));
+}
+
 int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src) {
     const char* v_lt;
     const char* v_rr;
@@ -6869,6 +6875,12 @@ int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_
     v_lt = f_type_confident(v_sy, v_l);
     v_rr = f_type_confident(v_sy, v_r);
     if (((f_confident(v_lt) == (1 != 1)) || (f_confident(v_rr) == (1 != 1)))) {
+        return 0;
+    }
+    if (f_is_cmp_op(v_op)) {
+        if (f_incompatible(v_sy, v_lt, v_rr)) {
+            f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: comparing ", v_lt), " and "), v_rr));
+        }
         return 0;
     }
     if ((v_op == f_OP_ADD())) {
@@ -7059,6 +7071,7 @@ int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Ex
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
+    f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
     return 0;
 }
@@ -7180,6 +7193,38 @@ int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int
             v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
             if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_sy, v_want, v_got))) {
                 f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of '"), v_fname), "' expects "), v_want), ", got "), v_got));
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
+int64_t f_variant_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    int64_t v_n;
+    int64_t v_i;
+    const char* v_k;
+    const char* v_want;
+    const char* v_got;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((map_str_str_has((v_sy)->evar, scat("@vfldn.", v_fname)) == (1 != 1))) {
+        return 0;
+    }
+    v_n = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_fname)));
+    if ((arr_Expr_len(v_args) != v_n)) {
+        f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("variant '", v_fname), "' expects "), i2s(v_n)), " fields, got "), i2s(arr_Expr_len(v_args))));
+        return 0;
+    }
+    v_i = 0;
+    while ((v_i < arr_Expr_len(v_args))) {
+        v_k = scat(scat(scat("@vfld.", v_fname), "."), i2s(v_i));
+        if (map_str_str_has((v_sy)->evar, v_k)) {
+            v_want = map_str_str_get((v_sy)->evar, v_k);
+            v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
+            if (((f_confident(v_want) && f_confident(v_got)) && f_cat_incompatible(v_want, v_got))) {
+                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of variant '"), v_fname), "' expects "), v_want), ", got "), v_got));
             }
         }
         v_i = (v_i + 1);
@@ -7339,6 +7384,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_order;
     int64_t v_vi;
     const char* v_vn;
+    const char* v_vfs;
+    arr_str v_vparts;
+    int64_t v_vpj;
     int64_t v_xi;
     int64_t v_fi2;
     s_Func v_f;
@@ -7578,6 +7626,20 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
             v_vn = arr_str_get((v_ed).vnames, v_vi);
             map_str_str_set((v_base).evar, v_vn, (v_ed).name);
             map_str_str_set((v_base).vft, v_vn, arr_str_get((v_ed).vftypes, v_vi));
+            v_vfs = arr_str_get((v_ed).vftypes, v_vi);
+            if ((str_contains(v_vfs, "(") == (1 != 1))) {
+                if ((((int64_t)strlen(v_vfs)) == 0)) {
+                    map_str_str_set((v_base).evar, scat("@vfldn.", v_vn), "0");
+                } else {
+                    v_vparts = f_split_semi(v_vfs);
+                    v_vpj = 0;
+                    while ((v_vpj < arr_str_len(v_vparts))) {
+                        map_str_str_set((v_base).evar, scat(scat(scat("@vfld.", v_vn), "."), i2s(v_vpj)), arr_str_get(v_vparts, v_vpj));
+                        v_vpj = (v_vpj + 1);
+                    }
+                    map_str_str_set((v_base).evar, scat("@vfldn.", v_vn), i2s(arr_str_len(v_vparts)));
+                }
+            }
             if ((v_vi == 0)) {
                 v_order = v_vn;
             } else {
