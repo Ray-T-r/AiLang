@@ -1,0 +1,10 @@
+// EXPECT: unknown variant 'C' in match on E
+en E { A(x:i64), B }
+fn f(e:E) -> i64 {
+  mt e {
+    A(x) => x;
+    B    => 0;
+    C    => 9;
+  }
+}
+println(f(B))

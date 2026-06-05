@@ -1,0 +1,8 @@
+// EXPECT: non-exhaustive match: enum E missing variant 'B'
+en E { A(x:i64), B }
+fn f(e:E) -> i64 {
+  mt e {
+    A(x) => x;
+  }
+}
+println(f(A(5)))

@@ -17,6 +17,8 @@ fn has_sub(s:str, sub:str) -> bool {
 fn var_name(e:Expr) -> str {
   mt e {
     Var(n)             => n;
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
     Num(v)             => "";
     Flt(fs)            => "";
     Str(s)             => "";
@@ -424,7 +426,51 @@ fn chk_maplit(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) ->
   chk_args(funcs, sy, vs, pos, src)
   0
 }
-fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, bd:[Expr], pos:i64, src:str) -> i64 {
+// Is `v` one of the match's arm names?
+fn vn_has(vnames:[str], v:str) -> bool {
+  mu i := 0
+  lp i < len(vnames) { if vnames[i] == v rt true; i += 1 }
+  false
+}
+// `mt scrut { V(b…) => … }` — match type-safety. The parser only emits a `Match`
+// AST node for capitalized-Variant arms (literal/`_`/tuple matches desugar to an
+// if-chain upstream), and the corpus has NO catch-all arms — so a Match is a
+// COMPLETE variant enumeration. gen_match lowers it to a bare if/else-if on the
+// tag with no default branch, so a stray arm silently aliases tag 0 and a missing
+// variant leaves the result uninitialized — both real bugs. Two confident checks,
+// each a no-op when the scrutinee type is "?" (so today's programs all still pass):
+//   (1) every arm names a real variant OF the scrutinee's enum;
+//   (2) exhaustiveness — every variant of that enum appears as an arm.
+fn match_check(sy:*Syms, scrut:Expr, vnames:[str], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  ty := type_confident(sy, scrut)
+  if confident(ty) == false rt 0                       // unknown scrutinee → skip
+  if has(sy.evar, "@order." + ty) == false {           // confident, but not an enum
+    report_at(src, pos, "type error: match on non-enum value of type " + ty)
+    rt 0
+  }
+  // (1) arm validity — each arm must be a variant of enum `ty`
+  mu i := 0
+  lp i < len(vnames) {
+    nm := vnames[i]
+    if is_variant(sy, nm) == false || sy.evar[nm] != ty {
+      report_at(src, pos, "unknown variant '" + nm + "' in match on " + ty)
+    }
+    i += 1
+  }
+  // (2) exhaustiveness — every variant of enum `ty` must be an arm
+  all := split_semi(sy.evar["@order." + ty])
+  mu j := 0
+  lp j < len(all) {
+    if vn_has(vnames, all[j]) == false {
+      report_at(src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
+    }
+    j += 1
+  }
+  0
+}
+fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, vnames:[str], bd:[Expr], pos:i64, src:str) -> i64 {
+  match_check(sy, sc, vnames, pos, src)
   check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); 0
 }
 fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
@@ -455,7 +501,7 @@ fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     Addr(x)             => check_expr(funcs, sy, x, pos, src);
     Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
     MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
-    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, bd, pos, src);
+    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, vn, bd, pos, src);
     IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
     Try(x)              => chk_try(funcs, sy, x, pos, src);
     Tuple(elems)        => chk_args(funcs, sy, elems, pos, src);

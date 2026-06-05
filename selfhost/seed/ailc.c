@@ -1286,7 +1286,9 @@ int64_t f_chk_try(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_x, int64_t v_pos, con
 int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t v_pos, const char* v_src);
 int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_pos, const char* v_src);
 int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
-int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bd, int64_t v_pos, const char* v_src);
+int64_t f_vn_has(arr_str v_vnames, const char* v_v);
+int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, int64_t v_pos, const char* v_src);
+int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_Expr v_bd, int64_t v_pos, const char* v_src);
 int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
@@ -6677,7 +6679,7 @@ int64_t f_has_sub(const char* v_s, const char* v_sub) {
 }
 
 const char* f_var_name(s_Expr v_e) {
-    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = v_n; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
+    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = v_n; } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = ""; } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = ""; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
 }
 
 int64_t f_is_empty_maplit(s_Expr v_e) {
@@ -7055,7 +7057,56 @@ int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_v
     return 0;
 }
 
-int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bd, int64_t v_pos, const char* v_src) {
+int64_t f_vn_has(arr_str v_vnames, const char* v_v) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        if ((strcmp(arr_str_get(v_vnames, v_i), v_v) == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, int64_t v_pos, const char* v_src) {
+    const char* v_ty;
+    int64_t v_i;
+    const char* v_nm;
+    arr_str v_all;
+    int64_t v_j;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    v_ty = f_type_confident(v_sy, v_scrut);
+    if ((f_confident(v_ty) == (1 != 1))) {
+        return 0;
+    }
+    if ((map_str_str_has((v_sy)->evar, scat("@order.", v_ty)) == (1 != 1))) {
+        f_report_at(v_src, v_pos, scat("type error: match on non-enum value of type ", v_ty));
+        return 0;
+    }
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        v_nm = arr_str_get(v_vnames, v_i);
+        if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
+            f_report_at(v_src, v_pos, scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty));
+        }
+        v_i = (v_i + 1);
+    }
+    v_all = f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty)));
+    v_j = 0;
+    while ((v_j < arr_str_len(v_all))) {
+        if ((f_vn_has(v_vnames, arr_str_get(v_all, v_j)) == (1 != 1))) {
+            f_report_at(v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), arr_str_get(v_all, v_j)), "'"));
+        }
+        v_j = (v_j + 1);
+    }
+    return 0;
+}
+
+int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_Expr v_bd, int64_t v_pos, const char* v_src) {
+    f_match_check(v_sy, v_sc, v_vnames, v_pos, v_src);
     f_check_expr(v_funcs, v_sy, v_sc, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_bd, v_pos, v_src);
     return 0;
@@ -7090,7 +7141,7 @@ int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, 
 }
 
 int64_t f_check_expr(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src) {
-    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_chk_match(v_funcs, v_sy, v_sc, v_bd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_bd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
 }
 
 int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr v_e, int64_t v_pos, const char* v_src) {
