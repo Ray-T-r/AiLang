@@ -282,8 +282,8 @@ struct s_Stmt { int tag; union {
   struct { const char* f0; s_Expr* f1; int64_t f2; } SDecl;
   struct { arr_str f0; s_Expr* f1; } SDestructure;
   struct { const char* f0; s_Expr* f1; int64_t f2; } SAssign;
-  struct { s_Expr* f0; s_Expr* f1; s_Expr* f2; } SIdxAssign;
-  struct { s_Expr* f0; const char* f1; s_Expr* f2; } SFieldAssign;
+  struct { s_Expr* f0; s_Expr* f1; s_Expr* f2; int64_t f3; } SIdxAssign;
+  struct { s_Expr* f0; const char* f1; s_Expr* f2; int64_t f3; } SFieldAssign;
   struct { s_Expr* f0; int64_t f1; } SReturn;
   struct { s_Expr* f0; int64_t f1; } SPrint;
   struct { s_Expr* f0; arr_Stmt f1; arr_Stmt f2; } SIf;
@@ -904,8 +904,8 @@ static s_Expr mkv_Bad(){ s_Expr v; v.tag=18; return v; }
 static s_Stmt mkv_SDecl(const char* f0, s_Expr f1, int64_t f2){ s_Stmt v; v.tag=0; v.u.SDecl.f0=f0; v.u.SDecl.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SDecl.f1=f1; v.u.SDecl.f2=f2; return v; }
 static s_Stmt mkv_SDestructure(arr_str f0, s_Expr f1){ s_Stmt v; v.tag=1; v.u.SDestructure.f0=f0; v.u.SDestructure.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SDestructure.f1=f1; return v; }
 static s_Stmt mkv_SAssign(const char* f0, s_Expr f1, int64_t f2){ s_Stmt v; v.tag=2; v.u.SAssign.f0=f0; v.u.SAssign.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SAssign.f1=f1; v.u.SAssign.f2=f2; return v; }
-static s_Stmt mkv_SIdxAssign(s_Expr f0, s_Expr f1, s_Expr f2){ s_Stmt v; v.tag=3; v.u.SIdxAssign.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f0=f0; v.u.SIdxAssign.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f1=f1; v.u.SIdxAssign.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f2=f2; return v; }
-static s_Stmt mkv_SFieldAssign(s_Expr f0, const char* f1, s_Expr f2){ s_Stmt v; v.tag=4; v.u.SFieldAssign.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SFieldAssign.f0=f0; v.u.SFieldAssign.f1=f1; v.u.SFieldAssign.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SFieldAssign.f2=f2; return v; }
+static s_Stmt mkv_SIdxAssign(s_Expr f0, s_Expr f1, s_Expr f2, int64_t f3){ s_Stmt v; v.tag=3; v.u.SIdxAssign.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f0=f0; v.u.SIdxAssign.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f1=f1; v.u.SIdxAssign.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIdxAssign.f2=f2; v.u.SIdxAssign.f3=f3; return v; }
+static s_Stmt mkv_SFieldAssign(s_Expr f0, const char* f1, s_Expr f2, int64_t f3){ s_Stmt v; v.tag=4; v.u.SFieldAssign.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SFieldAssign.f0=f0; v.u.SFieldAssign.f1=f1; v.u.SFieldAssign.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SFieldAssign.f2=f2; v.u.SFieldAssign.f3=f3; return v; }
 static s_Stmt mkv_SReturn(s_Expr f0, int64_t f1){ s_Stmt v; v.tag=5; v.u.SReturn.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SReturn.f0=f0; v.u.SReturn.f1=f1; return v; }
 static s_Stmt mkv_SPrint(s_Expr f0, int64_t f1){ s_Stmt v; v.tag=6; v.u.SPrint.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SPrint.f0=f0; v.u.SPrint.f1=f1; return v; }
 static s_Stmt mkv_SIf(s_Expr f0, arr_Stmt f1, arr_Stmt f2){ s_Stmt v; v.tag=7; v.u.SIf.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.SIf.f0=f0; v.u.SIf.f1=f1; v.u.SIf.f2=f2; return v; }
@@ -1262,7 +1262,7 @@ const char* f_push_call_elem(s_Syms* v_sy, s_Expr v_e);
 const char* f_same_name_push(s_Syms* v_sy, const char* v_name, s_Expr v_e, const char* v_a);
 const char* f_push_assign_elem(s_Syms* v_sy, s_Stmt v_s, const char* v_a);
 const char* f_array_elem_from_push(s_Syms* v_sy, arr_Stmt v_body, const char* v_a);
-s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e);
+s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e, int64_t v_pos);
 s_Stmt f_stamp_decl(s_Syms* v_sy, arr_Stmt v_body, s_Stmt v_s);
 int64_t f_seed_one(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 int64_t f_seed_decl_s(s_Syms* v_sy, s_Stmt v_s);
@@ -1287,6 +1287,14 @@ int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, 
 int64_t f_check_expr(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src);
 int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr v_e, int64_t v_pos, const char* v_src);
 int64_t f_chk_return(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src);
+int64_t f_chk_field_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fnm, s_Expr v_e, int64_t v_pos, const char* v_src);
+const char* f_idx_slot_type(s_Syms* v_sy, s_Expr v_obj);
+int64_t f_chk_idx_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, s_Expr v_e, int64_t v_pos, const char* v_src);
+int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_check_tail_expr(s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_want, const char* v_src);
+int64_t f_check_tail_if(s_Syms* v_sy, arr_Stmt v_b, arr_Stmt v_eb, const char* v_want, const char* v_src);
+int64_t f_check_tail_stmt(s_Syms* v_sy, s_Stmt v_s, const char* v_want, const char* v_src);
+int64_t f_check_tail_return(s_Syms* v_sy, arr_Stmt v_body, const char* v_want, const char* v_src);
 int64_t f_chk_if(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb, const char* v_src);
 int64_t f_chk_body(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, const char* v_src);
 int64_t f_chk_coll(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_coll, arr_Stmt v_b, const char* v_src);
@@ -3077,7 +3085,7 @@ int64_t f_is_lvalue_assign(s_P* v_p) {
 }
 
 s_Stmt f_mk_lvalue_assign(s_Expr v_lhs, s_Expr v_rhs, int64_t v_spos) {
-    return ({ s_Stmt __m; s_Expr __s = v_lhs; if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = mkv_SIdxAssign(v_obj, v_idx, v_rhs); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = mkv_SFieldAssign(v_obj, v_fnm, v_rhs); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==10){ const char* v_mlt = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==18){ __m = mkv_SExpr(v_lhs, v_spos); } __m; });
+    return ({ s_Stmt __m; s_Expr __s = v_lhs; if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = mkv_SIdxAssign(v_obj, v_idx, v_rhs, v_spos); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = mkv_SFieldAssign(v_obj, v_fnm, v_rhs, v_spos); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==10){ const char* v_mlt = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = mkv_SExpr(v_lhs, v_spos); } else if(__s.tag==18){ __m = mkv_SExpr(v_lhs, v_spos); } __m; });
 }
 
 s_Expr f_parse_decl_rhs(s_P* v_p, const char* v_ann) {
@@ -4336,7 +4344,7 @@ int64_t f_expr_is_str(s_Expr v_e, s_Syms* v_sy) {
 }
 
 int64_t f_confident(const char* v_t) {
-    return (strcmp(v_t, "?") != 0);
+    return ((((int64_t)strlen(v_t)) > 0) && (strcmp(v_t, "?") != 0));
 }
 
 int64_t f_is_num(const char* v_t) {
@@ -6717,26 +6725,26 @@ const char* f_array_elem_from_push(s_Syms* v_sy, arr_Stmt v_body, const char* v_
     return "";
 }
 
-s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e) {
+s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e, int64_t v_pos) {
     const char* v_t;
     const char* v_et;
     if (f_is_empty_maplit(v_e)) {
         v_t = f_map_assign_type(v_sy, v_body, v_name);
         if ((((int64_t)strlen(v_t)) > 0)) {
-            return mkv_SDecl(v_name, mkv_MapLit(v_t, f_no_exprs(), f_no_exprs()), (0 - 1));
+            return mkv_SDecl(v_name, mkv_MapLit(v_t, f_no_exprs(), f_no_exprs()), v_pos);
         }
     }
     if (f_is_empty_array(v_e)) {
         v_et = f_array_elem_from_push(v_sy, v_body, v_name);
         if ((((int64_t)strlen(v_et)) > 0)) {
-            return mkv_SDecl(v_name, mkv_Array(f_no_exprs(), v_et), (0 - 1));
+            return mkv_SDecl(v_name, mkv_Array(f_no_exprs(), v_et), v_pos);
         }
     }
-    return mkv_SDecl(v_name, v_e, (0 - 1));
+    return mkv_SDecl(v_name, v_e, v_pos);
 }
 
 s_Stmt f_stamp_decl(s_Syms* v_sy, arr_Stmt v_body, s_Stmt v_s) {
-    return ({ s_Stmt __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = f_stamp_decl_e(v_sy, v_body, v_name, v_e); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = v_s; } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = v_s; } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_ix = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = v_s; } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = v_s; } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = v_s; } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = v_s; } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = v_s; } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = v_s; } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = v_s; } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = v_s; } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = v_s; } else if(__s.tag==12){ __m = v_s; } else if(__s.tag==13){ __m = v_s; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = v_s; } __m; });
+    return ({ s_Stmt __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); int64_t v_pos = __s.u.SDecl.f2; __m = f_stamp_decl_e(v_sy, v_body, v_name, v_e, v_pos); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = v_s; } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = v_s; } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_ix = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = v_s; } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = v_s; } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = v_s; } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = v_s; } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = v_s; } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = v_s; } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = v_s; } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = v_s; } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = v_s; } else if(__s.tag==12){ __m = v_s; } else if(__s.tag==13){ __m = v_s; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = v_s; } __m; });
 }
 
 int64_t f_seed_one(s_Syms* v_sy, const char* v_name, s_Expr v_e) {
@@ -6948,6 +6956,7 @@ int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Ex
 
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
+    f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
     return 0;
 }
@@ -6999,6 +7008,112 @@ int64_t f_chk_return(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, 
     return 0;
 }
 
+int64_t f_chk_field_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fnm, s_Expr v_e, int64_t v_pos, const char* v_src) {
+    const char* v_slot;
+    const char* v_val;
+    f_field_check(v_sy, v_obj, v_fnm, v_pos, v_src);
+    if ((v_pos >= 0)) {
+        v_slot = f_tcon_field(v_sy, v_obj, v_fnm);
+        v_val = f_type_confident(v_sy, v_e);
+        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_slot, v_val))) {
+            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_val), " to field '."), v_fnm), "' of type "), v_slot));
+        }
+    }
+    f_check_expr(v_funcs, v_sy, v_obj, v_pos, v_src);
+    f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src);
+    return 0;
+}
+
+const char* f_idx_slot_type(s_Syms* v_sy, s_Expr v_obj) {
+    const char* v_t;
+    v_t = f_type_confident(v_sy, v_obj);
+    if (f_is_array_ann(v_t)) {
+        return f_elem_of_ann(v_t);
+    }
+    if (f_is_map_ann(v_t)) {
+        return f_map_vtype(v_t);
+    }
+    return "?";
+}
+
+int64_t f_chk_idx_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, s_Expr v_e, int64_t v_pos, const char* v_src) {
+    const char* v_slot;
+    const char* v_val;
+    f_index_check(v_sy, v_obj, v_pos, v_src);
+    if ((v_pos >= 0)) {
+        v_slot = f_idx_slot_type(v_sy, v_obj);
+        v_val = f_type_confident(v_sy, v_e);
+        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_slot, v_val))) {
+            f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: cannot assign ", v_val), " to element of type "), v_slot));
+        }
+    }
+    f_check_expr(v_funcs, v_sy, v_obj, v_pos, v_src);
+    f_check_expr(v_funcs, v_sy, v_idx, v_pos, v_src);
+    f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src);
+    return 0;
+}
+
+int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    int64_t v_n;
+    int64_t v_i;
+    const char* v_k;
+    const char* v_want;
+    const char* v_got;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((map_str_str_has((v_sy)->evar, scat("@fldn.", v_fname)) == (1 != 1))) {
+        return 0;
+    }
+    v_n = s2i(map_str_str_get((v_sy)->evar, scat("@fldn.", v_fname)));
+    if ((arr_Expr_len(v_args) != v_n)) {
+        return 0;
+    }
+    v_i = 0;
+    while ((v_i < arr_Expr_len(v_args))) {
+        v_k = scat(scat(scat("@fld.", v_fname), "."), i2s(v_i));
+        if (map_str_str_has((v_sy)->evar, v_k)) {
+            v_want = map_str_str_get((v_sy)->evar, v_k);
+            v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
+            if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_want, v_got))) {
+                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of '"), v_fname), "' expects "), v_want), ", got "), v_got));
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
+int64_t f_check_tail_expr(s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_want, const char* v_src) {
+    const char* v_got;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    v_got = f_type_confident(v_sy, v_e);
+    if ((f_confident(v_got) && f_incompatible(v_want, v_got))) {
+        f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
+    }
+    return 0;
+}
+
+int64_t f_check_tail_if(s_Syms* v_sy, arr_Stmt v_b, arr_Stmt v_eb, const char* v_want, const char* v_src) {
+    f_check_tail_return(v_sy, v_b, v_want, v_src);
+    f_check_tail_return(v_sy, v_eb, v_want, v_src);
+    return 0;
+}
+
+int64_t f_check_tail_stmt(s_Syms* v_sy, s_Stmt v_s, const char* v_want, const char* v_src) {
+    return ({ int64_t __m; s_Stmt __s = v_s; if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); int64_t v_pos = __s.u.SExpr.f1; __m = f_check_tail_expr(v_sy, v_e, v_pos, v_want, v_src); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_check_tail_if(v_sy, v_b, v_eb, v_want, v_src); } else if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); int64_t v_pos = __s.u.SDecl.f2; __m = 0; } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = 0; } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); int64_t v_pos = __s.u.SAssign.f2; __m = 0; } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_i = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); int64_t v_pos = __s.u.SIdxAssign.f3; __m = 0; } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); int64_t v_pos = __s.u.SFieldAssign.f3; __m = 0; } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); int64_t v_pos = __s.u.SReturn.f1; __m = 0; } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); int64_t v_pos = __s.u.SPrint.f1; __m = 0; } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = 0; } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = 0; } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = 0; } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = 0; } else if(__s.tag==12){ __m = 0; } else if(__s.tag==13){ __m = 0; } __m; });
+}
+
+int64_t f_check_tail_return(s_Syms* v_sy, arr_Stmt v_body, const char* v_want, const char* v_src) {
+    if ((arr_Stmt_len(v_body) == 0)) {
+        return 0;
+    }
+    f_check_tail_stmt(v_sy, arr_Stmt_get(v_body, (arr_Stmt_len(v_body) - 1)), v_want, v_src);
+    return 0;
+}
+
 int64_t f_chk_if(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb, const char* v_src) {
     f_check_expr(v_funcs, v_sy, v_c, (0 - 1), v_src);
     f_check_stmts(v_funcs, v_sy, v_b, v_src);
@@ -7026,7 +7141,7 @@ int64_t f_chk_range(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_lo, s_Expr v_hi, ar
 }
 
 int64_t f_check_stmt(arr_Func v_funcs, s_Syms* v_sy, s_Stmt v_s, const char* v_src) {
-    return ({ int64_t __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); int64_t v_pos = __s.u.SDecl.f2; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = f_check_expr(v_funcs, v_sy, v_e, (0 - 1), v_src); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); int64_t v_pos = __s.u.SAssign.f2; __m = f_chk_assign(v_funcs, v_sy, v_name, v_e, v_pos, v_src); } else if(__s.tag==3){ s_Expr v_obj = *(__s.u.SIdxAssign.f0); s_Expr v_idx = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = f_chk3(v_funcs, v_sy, v_obj, v_idx, v_e, (0 - 1), v_src); } else if(__s.tag==4){ s_Expr v_obj = *(__s.u.SFieldAssign.f0); const char* v_fnm = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = f_chk2(v_funcs, v_sy, v_obj, v_e, (0 - 1), v_src); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); int64_t v_pos = __s.u.SReturn.f1; __m = f_chk_return(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); int64_t v_pos = __s.u.SPrint.f1; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_chk_if(v_funcs, v_sy, v_c, v_b, v_eb, v_src); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = f_chk_body(v_funcs, v_sy, v_c, v_b, v_src); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = f_chk_coll(v_funcs, v_sy, v_coll, v_b, v_src); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = f_chk_coll(v_funcs, v_sy, v_coll, v_b, v_src); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = f_chk_range(v_funcs, v_sy, v_lo, v_hi, v_b, v_src); } else if(__s.tag==12){ __m = 0; } else if(__s.tag==13){ __m = 0; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); int64_t v_pos = __s.u.SExpr.f1; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } __m; });
+    return ({ int64_t __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); int64_t v_pos = __s.u.SDecl.f2; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = f_check_expr(v_funcs, v_sy, v_e, (0 - 1), v_src); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); int64_t v_pos = __s.u.SAssign.f2; __m = f_chk_assign(v_funcs, v_sy, v_name, v_e, v_pos, v_src); } else if(__s.tag==3){ s_Expr v_obj = *(__s.u.SIdxAssign.f0); s_Expr v_idx = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); int64_t v_pos = __s.u.SIdxAssign.f3; __m = f_chk_idx_assign(v_funcs, v_sy, v_obj, v_idx, v_e, v_pos, v_src); } else if(__s.tag==4){ s_Expr v_obj = *(__s.u.SFieldAssign.f0); const char* v_fnm = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); int64_t v_pos = __s.u.SFieldAssign.f3; __m = f_chk_field_assign(v_funcs, v_sy, v_obj, v_fnm, v_e, v_pos, v_src); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); int64_t v_pos = __s.u.SReturn.f1; __m = f_chk_return(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); int64_t v_pos = __s.u.SPrint.f1; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_chk_if(v_funcs, v_sy, v_c, v_b, v_eb, v_src); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = f_chk_body(v_funcs, v_sy, v_c, v_b, v_src); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = f_chk_coll(v_funcs, v_sy, v_coll, v_b, v_src); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = f_chk_coll(v_funcs, v_sy, v_coll, v_b, v_src); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = f_chk_range(v_funcs, v_sy, v_lo, v_hi, v_b, v_src); } else if(__s.tag==12){ __m = 0; } else if(__s.tag==13){ __m = 0; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); int64_t v_pos = __s.u.SExpr.f1; __m = f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src); } __m; });
 }
 
 int64_t f_check_stmts(arr_Func v_funcs, s_Syms* v_sy, arr_Stmt v_body, const char* v_src) {
@@ -7041,29 +7156,37 @@ int64_t f_check_stmts(arr_Func v_funcs, s_Syms* v_sy, arr_Stmt v_body, const cha
 
 int64_t f_check_fn(arr_Func v_funcs, s_Syms* v_base, s_Func v_f, const char* v_src) {
     s_Syms v_sy;
+    arr_Stmt v_fb;
     const char* v_hd;
     v_sy = f_seed_fn(v_base, v_f);
-    v_hd = f_hoist_decls((&v_sy), (v_f).body, "    ");
+    v_fb = f_stamp_empty_maps((&v_sy), (v_f).body);
+    v_sy = f_seed_fn(v_base, v_f);
+    v_hd = f_hoist_decls((&v_sy), v_fb, "    ");
     if ((((int64_t)strlen((v_f).ret)) > 0)) {
         f_set_ty((&v_sy), "@chkret", (v_f).ret);
     }
-    f_check_stmts(v_funcs, (&v_sy), (v_f).body, v_src);
+    f_check_stmts(v_funcs, (&v_sy), v_fb, v_src);
+    if ((((int64_t)strlen((v_f).ret)) > 0)) {
+        f_check_tail_return((&v_sy), v_fb, (v_f).ret, v_src);
+    }
     return 0;
 }
 
 int64_t f_check_program(arr_Func v_funcs, s_Syms* v_base, arr_Stmt v_mains, const char* v_src) {
     int64_t v_i;
     s_Syms v_msy;
+    arr_Stmt v_mm;
     const char* v_mhd;
     v_i = 0;
     while ((v_i < arr_Func_len(v_funcs))) {
         f_check_fn(v_funcs, v_base, arr_Func_get(v_funcs, v_i), v_src);
         v_i = (v_i + 1);
     }
-    v_msy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
-    (v_msy).vty = map_str_str_new();
-    v_mhd = f_hoist_decls((&v_msy), v_mains, "    ");
-    f_check_stmts(v_funcs, (&v_msy), v_mains, v_src);
+    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_mm = f_stamp_empty_maps((&v_msy), v_mains);
+    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_mhd = f_hoist_decls((&v_msy), v_mm, "    ");
+    f_check_stmts(v_funcs, (&v_msy), v_mm, v_src);
     return 0;
 }
 
@@ -7107,6 +7230,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_spi;
     int64_t v_si;
     s_StructDef v_sd;
+    int64_t v_uidx;
     int64_t v_ei;
     s_EnumDef v_ed;
     const char* v_order;
@@ -7328,10 +7452,16 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_sd = arr_StructDef_get(v_structs, v_si);
         map_str_str_set((v_base).ctors, (v_sd).name, "1");
         v_fi = 0;
+        v_uidx = 0;
         while ((v_fi < arr_str_len((v_sd).fnames))) {
             map_str_str_set((v_base).fld, f_fkey((v_sd).name, arr_str_get((v_sd).fnames, v_fi)), arr_str_get((v_sd).ftypes, v_fi));
+            if ((strcmp(arr_str_get((v_sd).fnames, v_fi), "__vt") != 0)) {
+                map_str_str_set((v_base).evar, scat(scat(scat("@fld.", (v_sd).name), "."), i2s(v_uidx)), arr_str_get((v_sd).ftypes, v_fi));
+                v_uidx = (v_uidx + 1);
+            }
             v_fi = (v_fi + 1);
         }
+        map_str_str_set((v_base).evar, scat("@fldn.", (v_sd).name), i2s(v_uidx));
         v_si = (v_si + 1);
     }
     v_enums = f_box_cross_enums(v_enums);

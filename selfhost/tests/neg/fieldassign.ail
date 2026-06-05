@@ -1,0 +1,4 @@
+// EXPECT: cannot assign str to field '.x' of type i64
+st P { x:i64 }
+mu p := P(1)
+p.x = "no"

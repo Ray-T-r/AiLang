@@ -197,20 +197,20 @@ fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
   }
   ""
 }
-fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
+fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr, pos:i64) -> Stmt {
   if is_empty_maplit(e) {
     t := map_assign_type(sy, body, name)
-    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), -1)   // typing handled by pass-1 + hoist; -1 = synthetic (codegen-only, checker already ran)
+    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), pos)   // preserve source pos (codegen ignores it; the checker walks stamped bodies and needs it)
   }
   if is_empty_array(e) {
     et := array_elem_from_push(sy, body, name)
-    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et), -1)              // pin elem type from first push; -1 = synthetic
+    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et), pos)             // pin elem type from first push
   }
-  SDecl(name, e, -1)
+  SDecl(name, e, pos)
 }
 fn stamp_decl(sy:*Syms, body:[Stmt], s:Stmt) -> Stmt {
   mt s {
-    SDecl(name,e)         => stamp_decl_e(sy, body, name, e);
+    SDecl(name,e,pos)     => stamp_decl_e(sy, body, name, e, pos);
     SDestructure(names,e) => s;
     SAssign(name,e)       => s;
     SIdxAssign(o,ix,e)    => s;
@@ -381,6 +381,7 @@ fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> 
 }
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   callarg_check(funcs, sy, fname, args, pos, src)
+  ctor_arg_check(sy, fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
 }
 fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
@@ -441,6 +442,106 @@ fn chk_return(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
   check_expr(funcs, sy, e, pos, src)
   0
 }
+// `obj.fnm = e` — the field must exist on a struct (field_check, fail-fast) and the
+// value's confident type must be compatible with the field's slot type.
+fn chk_field_assign(funcs:[Func], sy:*Syms, obj:Expr, fnm:str, e:Expr, pos:i64, src:str) -> i64 {
+  field_check(sy, obj, fnm, pos, src)
+  if pos >= 0 {
+    slot := tcon_field(sy, obj, fnm)
+    val := type_confident(sy, e)
+    if confident(slot) && confident(val) && incompatible(slot, val) {
+      report_at(src, pos, "type mismatch: cannot assign " + val + " to field '." + fnm + "' of type " + slot)
+    }
+  }
+  check_expr(funcs, sy, obj, pos, src)
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `obj[idx] = e` — obj must be indexable (index_check, fail-fast) and the value's
+// confident type must be compatible with the array elem / map value type.
+fn idx_slot_type(sy:*Syms, obj:Expr) -> str {
+  t := type_confident(sy, obj)
+  if is_array_ann(t) rt elem_of_ann(t)
+  if is_map_ann(t) rt map_vtype(t)
+  "?"
+}
+fn chk_idx_assign(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, e:Expr, pos:i64, src:str) -> i64 {
+  index_check(sy, obj, pos, src)
+  if pos >= 0 {
+    slot := idx_slot_type(sy, obj)
+    val := type_confident(sy, e)
+    if confident(slot) && confident(val) && incompatible(slot, val) {
+      report_at(src, pos, "type mismatch: cannot assign " + val + " to element of type " + slot)
+    }
+  }
+  check_expr(funcs, sy, obj, pos, src)
+  check_expr(funcs, sy, idx, pos, src)
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `Name(a, b, …)` for a struct/class ctor — positional field types are registered
+// as @fld.<Name>.<i> (user fields only, __vt skipped) with arity @fldn.<Name>.
+// Skips entirely unless the arg count matches the registered arity, so any
+// vtable/lowering surprise degrades to no-op rather than a wrong report.
+fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if has(sy.evar, "@fldn." + fname) == false rt 0
+  n := str_to_int(sy.evar["@fldn." + fname])
+  if len(args) != n rt 0
+  mu i := 0
+  lp i < len(args) {
+    k := "@fld." + fname + "." + int_to_str(i)
+    if has(sy.evar, k) {
+      want := sy.evar[k]
+      got := type_confident(sy, args[i])
+      if confident(want) && confident(got) && incompatible(want, got) {
+        report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of '" + fname + "' expects " + want + ", got " + got)
+      }
+    }
+    i += 1
+  }
+  0
+}
+// Tail-expression return check: the last statement of a body is the implicit
+// return when there's no `rt`. Mirrors last_expr_type/either_return — an SExpr
+// tail is the return value; a tail SIf returns through BOTH branches.
+fn check_tail_expr(sy:*Syms, e:Expr, pos:i64, want:str, src:str) -> i64 {
+  if pos < 0 rt 0
+  got := type_confident(sy, e)
+  if confident(got) && incompatible(want, got) {
+    report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+  }
+  0
+}
+fn check_tail_if(sy:*Syms, b:[Stmt], eb:[Stmt], want:str, src:str) -> i64 {
+  check_tail_return(sy, b, want, src)
+  check_tail_return(sy, eb, want, src)
+  0
+}
+fn check_tail_stmt(sy:*Syms, s:Stmt, want:str, src:str) -> i64 {
+  mt s {
+    SExpr(e,pos)             => check_tail_expr(sy, e, pos, want, src);
+    SIf(c,b,eb)              => check_tail_if(sy, b, eb, want, src);
+    SDecl(name,e,pos)        => 0;
+    SDestructure(names,e)    => 0;
+    SAssign(name,e,pos)      => 0;
+    SIdxAssign(o,i,e,pos)    => 0;
+    SFieldAssign(o,f,e,pos)  => 0;
+    SReturn(e,pos)           => 0;
+    SPrint(e,pos)            => 0;
+    SLoop(c,b)               => 0;
+    SLoopIn(vnm,coll,b)      => 0;
+    SLoopKV(kn,vn,coll,b)    => 0;
+    SLoopRange(v,lo,hi,b)    => 0;
+    SBreak                   => 0;
+    SContinue                => 0;
+  }
+}
+fn check_tail_return(sy:*Syms, body:[Stmt], want:str, src:str) -> i64 {
+  if len(body) == 0 rt 0
+  check_tail_stmt(sy, body[len(body) - 1], want, src)
+  0
+}
 fn chk_if(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], src:str) -> i64 {
   check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); check_stmts(funcs, sy, eb, src); 0
 }
@@ -458,8 +559,8 @@ fn check_stmt(funcs:[Func], sy:*Syms, s:Stmt, src:str) -> i64 {
     SDecl(name,e,pos)        => check_expr(funcs, sy, e, pos, src);
     SDestructure(names,e)    => check_expr(funcs, sy, e, -1, src);
     SAssign(name,e,pos)      => chk_assign(funcs, sy, name, e, pos, src);
-    SIdxAssign(obj,idx,e)    => chk3(funcs, sy, obj, idx, e, -1, src);
-    SFieldAssign(obj,fnm,e)  => chk2(funcs, sy, obj, e, -1, src);
+    SIdxAssign(obj,idx,e,pos)    => chk_idx_assign(funcs, sy, obj, idx, e, pos, src);
+    SFieldAssign(obj,fnm,e,pos)  => chk_field_assign(funcs, sy, obj, fnm, e, pos, src);
     SReturn(e,pos)           => chk_return(funcs, sy, e, pos, src);
     SPrint(e,pos)            => check_expr(funcs, sy, e, pos, src);
     SIf(c,b,eb)              => chk_if(funcs, sy, c, b, eb, src);
@@ -479,18 +580,22 @@ fn check_stmts(funcs:[Func], sy:*Syms, body:[Stmt], src:str) -> i64 {
 }
 fn check_fn(funcs:[Func], base:*Syms, f:Func, src:str) -> i64 {
   mu sy := seed_fn(base, f)
-  hd := hoist_decls(&sy, f.body, "    ")             // discard string; populates sy.vty for locals
+  fb := stamp_empty_maps(&sy, f.body)               // infer un-annotated `m := {}` / `xs := []` (mirror codegen 1144)
+  sy = seed_fn(base, f)                              // discard inference's scratch typing (mirror codegen 1145)
+  hd := hoist_decls(&sy, fb, "    ")                 // populate sy.vty for locals from the STAMPED body
   if len(f.ret) > 0 { set_ty(&sy, "@chkret", f.ret) }   // explicit `-> T` → enable the return-type check
-  check_stmts(funcs, &sy, f.body, src)
+  check_stmts(funcs, &sy, fb, src)
+  if len(f.ret) > 0 { check_tail_return(&sy, fb, f.ret, src) }   // implicit tail-expr return vs declared
   0
 }
 fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
   mu i := 0
   lp i < len(funcs) { check_fn(funcs, base, funcs[i], src); i += 1 }
-  mu msy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
-  msy.vty = {}
-  mhd := hoist_decls(&msy, mains, "    ")
-  check_stmts(funcs, &msy, mains, src)
+  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mm := stamp_empty_maps(&msy, mains)               // infer un-annotated `m := {}` (mirror codegen 1159)
+  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)   // re-seed fresh — discard inference scratch (codegen 1160)
+  mhd := hoist_decls(&msy, mm, "    ")
+  check_stmts(funcs, &msy, mm, src)
   0
 }
 
@@ -637,7 +742,16 @@ fn compile_to_c(src:str, dir:str) -> str {
     sd := structs[si]
     base.ctors[sd.name] = "1"
     mu fi := 0
-    lp fi < len(sd.fnames) { base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]; fi += 1 }
+    mu uidx := 0
+    lp fi < len(sd.fnames) {
+      base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]
+      if sd.fnames[fi] != "__vt" {                                   // skip the hidden vtable ptr — ctors don't take it
+        base.evar["@fld." + sd.name + "." + int_to_str(uidx)] = sd.ftypes[fi]   // positional user-field type (ctor-arg checks)
+        uidx = uidx + 1
+      }
+      fi += 1
+    }
+    base.evar["@fldn." + sd.name] = int_to_str(uidx)                 // ctor arity (user fields only)
     si += 1
   }
   // Box bare cross-enum fields now that ALL enums are known (mutual recursion),

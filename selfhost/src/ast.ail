@@ -63,8 +63,8 @@ en Stmt {
   SDecl(name:str, e:Expr, pos:i64),       // name := expr  (or  mu name := expr)  — declares; pos = byte offset of the stmt (-1 if synthetic)
   SDestructure(names:[str], e:Expr),  // a, b := expr — destructure a tuple ("_" slot ignores)
   SAssign(name:str, e:Expr, pos:i64),     // name = expr   — reassigns an existing binding; pos = byte offset (-1 if synthetic)
-  SIdxAssign(obj:Expr, idx:Expr, e:Expr),  // obj[idx] = expr
-  SFieldAssign(obj:Expr, fname:str, e:Expr), // obj.field = expr
+  SIdxAssign(obj:Expr, idx:Expr, e:Expr, pos:i64),  // obj[idx] = expr ; pos = byte offset
+  SFieldAssign(obj:Expr, fname:str, e:Expr, pos:i64), // obj.field = expr ; pos = byte offset
   SReturn(e:Expr, pos:i64),               // rt expr ; pos = byte offset (-1 if synthetic)
   SPrint(e:Expr, pos:i64),                // println(expr) ; pos = byte offset
   SIf(cond:Expr, body:[Stmt], else_b:[Stmt]),   // if cond {body} [el {else_b}]

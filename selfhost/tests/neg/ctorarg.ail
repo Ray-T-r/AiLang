@@ -1,0 +1,4 @@
+// EXPECT: field 1 of 'P' expects i64, got str
+st P { x:i64 }
+p := P("a")
+println(p.x)

@@ -863,8 +863,8 @@ fn is_lvalue_assign(p:*P) -> bool {
 // (match arms can't hold `rt`, so this dispatch lives in a helper).
 fn mk_lvalue_assign(lhs:Expr, rhs:Expr, spos:i64) -> Stmt {
   mt lhs {
-    Index(obj, idx)  => SIdxAssign(obj, idx, rhs);
-    Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs);
+    Index(obj, idx)  => SIdxAssign(obj, idx, rhs, spos);
+    Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs, spos);
     Tuple(tes)       => SExpr(lhs, spos);
     BlockE(bb)       => SExpr(lhs, spos);
     Num(v)           => SExpr(lhs, spos);

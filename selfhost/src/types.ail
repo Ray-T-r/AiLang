@@ -290,7 +290,7 @@ fn expr_is_str(e:Expr, sy:*Syms) -> bool { type_of_expr(sy, e) == "str" }
 // These functions are brand-new and called ONLY by the checker pass; the existing
 // `type_of_expr` (and the i64 fallbacks codegen relies on) is left untouched, so
 // the generated C stays byte-identical and the self-host fixpoint holds.
-fn confident(t:str) -> bool { t != "?" }
+fn confident(t:str) -> bool { len(t) > 0 && t != "?" }   // "" (e.g. a void fn's frets) is NOT confident
 // All integer widths + floats + bool are ONE numeric category — the widths are
 // cosmetic (cty lowers i8..u64 to int*/uint*, f32/f64 to double, bool to int),
 // and AiLang freely mixes them. Treating them as one keeps the checker from
