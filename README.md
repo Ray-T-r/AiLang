@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 8,642 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 8,714 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -26,8 +26,10 @@ multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), `cinc` C-header interop,
 C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or an
 external `.cpp`, POSIX), variadic externs
-(`ex fn printf(fmt, ...)`), and the 10 `std/*` modules — sockets, HTTP, TLS,
-Postgres, Redis, WebSocket, JSON, time, str, math — pulled in via `im`.
+(`ex fn printf(fmt, ...)`), OS-thread concurrency (pthread-backed
+`thread_spawn`/`thread_join`, `mutex_*`, and bounded blocking `chan_*` channels,
+POSIX), and the 11 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
+WebSocket, JSON, time, str, math, threads — pulled in via `im`.
 
 ## Benchmarks
 
@@ -67,9 +69,10 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~6,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **8,642 lines, byte-identical** |
-| sample programs | **37**, each output-verified against a frozen fixture |
-| standard library | 10 modules, all compiling |
+| strict fixpoint | `stage2.c == stage3.c` — **8,714 lines, byte-identical** |
+| sample programs | **39**, each output-verified against a frozen fixture |
+| standard library | 11 modules, all compiling |
+| concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
 | type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness/variants/bindings, and call/callback/generic arity |
 | Rust in the build | **none** |
 
