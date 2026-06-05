@@ -541,12 +541,30 @@ fn generic_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i6
   }
   0
 }
+// `ok(x)` is monomorphic on the ENCLOSING fn's result type — it builds a
+// `res_<T>` where T is that fn's ok type, stashed as @ret by seed_fn for every
+// `-> !T` fn. So x must be compatible with T. (incompatible() treats `!T` itself
+// as "skip", so a result fn's returns are otherwise unchecked — this closes that.)
+// Conservative: no @ret (not a result fn) or unknown x → skip.
+fn ok_ret_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if fname != "ok" rt 0
+  if len(args) != 1 rt 0
+  if has(sy.vty, "@ret") == false rt 0
+  want := sy.vty["@ret"]
+  got := type_confident(sy, args[0])
+  if confident(want) && confident(got) && incompatible(sy, want, got) {
+    report_at(src, pos, "type mismatch: ok(" + got + ") but function returns !" + want)
+  }
+  0
+}
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
   hof_arity_check(fname, args, pos, src)
   generic_arity_check(sy, fname, args, pos, src)
+  ok_ret_check(sy, fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
 }
 fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {

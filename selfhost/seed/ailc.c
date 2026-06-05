@@ -1293,6 +1293,7 @@ int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Ex
 int64_t f_lambda_arity(s_Expr v_e);
 int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
 int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, int64_t v_pos, const char* v_src);
@@ -7174,12 +7175,36 @@ int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args
     return 0;
 }
 
+int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    const char* v_want;
+    const char* v_got;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((strcmp(v_fname, "ok") != 0)) {
+        return 0;
+    }
+    if ((arr_Expr_len(v_args) != 1)) {
+        return 0;
+    }
+    if ((map_str_str_has((v_sy)->vty, "@ret") == (1 != 1))) {
+        return 0;
+    }
+    v_want = map_str_str_get((v_sy)->vty, "@ret");
+    v_got = f_type_confident(v_sy, arr_Expr_get(v_args, 0));
+    if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_sy, v_want, v_got))) {
+        f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: ok(", v_got), ") but function returns !"), v_want));
+    }
+    return 0;
+}
+
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_hof_arity_check(v_fname, v_args, v_pos, v_src);
     f_generic_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
+    f_ok_ret_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
     return 0;
 }
