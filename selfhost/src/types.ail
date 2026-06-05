@@ -408,12 +408,45 @@ fn ty_cat(t:str) -> str {
   if t == "?" rt "skip"
   "agg"                                          // a struct / enum name
 }
-fn incompatible(a:str, b:str) -> bool {
+// Is `anc` a (transitive) class-ancestor of `desc`? Walks the @class.parent
+// chain (set only for classes; plain structs/enums have no parent → false).
+fn is_ancestor(sy:*Syms, anc:str, desc:str) -> bool {
+  mu cur := desc
+  lp len(cur) > 0 {
+    if has(sy.evar, "@class.parent." + cur) == false rt false
+    p := sy.evar["@class.parent." + cur]
+    if p == anc rt true
+    cur = p
+  }
+  false
+}
+// Category-only incompatibility — tolerates ALL struct/enum aggregates. Used for
+// literal homogeneity, where polymorphic subclass elements must stay legal.
+fn cat_incompatible(a:str, b:str) -> bool {
   if a == b rt false
   ca := ty_cat(a)
   cb := ty_cat(b)
   if ca == "skip" || cb == "skip" rt false
   if ca == cb rt false
+  true
+}
+// Nominal incompatibility: like cat_incompatible, but two DISTINCT struct/enum
+// names are ALSO incompatible — UNLESS one class is an ancestor of the other, so
+// an upcast (`base = derived`, passing a subclass) stays legal. Two unrelated
+// nominal types (incl. siblings, struct-vs-enum) are flagged.
+fn incompatible(sy:*Syms, a:str, b:str) -> bool {
+  if a == b rt false
+  ca := ty_cat(a)
+  cb := ty_cat(b)
+  if ca == "skip" || cb == "skip" rt false
+  if ca == cb {
+    if ca == "agg" {
+      if is_ancestor(sy, a, b) rt false
+      if is_ancestor(sy, b, a) rt false
+      rt true
+    }
+    rt false
+  }
   true
 }
 

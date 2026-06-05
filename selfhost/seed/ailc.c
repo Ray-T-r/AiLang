@@ -1109,7 +1109,9 @@ const char* f_tcon_bin(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r);
 const char* f_tcon_addr(s_Syms* v_sy, s_Expr v_x);
 const char* f_type_confident(s_Syms* v_sy, s_Expr v_e);
 const char* f_ty_cat(const char* v_t);
-int64_t f_incompatible(const char* v_a, const char* v_b);
+int64_t f_is_ancestor(s_Syms* v_sy, const char* v_anc, const char* v_desc);
+int64_t f_cat_incompatible(const char* v_a, const char* v_b);
+int64_t f_incompatible(s_Syms* v_sy, const char* v_a, const char* v_b);
 const char* f_gen_args(s_Syms* v_sy, arr_Expr v_args);
 const char* f_gen_str(const char* v_s);
 const char* f_gen_var(s_Syms* v_sy, const char* v_name);
@@ -4527,7 +4529,24 @@ const char* f_ty_cat(const char* v_t) {
     return "agg";
 }
 
-int64_t f_incompatible(const char* v_a, const char* v_b) {
+int64_t f_is_ancestor(s_Syms* v_sy, const char* v_anc, const char* v_desc) {
+    const char* v_cur;
+    const char* v_p;
+    v_cur = v_desc;
+    while ((((int64_t)strlen(v_cur)) > 0)) {
+        if ((map_str_str_has((v_sy)->evar, scat("@class.parent.", v_cur)) == (1 != 1))) {
+            return (1 != 1);
+        }
+        v_p = map_str_str_get((v_sy)->evar, scat("@class.parent.", v_cur));
+        if ((strcmp(v_p, v_anc) == 0)) {
+            return (1 == 1);
+        }
+        v_cur = v_p;
+    }
+    return (1 != 1);
+}
+
+int64_t f_cat_incompatible(const char* v_a, const char* v_b) {
     const char* v_ca;
     const char* v_cb;
     if ((strcmp(v_a, v_b) == 0)) {
@@ -4539,6 +4558,32 @@ int64_t f_incompatible(const char* v_a, const char* v_b) {
         return (1 != 1);
     }
     if ((strcmp(v_ca, v_cb) == 0)) {
+        return (1 != 1);
+    }
+    return (1 == 1);
+}
+
+int64_t f_incompatible(s_Syms* v_sy, const char* v_a, const char* v_b) {
+    const char* v_ca;
+    const char* v_cb;
+    if ((strcmp(v_a, v_b) == 0)) {
+        return (1 != 1);
+    }
+    v_ca = f_ty_cat(v_a);
+    v_cb = f_ty_cat(v_b);
+    if (((strcmp(v_ca, "skip") == 0) || (strcmp(v_cb, "skip") == 0))) {
+        return (1 != 1);
+    }
+    if ((strcmp(v_ca, v_cb) == 0)) {
+        if ((strcmp(v_ca, "agg") == 0)) {
+            if (f_is_ancestor(v_sy, v_a, v_b)) {
+                return (1 != 1);
+            }
+            if (f_is_ancestor(v_sy, v_b, v_a)) {
+                return (1 != 1);
+            }
+            return (1 == 1);
+        }
         return (1 != 1);
     }
     return (1 == 1);
@@ -6843,6 +6888,7 @@ int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_
 
 int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     int64_t v_fi;
+    int64_t v_np;
     arr_str v_pts;
     int64_t v_i;
     const char* v_at;
@@ -6856,12 +6902,17 @@ int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr
     if ((arr_str_len((arr_Func_get(v_funcs, v_fi)).tparams) > 0)) {
         return 0;
     }
+    v_np = arr_str_len((arr_Func_get(v_funcs, v_fi)).params);
+    if ((arr_Expr_len(v_args) != v_np)) {
+        f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
+        return 0;
+    }
     v_pts = (arr_Func_get(v_funcs, v_fi)).ptypes;
     v_i = 0;
     while ((v_i < arr_Expr_len(v_args))) {
         if ((v_i < arr_str_len(v_pts))) {
             v_at = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
-            if ((f_confident(v_at) && f_incompatible(arr_str_get(v_pts, v_i), v_at))) {
+            if ((f_confident(v_at) && f_incompatible(v_sy, arr_str_get(v_pts, v_i), v_at))) {
                 f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: argument ", i2s((v_i + 1))), " to '"), v_fname), "' expects "), arr_str_get(v_pts, v_i)), ", got "), v_at));
             }
         }
@@ -6968,7 +7019,7 @@ int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t
             if ((strcmp(v_base, "?") == 0)) {
                 v_base = v_t;
             } else {
-                if (f_incompatible(v_base, v_t)) {
+                if (f_cat_incompatible(v_base, v_t)) {
                     f_report_at(v_src, v_pos, scat(scat(scat(scat(v_msg, " "), v_base), " and "), v_t));
                 }
             }
@@ -7035,7 +7086,7 @@ int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr 
     if ((v_pos >= 0)) {
         v_lt = f_tcon_var(v_sy, v_name);
         v_rr = f_type_confident(v_sy, v_e);
-        if (((f_confident(v_lt) && f_confident(v_rr)) && f_incompatible(v_lt, v_rr))) {
+        if (((f_confident(v_lt) && f_confident(v_rr)) && f_incompatible(v_sy, v_lt, v_rr))) {
             f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_rr), " to '"), v_name), "' of type "), v_lt));
         }
     }
@@ -7050,7 +7101,7 @@ int64_t f_chk_return(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, 
         if (map_str_str_has((v_sy)->vty, "@chkret")) {
             v_want = map_str_str_get((v_sy)->vty, "@chkret");
             v_got = f_type_confident(v_sy, v_e);
-            if ((f_confident(v_got) && f_incompatible(v_want, v_got))) {
+            if ((f_confident(v_got) && f_incompatible(v_sy, v_want, v_got))) {
                 f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
             }
         }
@@ -7066,7 +7117,7 @@ int64_t f_chk_field_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const c
     if ((v_pos >= 0)) {
         v_slot = f_tcon_field(v_sy, v_obj, v_fnm);
         v_val = f_type_confident(v_sy, v_e);
-        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_slot, v_val))) {
+        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_sy, v_slot, v_val))) {
             f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_val), " to field '."), v_fnm), "' of type "), v_slot));
         }
     }
@@ -7094,7 +7145,7 @@ int64_t f_chk_idx_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_
     if ((v_pos >= 0)) {
         v_slot = f_idx_slot_type(v_sy, v_obj);
         v_val = f_type_confident(v_sy, v_e);
-        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_slot, v_val))) {
+        if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_sy, v_slot, v_val))) {
             f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: cannot assign ", v_val), " to element of type "), v_slot));
         }
     }
@@ -7127,7 +7178,7 @@ int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int
         if (map_str_str_has((v_sy)->evar, v_k)) {
             v_want = map_str_str_get((v_sy)->evar, v_k);
             v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
-            if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_want, v_got))) {
+            if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_sy, v_want, v_got))) {
                 f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of '"), v_fname), "' expects "), v_want), ", got "), v_got));
             }
         }
@@ -7142,7 +7193,7 @@ int64_t f_check_tail_expr(s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v
         return 0;
     }
     v_got = f_type_confident(v_sy, v_e);
-    if ((f_confident(v_got) && f_incompatible(v_want, v_got))) {
+    if ((f_confident(v_got) && f_incompatible(v_sy, v_want, v_got))) {
         f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
     }
     return 0;

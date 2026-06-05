@@ -1,0 +1,6 @@
+// EXPECT: cannot assign B to 'a' of type A
+st A { x:i64 }
+st B { y:i64 }
+mu a := A(1)
+a = B(2)
+println(a.x)

@@ -319,12 +319,17 @@ fn callarg_check(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:st
   fi := find_func_i(funcs, fname)
   if fi < 0 rt 0                                     // not a non-generic user fn → skip
   if len(funcs[fi].tparams) > 0 rt 0                 // belt-and-braces: never a generic
+  np := len(funcs[fi].params)                        // params is authoritative (untyped params still counted)
+  if len(args) != np {
+    report_at(src, pos, "function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+    rt 0
+  }
   pts := funcs[fi].ptypes
   mu i := 0
   lp i < len(args) {
     if i < len(pts) {
       at := type_confident(sy, args[i])
-      if confident(at) && incompatible(pts[i], at) {
+      if confident(at) && incompatible(sy, pts[i], at) {
         report_at(src, pos, "type mismatch: argument " + int_to_str(i + 1) + " to '" + fname + "' expects " + pts[i] + ", got " + at)
       }
     }
@@ -392,7 +397,7 @@ fn homog_check(sy:*Syms, elems:[Expr], msg:str, pos:i64, src:str) -> i64 {
   lp i < len(elems) {
     t := type_confident(sy, elems[i])
     if confident(t) {
-      if base == "?" { base = t } el if incompatible(base, t) { report_at(src, pos, msg + " " + base + " and " + t) }
+      if base == "?" { base = t } el if cat_incompatible(base, t) { report_at(src, pos, msg + " " + base + " and " + t) }
     }
     i += 1
   }
@@ -457,7 +462,7 @@ fn chk_assign(funcs:[Func], sy:*Syms, name:str, e:Expr, pos:i64, src:str) -> i64
   if pos >= 0 {
     lt := tcon_var(sy, name)
     rr := type_confident(sy, e)
-    if confident(lt) && confident(rr) && incompatible(lt, rr) {
+    if confident(lt) && confident(rr) && incompatible(sy, lt, rr) {
       report_at(src, pos, "type mismatch: cannot assign " + rr + " to '" + name + "' of type " + lt)
     }
   }
@@ -472,7 +477,7 @@ fn chk_return(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     if has(sy.vty, "@chkret") {
       want := sy.vty["@chkret"]
       got := type_confident(sy, e)
-      if confident(got) && incompatible(want, got) {
+      if confident(got) && incompatible(sy, want, got) {
         report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
       }
     }
@@ -487,7 +492,7 @@ fn chk_field_assign(funcs:[Func], sy:*Syms, obj:Expr, fnm:str, e:Expr, pos:i64, 
   if pos >= 0 {
     slot := tcon_field(sy, obj, fnm)
     val := type_confident(sy, e)
-    if confident(slot) && confident(val) && incompatible(slot, val) {
+    if confident(slot) && confident(val) && incompatible(sy, slot, val) {
       report_at(src, pos, "type mismatch: cannot assign " + val + " to field '." + fnm + "' of type " + slot)
     }
   }
@@ -508,7 +513,7 @@ fn chk_idx_assign(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, e:Expr, pos:i64, s
   if pos >= 0 {
     slot := idx_slot_type(sy, obj)
     val := type_confident(sy, e)
-    if confident(slot) && confident(val) && incompatible(slot, val) {
+    if confident(slot) && confident(val) && incompatible(sy, slot, val) {
       report_at(src, pos, "type mismatch: cannot assign " + val + " to element of type " + slot)
     }
   }
@@ -535,7 +540,7 @@ fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
     if has(sy.evar, k) {
       want := sy.evar[k]
       got := type_confident(sy, args[i])
-      if confident(want) && confident(got) && incompatible(want, got) {
+      if confident(want) && confident(got) && incompatible(sy, want, got) {
         report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of '" + fname + "' expects " + want + ", got " + got)
       }
     }
@@ -549,7 +554,7 @@ fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
 fn check_tail_expr(sy:*Syms, e:Expr, pos:i64, want:str, src:str) -> i64 {
   if pos < 0 rt 0
   got := type_confident(sy, e)
-  if confident(got) && incompatible(want, got) {
+  if confident(got) && incompatible(sy, want, got) {
     report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
   }
   0
