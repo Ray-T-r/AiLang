@@ -441,7 +441,7 @@ fn vn_has(vnames:[str], v:str) -> bool {
 // each a no-op when the scrutinee type is "?" (so today's programs all still pass):
 //   (1) every arm names a real variant OF the scrutinee's enum;
 //   (2) exhaustiveness — every variant of that enum appears as an arm.
-fn match_check(sy:*Syms, scrut:Expr, vnames:[str], pos:i64, src:str) -> i64 {
+fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
   ty := type_confident(sy, scrut)
   if confident(ty) == false rt 0                       // unknown scrutinee → skip
@@ -449,12 +449,22 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], pos:i64, src:str) -> i64 {
     report_at(src, pos, "type error: match on non-enum value of type " + ty)
     rt 0
   }
-  // (1) arm validity — each arm must be a variant of enum `ty`
+  // (1) per arm: must be a variant of enum `ty`, and bind no more vars than the
+  // variant has fields. Binding fewer ignores trailing fields (legal); binding
+  // more would read a nonexistent union member. @vfldn is registered only for
+  // tuple/fn-free variants, so subtler variants degrade to no-op (has → false).
   mu i := 0
   lp i < len(vnames) {
     nm := vnames[i]
     if is_variant(sy, nm) == false || sy.evar[nm] != ty {
       report_at(src, pos, "unknown variant '" + nm + "' in match on " + ty)
+    }
+    nb := len(split_semi(vbinds[i]))
+    if has(sy.evar, "@vfldn." + nm) {
+      nf := str_to_int(sy.evar["@vfldn." + nm])
+      if nb > nf {
+        report_at(src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
+      }
     }
     i += 1
   }
@@ -469,8 +479,8 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], pos:i64, src:str) -> i64 {
   }
   0
 }
-fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, vnames:[str], bd:[Expr], pos:i64, src:str) -> i64 {
-  match_check(sy, sc, vnames, pos, src)
+fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bd:[Expr], pos:i64, src:str) -> i64 {
+  match_check(sy, sc, vnames, vbinds, pos, src)
   check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); 0
 }
 fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
@@ -585,7 +595,7 @@ fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     Addr(x)             => check_expr(funcs, sy, x, pos, src);
     Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
     MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
-    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, vn, bd, pos, src);
+    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, vn, vb, bd, pos, src);
     IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
     Try(x)              => chk_try(funcs, sy, x, pos, src);
     Tuple(elems)        => chk_args(funcs, sy, elems, pos, src);

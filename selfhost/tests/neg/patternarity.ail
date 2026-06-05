@@ -1,0 +1,9 @@
+// EXPECT: variant 'A' binds 2 but has 1 field(s)
+en E { A(x:i64), B }
+fn f(e:E) -> i64 {
+  mt e {
+    A(p, q) => p;
+    B       => 0;
+  }
+}
+println(f(B))
