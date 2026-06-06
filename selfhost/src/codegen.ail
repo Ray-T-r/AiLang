@@ -470,6 +470,32 @@ fn find_gfn(sy:*Syms, name:str) -> Func {
   mu noa:[str] := []
   Func("", noa, noa, "", "", noa, nob)
 }
+// The concrete type for a SPECIFIC type param `tp`, inferred from the arg whose param
+// type is `tp` (or `[tp]` → its element). Enables distinct multi-param generics `<A,B>`.
+fn targ_for(sy:*Syms, f:Func, tp:str, args:[Expr]) -> str {
+  mu i := 0
+  lp i < len(f.ptypes) {
+    if i < len(args) {
+      if f.ptypes[i] == tp rt type_of_expr(sy, args[i])
+      if f.ptypes[i] == "[" + tp + "]" rt elem_of_ann(type_of_expr(sy, args[i]))
+    }
+    i += 1
+  }
+  "i64"
+}
+// Substitute EVERY type param in `ty` with its OWN inferred type (so `<A,B>` map to
+// different types) — T→targ(T), [T]→[targ(T)], else unchanged. (subst_tparam used one
+// shared type for all params; this is its per-param generalization.)
+fn subst_multi(sy:*Syms, f:Func, ty:str, args:[Expr]) -> str {
+  mu i := 0
+  lp i < len(f.tparams) {
+    tp := f.tparams[i]
+    if ty == tp rt targ_for(sy, f, tp, args)
+    if ty == "[" + tp + "]" rt "[" + targ_for(sy, f, tp, args) + "]"
+    i += 1
+  }
+  ty
+}
 fn generic_T(sy:*Syms, f:Func, args:[Expr]) -> str {
   mu i := 0
   lp i < len(f.ptypes) {
@@ -502,11 +528,10 @@ fn inline_stmt_value(sy:*Syms, s:Stmt) -> str {
 }
 fn gen_generic_call(sy:*Syms, name:str, args:[Expr]) -> str {
   f := find_gfn(sy, name)
-  gt := generic_T(sy, f, args)
   mu o := "({ "
   mu i := 0
   lp i < len(f.params) {
-    pt := subst_tparam(f, f.ptypes[i], gt)   // substitutes both `T` and `[T]`
+    pt := subst_multi(sy, f, f.ptypes[i], args)   // per-tparam: each `<A,B>` → its own inferred type
     set_ty(sy, f.params[i], pt)
     o = o + cty(pt) + " v_" + f.params[i] + " = " + gen_expr(sy, args[i]) + "; "
     i += 1

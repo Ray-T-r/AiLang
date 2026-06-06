@@ -1230,6 +1230,8 @@ int64_t f_is_tparam(s_Func v_f, const char* v_ty);
 int64_t f_is_array_tparam(s_Func v_f, const char* v_ty);
 const char* f_subst_tparam(s_Func v_f, const char* v_ty, const char* v_concrete);
 s_Func f_find_gfn(s_Syms* v_sy, const char* v_name);
+const char* f_targ_for(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args);
+const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v_args);
 const char* f_generic_T(s_Syms* v_sy, s_Func v_f, arr_Expr v_args);
 const char* f_inline_stmt_value(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_generic_call(s_Syms* v_sy, const char* v_name, arr_Expr v_args);
@@ -1341,6 +1343,7 @@ const char* f_mono_of(const char* v_head, arr_str v_args);
 const char* f_mono_name(const char* v_ty);
 const char* f_subst_struct_ty(arr_str v_tparams, arr_str v_args, const char* v_ty);
 arr_str f_mk1(const char* v_s);
+arr_str f_mk2(const char* v_a, const char* v_b);
 int64_t f_has_struct(arr_StructDef v_xs, const char* v_nm);
 s_StructDef f_gen_instance(s_StructDef v_gt, arr_str v_args);
 s_StructDef f_find_gstruct(arr_StructDef v_gstructs, const char* v_nm);
@@ -4561,7 +4564,6 @@ const char* f_gvariant_mangle(s_Syms* v_sy, const char* v_bareV, arr_Expr v_args
 const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_gm;
     s_Func v_f;
-    const char* v_gt;
     const char* v_pdef;
     const char* v_rcv;
     const char* v_mk;
@@ -4578,11 +4580,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (f_is_generic(v_sy, v_fname)) {
         v_f = f_find_gfn(v_sy, v_fname);
-        v_gt = f_generic_T(v_sy, v_f, v_args);
-        if (f_is_tparam(v_f, (v_f).ret)) {
-            return v_gt;
-        }
-        return (v_f).ret;
+        return f_subst_multi(v_sy, v_f, (v_f).ret, v_args);
     }
     if ((((arr_Expr_len(v_args) >= 1) && (strcmp(f_var_name(arr_Expr_get(v_args, 0)), "super") == 0)) && map_str_str_has((v_sy)->evar, "@curclass"))) {
         v_pdef = f_defining_class(v_sy, f_class_parent(v_sy, map_str_str_get((v_sy)->evar, "@curclass")), v_fname);
@@ -5515,6 +5513,40 @@ s_Func f_find_gfn(s_Syms* v_sy, const char* v_name) {
     return mk_Func("", v_noa, v_noa, "", "", v_noa, v_nob);
 }
 
+const char* f_targ_for(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len((v_f).ptypes))) {
+        if ((v_i < arr_Expr_len(v_args))) {
+            if ((strcmp(arr_str_get((v_f).ptypes, v_i), v_tp) == 0)) {
+                return f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i));
+            }
+            if ((strcmp(arr_str_get((v_f).ptypes, v_i), scat(scat("[", v_tp), "]")) == 0)) {
+                return f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i)));
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return "i64";
+}
+
+const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v_args) {
+    int64_t v_i;
+    const char* v_tp;
+    v_i = 0;
+    while ((v_i < arr_str_len((v_f).tparams))) {
+        v_tp = arr_str_get((v_f).tparams, v_i);
+        if ((strcmp(v_ty, v_tp) == 0)) {
+            return f_targ_for(v_sy, v_f, v_tp, v_args);
+        }
+        if ((strcmp(v_ty, scat(scat("[", v_tp), "]")) == 0)) {
+            return scat(scat("[", f_targ_for(v_sy, v_f, v_tp, v_args)), "]");
+        }
+        v_i = (v_i + 1);
+    }
+    return v_ty;
+}
+
 const char* f_generic_T(s_Syms* v_sy, s_Func v_f, arr_Expr v_args) {
     int64_t v_i;
     v_i = 0;
@@ -5538,18 +5570,16 @@ const char* f_inline_stmt_value(s_Syms* v_sy, s_Stmt v_s) {
 
 const char* f_gen_generic_call(s_Syms* v_sy, const char* v_name, arr_Expr v_args) {
     s_Func v_f;
-    const char* v_gt;
     const char* v_o;
     int64_t v_i;
     const char* v_pt;
     int64_t v_n;
     int64_t v_j;
     v_f = f_find_gfn(v_sy, v_name);
-    v_gt = f_generic_T(v_sy, v_f, v_args);
     v_o = "({ ";
     v_i = 0;
     while ((v_i < arr_str_len((v_f).params))) {
-        v_pt = f_subst_tparam(v_f, arr_str_get((v_f).ptypes, v_i), v_gt);
+        v_pt = f_subst_multi(v_sy, v_f, arr_str_get((v_f).ptypes, v_i), v_args);
         f_set_ty(v_sy, arr_str_get((v_f).params, v_i), v_pt);
         v_o = scat(scat(scat(scat(scat(scat(v_o, f_cty(v_pt)), " v_"), arr_str_get((v_f).params, v_i)), " = "), f_gen_expr(v_sy, arr_Expr_get(v_args, v_i))), "; ");
         v_i = (v_i + 1);
@@ -7336,6 +7366,14 @@ arr_str f_mk1(const char* v_s) {
     return v_xs;
 }
 
+arr_str f_mk2(const char* v_a, const char* v_b) {
+    arr_str v_xs;
+    v_xs = ({ arr_str __a = arr_str_new(); __a; });
+    v_xs = arr_str_push(v_xs, v_a);
+    v_xs = arr_str_push(v_xs, v_b);
+    return v_xs;
+}
+
 int64_t f_has_struct(arr_StructDef v_xs, const char* v_nm) {
     int64_t v_i;
     v_i = 0;
@@ -8632,6 +8670,8 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_gti;
     int64_t v_sk;
     s_StructDef v_inst;
+    int64_t v_sa;
+    int64_t v_sb;
     int64_t v_afi;
     int64_t v_asi;
     int64_t v_fj;
@@ -8642,6 +8682,8 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_gnti;
     int64_t v_esk;
     s_EnumDef v_einst;
+    int64_t v_ea;
+    int64_t v_eb;
     int64_t v_aei;
     int64_t v_epj;
     int64_t v_aesi;
@@ -8927,6 +8969,21 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
                 }
                 v_sk = (v_sk + 1);
             }
+        } else {
+            if ((arr_str_len((arr_StructDef_get(v_gstructs, v_gti)).tparams) == 2)) {
+                v_sa = 0;
+                while ((v_sa < arr_str_len(v_gscal))) {
+                    v_sb = 0;
+                    while ((v_sb < arr_str_len(v_gscal))) {
+                        v_inst = f_gen_instance(arr_StructDef_get(v_gstructs, v_gti), f_mk2(arr_str_get(v_gscal, v_sa), arr_str_get(v_gscal, v_sb)));
+                        if ((f_has_struct(v_structs, (v_inst).name) == (1 != 1))) {
+                            v_structs = arr_StructDef_push(v_structs, v_inst);
+                        }
+                        v_sb = (v_sb + 1);
+                    }
+                    v_sa = (v_sa + 1);
+                }
+            }
         }
         v_gti = (v_gti + 1);
     }
@@ -8978,6 +9035,21 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
                     v_enums = arr_EnumDef_push(v_enums, v_einst);
                 }
                 v_esk = (v_esk + 1);
+            }
+        } else {
+            if ((arr_str_len((arr_EnumDef_get(v_genums, v_gnti)).tparams) == 2)) {
+                v_ea = 0;
+                while ((v_ea < arr_str_len(v_gscal))) {
+                    v_eb = 0;
+                    while ((v_eb < arr_str_len(v_gscal))) {
+                        v_einst = f_gen_enum_instance(arr_EnumDef_get(v_genums, v_gnti), f_mk2(arr_str_get(v_gscal, v_ea), arr_str_get(v_gscal, v_eb)));
+                        if ((f_has_enum(v_enums, (v_einst).name) == (1 != 1))) {
+                            v_enums = arr_EnumDef_push(v_enums, v_einst);
+                        }
+                        v_eb = (v_eb + 1);
+                    }
+                    v_ea = (v_ea + 1);
+                }
             }
         }
         v_gnti = (v_gnti + 1);

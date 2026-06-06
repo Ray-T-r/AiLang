@@ -1,0 +1,16 @@
+// Multi-parameter generics: generic functions, structs, and enums can each take
+// more than one type parameter, with every parameter inferred/substituted
+// independently (Pair_i64_str ≠ Pair_str_i64).
+st Pair<A,B> { a: A  b: B }
+en Either<A,B> { Left(v:A), Right(v:B) }
+fn fst<A,B>(p:A, q:B) -> A { p }
+fn snd<A,B>(p:A, q:B) -> B { q }
+fn classify(n:i64) -> Either<i64,str> { if n > 0 { Left(n) } el { Right("non-positive") } }
+fn render(e: Either<i64,str>) -> str { mt e { Left(v) => "L:" + int_to_str(v); Right(v) => "R:" + v } }
+println(fst(10, "ten"))
+println(snd(10, "ten"))
+p := Pair(3, "three")
+println(p.a)
+println(p.b)
+println(render(classify(5)))
+println(render(classify(0 - 1)))
