@@ -55,6 +55,7 @@ those under WSL, not native `ailc`.
 | `in` | iterator separator in `lp` | `true` `false` | bool literals |
 | `cl` | class (single inheritance) | `vt` | virtual-method marker |
 | `csrc` | compile + link a C++ shim | `super` | parent-method call (in a method) |
+| `tr` | trait declaration (generic bound) | `<T>` `<A,B>` | generic type params |
 
 `println` / `print` are **builtins, not keywords**. Full-word forms do **not** exist — use the short keyword: `cl` (not `class`), `st` (not `struct`), `en` (not `enum`), `lp` (not `for`/`while`), `el` (not `else`), `rt` (not `return`), `mt` (not `match`). Also no `def` / `let` / `var`.
 
@@ -105,6 +106,8 @@ fn fib(n) {                              // block body
 fn greet(name:str) -> str "Hello, " + name + "!"   // annotate non-i64
 
 fn id<T>(x:T) -> T x                     // real generic, monomorphized per call
+fn pick<A,B>(a:A, b:B) -> A a            // multi-param — A and B inferred independently
+fn dump<T: Show>(x:T) -> str x.fmt()     // constrained — T must satisfy trait Show (see Traits)
 
 inc := fn(x) x + 1                          // lambda (closure) — fn(params) body
 println(inc(41))                            // 42 — stored lambda, direct call: fine
@@ -166,6 +169,44 @@ println(c.describe())    // 0   — inherited static method
 - A class IS a struct under the hood — `Name(...)` construction, `println(obj)`, `[Name]` arrays, `{str:Name}` maps and `!Name` all work for free.
 - **Single inheritance only.** Lowers to plain C (vtables = function-pointer tables) → works on macOS, Linux, and Windows.
 
+**Operator overloading (structural).** A class that defines a conventionally-named method gets the operator — no trait/keyword needed:
+
+```
+cl Vec2 { x:i64  y:i64
+  fn add(self, o:Vec2) -> Vec2 { Vec2(self.x+o.x, self.y+o.y) }   // enables  a + b
+  fn eq(self, o:Vec2) -> bool { self.x==o.x && self.y==o.y }      // enables  a == b
+}
+c := a + b        // → a.add(b)
+```
+Map: `+ - * / %` → `add sub mul div mod`; `== != < > <= >=` → `eq ne lt gt le ge`. Dispatch is on the LEFT operand's class; bind intermediates (`c := a+b`) before chaining `.m()`.
+
+## Traits & generic bounds (structural — no `impl`)
+
+```
+tr Show { fn fmt(self) -> str; }                 // a bundle of required method names
+cl Dog { nm:str  fn fmt(self) -> str { "dog:" + self.nm } }   // satisfies Show by HAVING fmt
+fn dump<T: Show>(x:T) -> str { x.fmt() }         // bound: T must provide Show's methods
+println(dump(Dog("rex")))                        // dog:rex
+```
+A type satisfies a trait just by defining its methods (Go-interface style). The checker enforces the bound at the call site: `dump(5)` → `type 'i64' does not satisfy bound 'Show': missing method 'fmt'`.
+
+## Generic data types (monomorphized per use)
+
+```
+st Box<T> { val: T }                             // generic struct
+st Pair<A,B> { a: A  b: B }                       // multi-param
+en Option<T> { Some(v:T), None }                  // generic enum
+en Result<T> { Ok(v:T), Err(e:str) }
+
+b := Box(5)            // → Box_i64 (T inferred from the ctor arg)
+p := Pair(3, "hi")     // → Pair_i64_str  (order matters: Pair_i64_str ≠ Pair_str_i64)
+
+fn lookup(k:i64) -> Option<i64> { if k>0 { Some(k*10) } el { None } }
+fn opt_get(o:Option<i64>) -> i64 { mt o { Some(v) => v; None => 0-1 } }
+```
+- `Some(x)` / `Ok(x)` infer the type param from the payload. A **payload-less / non-T variant** (`None`, `Err`) infers it from the **enclosing fn's declared return type** — so return `None` from a `-> Option<i64>` fn; `f(None)` at a call site (no context) is not supported.
+- Use an explicit annotation (`Box<i64>` in a param/field/return) for instantiations over a non-scalar type (e.g. `Box<Vec2>`).
+
 ## Enums / ADTs (recursive OK — self-references are heap-boxed)
 
 ```
@@ -188,7 +229,7 @@ fn eval(x:Expr) -> i64 {
 }
 ```
 
-`mt` is an expression; variant patterns bind positionally; `_` is the wildcard. No exhaustiveness checking.
+`mt` is an expression; variant patterns bind positionally. Also supported: a `_` wildcard arm, per-arm **guards** (`Circle(r) if r > 10 => …`), and one-level **nested** destructuring (`Some(Pair(a,b)) => …`). The checker verifies **exhaustiveness** (guard-aware — a guarded arm doesn't count as covering), variant validity, and binding arity, reported at the `.ail` line.
 
 ## Types
 
@@ -268,6 +309,8 @@ ex fn set_new() -> i64
 | time / io: `now_ms()`, `mono_ms()`, `time_iso(ms)`, `sleep_ms(ms)`, `flush()`, `read_line()`, `get_env(name)` | **`time_iso` takes a ms timestamp** — current ISO time is `time_iso(now_ms())`, *not* `time_iso()`. `flush()` flushes stdout, needed for live output: `lp { print(time_iso(now_ms()) + "\r"); flush(); sleep_ms(1000) }` |
 | socket/net builtins: `tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1`, ... | baked into codegen — no extern decls needed; POSIX-only (need WSL on Windows) |
 
+**Don't name your own functions after a builtin** (e.g. `unwrap`, `split`, `len`, `keys`, `to_str`) — the builtin wins and your fn is silently misrouted. Pick a distinct name (`opt_get`, not `unwrap`).
+
 ## Standard library (`im "std/<name>.ail"`)
 
 | module | purpose | key functions |
@@ -282,8 +325,11 @@ ex fn set_new() -> i64
 | `std/pg.ail`    | Postgres | `pg_must_connect(dsn)`, `pg_one(conn,sql)`, `pg_first_col(conn,sql) -> [str]`, `pg_print_table(res)` |
 | `std/redis.ail` | Redis | `redis_connect(host,port)`, `redis_get`/`redis_set`, `redis_incr`, `redis_del`, `redis_ping` |
 | `std/ws.ail`    | WebSocket | `ws_handshake_response(key)`, `ws_send_text(fd,p)`, `ws_recv_text(fd)`, `b64_encode(bytes)` |
+| `std/thread.ail`| OS threads (pthread, POSIX) | `spawn(fn()->i64)`/`wait(h)`/`wait_all(hs)`, `mutex()`/`lock`/`unlock`, `channel(cap)`/`send`/`recv`/`close` (bounded blocking) |
 
-`std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis builtins are baked into codegen, so the modules are thin convenience wrappers.
+`std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis/thread builtins are baked into codegen, so the modules are thin convenience wrappers.
+
+**Namespaced imports.** `im "path" as m` aliases a module; call its fns qualified as `m.fn(...)`. The module's functions are isolated under the alias, so two modules can define the same name without colliding (`im "a.ail" as a` + `im "b.ail" as b` → `a.run()` / `b.run()`). Plain `im "path"` still splices unqualified.
 
 ## Top gotchas (what an LLM gets wrong)
 
@@ -296,7 +342,7 @@ ex fn set_new() -> i64
 7. **Enum variants are call-style** (`Add(l,r)`, bare `Red`) and matched with `mt x { V(b) => ...; }` using `;` separators.
 8. **Lambdas are `fn(x) body`** — no `|x|` / `=>` / `->` arrow forms.
 9. **Implicit `main`** — don't wrap a top-level script in `fn main`.
-10. **Integer widths are cosmetic** (stored 64-bit). The self-hosted compiler has minimal type diagnostics — type mistakes surface as C-compiler errors, not friendly messages.
+10. **Integer widths are cosmetic** (stored 64-bit). The type checker is conservative but real — it reports confident mistakes at the `.ail` `line:col` (type/`!T` mismatches, `mt` exhaustiveness/variants/arity, call & generic arity, `<T: Trait>` bounds, generic-instance mismatches), **all errors in one run**, with *"did you mean?"* spelling suggestions. It's not a full type system, so some mistakes still surface as C-compiler errors.
 11. **`map`/`filter`/`reduce` need an inline lambda** — `map(xs, fn(x) x*2)`, not a lambda stored in a variable. And a fn that returns the result of calling a `fn(...)->R` parameter must **annotate its return type** (`-> i64`) or use explicit `rt`.
 
 ## Worked examples
