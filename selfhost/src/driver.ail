@@ -403,6 +403,10 @@ fn compile_to_c(src:str) -> str {
   // them in (needs both libs installed — fixpoint-safe: stage2==stage3).
   needs_tls := has_sub(src, "tls_") || has_sub(src, "sha1")
   needs_pg := has_sub(src, "pg_")
+  // exe_dir() — the compiler uses it (in resolve_imports) to find the std/ that
+  // ships beside the ailc binary; gated, so user programs that never call it
+  // (and main.ail's self-compile DOES, via the string below) decide on their own.
+  needs_exedir := has_sub(src, "exe_dir")
   out = out + "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n"
   if needs_time { out = out + "#include <time.h>\n" }
   if needs_sock { out = out + "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n" }
@@ -410,6 +414,7 @@ fn compile_to_c(src:str) -> str {
   if needs_regex { out = out + "#ifndef _WIN32\n#include <regex.h>\n#endif\n" }
   if needs_tls { out = out + "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n" }
   if needs_pg { out = out + "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n" }
+  if needs_exedir { out = out + "#ifdef _WIN32\nunsigned long GetModuleFileNameA(void*, char*, unsigned long);\n#elif defined(__APPLE__)\n#include <mach-o/dyld.h>\n#else\n#include <unistd.h>\n#endif\n" }
   mu ci := 0
   lp ci < len(cincs) { out = out + "#include \"" + cincs[ci] + "\"\n"; ci += 1 }
   out = out + "static const char* scat(const char* a, const char* b){ size_t la=strlen(a), lb=strlen(b); char* r=(char*)GC_MALLOC(la+lb+1); memcpy(r,a,la); memcpy(r+la,b,lb); r[la+lb]=0; return r; }\n"
@@ -460,6 +465,9 @@ fn compile_to_c(src:str) -> str {
   out = out + "static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return \"\"; return b; }\n"
   out = out + "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n"
   out = out + "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n"
+  // exe_dir() — directory of the running compiler, so `im "std/…"` finds the
+  // bundled std with no env var (the path stripped to its dir; "" if unknown).
+  if needs_exedir { out = out + "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n" }
   // ===== Phase 2 optional native sections (gated; ported from prelude.c) =====
   if needs_time {
     out = out + "static int64_t now_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n"
@@ -704,12 +712,15 @@ fn link_flags(cprog:str) -> str {
   out
 }
 
-// The directory prefix of a path (through the last '/'), or "" if none — used
-// to resolve `im` paths relative to the importing file.
+// The directory prefix of a path (through the last separator), or "" if none —
+// used to resolve `im` paths relative to the importing file. Splits on both '/'
+// and '\' so a Windows-style path (e.g. `ailc src\app.ail`, or a tab-completed
+// `.\sub\app.ail`) still resolves its sibling imports; otherwise dirname would
+// return "" and imports would be looked up against the cwd instead.
 fn dirname(path:str) -> str {
   mu last := 0 - 1
   mu i := 0
-  lp i < len(path) { if path[i] == 47 { last = i } i += 1 }   // '/'
+  lp i < len(path) { if path[i] == 47 || path[i] == 92 { last = i } i += 1 }   // '/' or '\' (Windows)
   if last < 0 rt ""
   substring(path, 0, last + 1)
 }
@@ -815,6 +826,25 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
               gbody := read_file(gfull)
               if len(gbody) > 0 { body = gbody; bdir = dirname(gfull) }
             }
+          }
+          if len(body) == 0 {
+            // Still nothing — look beside the compiler executable itself. The
+            // std/ library ships next to ailc, so `im "std/…"` resolves even when
+            // AILANG_STD is unset (e.g. a terminal opened before the installer ran).
+            ed := exe_dir()
+            if len(ed) > 0 {
+              efull := ed + "/" + imp
+              ebody := read_file(efull)
+              if len(ebody) > 0 { body = ebody; bdir = dirname(efull) }
+            }
+          }
+          if len(body) == 0 {
+            // Found nowhere — fail loudly instead of dropping the import (which
+            // left the importer's calls undefined and surfaced as a cryptic
+            // clang `f_<fn> undeclared`). main.ail's own imports always resolve
+            // via path (1), so this is dead code for the self-compile → fixpoint-safe.
+            println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
+            exit(1)
           }
           out = out + resolve_imports(body, bdir, seen) + "\n"
         }

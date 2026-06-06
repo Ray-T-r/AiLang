@@ -21,14 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The compiler emits C linked against Boehm GC, and its runtime prelude
-      # currently pulls in OpenSSL + libpq — install all three. No Rust needed.
+      # The compiler emits C linked against Boehm GC; its runtime prelude pulls
+      # in OpenSSL + libpq; and the `cinc` sample links zlib. No Rust needed.
+      # (macOS ships these in the SDK / via brew below.)
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang libgc-dev libssl-dev libpq-dev pkg-config
+            clang libgc-dev libssl-dev libpq-dev zlib1g-dev pkg-config
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'

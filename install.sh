@@ -12,14 +12,16 @@
 # Flags / env:
 #   --no-deps         skip auto-installing native libraries (just warn)
 #   --no-skill        skip installing the Claude Code skill
+#   --version <tag>   install a specific release (e.g. v0.4.3-beta) instead of latest
 #   AILANG_NO_DEPS=1  same as --no-deps
+#   AILANG_VERSION    same as --version
 #
 # Re-run any time — every step is idempotent.
 
 set -euo pipefail
 
 REPO="Ray-T-r/AiLang"
-BASE_URL="https://github.com/${REPO}/releases/latest/download"
+BASE_URL="https://github.com/${REPO}/releases/latest/download"   # --version overrides this below
 BIN_DIR="${HOME}/.local/bin"
 BIN_PATH="${BIN_DIR}/ailc"
 SKILL_DIR="${HOME}/.claude/skills/ailang"
@@ -29,13 +31,19 @@ STD_ASSET="ailc-std.tar.gz"
 
 INSTALL_DEPS=1
 INSTALL_SKILL=1
+VERSION="${AILANG_VERSION:-}"
 [[ "${AILANG_NO_DEPS:-}" == "1" ]] && INSTALL_DEPS=0
-for arg in "$@"; do
-    case "$arg" in
-        --no-deps)  INSTALL_DEPS=0 ;;
-        --no-skill) INSTALL_SKILL=0 ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-deps)   INSTALL_DEPS=0 ;;
+        --no-skill)  INSTALL_SKILL=0 ;;
+        --version)   VERSION="$2"; shift ;;
+        --version=*) VERSION="${1#--version=}" ;;
     esac
+    shift
 done
+# --version / $AILANG_VERSION pins a specific release (e.g. a beta) instead of latest.
+[[ -n "$VERSION" ]] && BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m   ok\033[0m %s\n' "$*"; }

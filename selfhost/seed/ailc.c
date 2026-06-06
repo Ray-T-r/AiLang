@@ -28,6 +28,13 @@
 #ifndef _WIN32
 #include <libpq-fe.h>
 #endif
+#ifdef _WIN32
+unsigned long GetModuleFileNameA(void*, char*, unsigned long);
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
 static const char* scat(const char* a, const char* b){ size_t la=strlen(a), lb=strlen(b); char* r=(char*)GC_MALLOC(la+lb+1); memcpy(r,a,la); memcpy(r+la,b,lb); r[la+lb]=0; return r; }
 static const char* i2s(long long v){ char* r=(char*)GC_MALLOC(24); snprintf(r,24,"%lld",v); return r; }
 static const char* substr(const char* s, int64_t a, int64_t b){ int64_t n=(int64_t)strlen(s); if(a<0)a=0; if(b>n)b=n; if(b<a)b=a; int64_t L=b-a; char* r=(char*)GC_MALLOC(L+1); memcpy(r,s+a,L); r[L]=0; return r; }
@@ -66,6 +73,15 @@ static int64_t clamp(int64_t n, int64_t lo, int64_t hi){ if(n<lo) return lo; if(
 static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return ""; return b; }
 static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:""; }
 static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:"",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }
+static const char* exe_dir(void){ char buf[4096]; buf[0]=0;
+#ifdef _WIN32
+ unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return "";
+#elif defined(__APPLE__)
+ unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return "";
+#else
+ long rn=readlink("/proc/self/exe",buf,sizeof buf-1); if(rn<=0) return ""; buf[(size_t)rn]=0;
+#endif
+ int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return ""; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }
 static int64_t now_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }
 static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }
 static int64_t mono_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_MONOTONIC,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }
@@ -3994,7 +4010,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((((strcmp(v_fname, "index_of") == 0) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0))) {
         return "i64";
     }
-    if (((((((((((((strcmp(v_fname, "to_upper") == 0) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "to_upper") == 0) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
         return "str";
     }
     if ((strcmp(v_fname, "split") == 0)) {
@@ -4822,6 +4838,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "get_env") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("get_env(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ")");
+    }
+    if (((strcmp(v_fname, "exe_dir") == 0) && (arr_Expr_len(v_args) == 0))) {
+        return "exe_dir()";
     }
     if (((strcmp(v_fname, "split") == 0) && (arr_Expr_len(v_args) == 2))) {
         return scat(scat(scat(scat("split(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ", "), f_gen_expr(v_sy, arr_Expr_get(v_args, 1))), ")");
@@ -6172,6 +6191,7 @@ const char* f_compile_to_c(const char* v_src) {
     int64_t v_needs_regex;
     int64_t v_needs_tls;
     int64_t v_needs_pg;
+    int64_t v_needs_exedir;
     int64_t v_ci;
     arr_str v_mapkeys;
     arr_str v_mapvals;
@@ -6324,6 +6344,7 @@ const char* f_compile_to_c(const char* v_src) {
     v_needs_regex = (f_has_sub(v_src, "regex_match") || f_has_sub(v_src, "regex_find"));
     v_needs_tls = (f_has_sub(v_src, "tls_") || f_has_sub(v_src, "sha1"));
     v_needs_pg = f_has_sub(v_src, "pg_");
+    v_needs_exedir = f_has_sub(v_src, "exe_dir");
     v_out = scat(v_out, "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n");
     if (v_needs_time) {
         v_out = scat(v_out, "#include <time.h>\n");
@@ -6342,6 +6363,9 @@ const char* f_compile_to_c(const char* v_src) {
     }
     if (v_needs_pg) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n");
+    }
+    if (v_needs_exedir) {
+        v_out = scat(v_out, "#ifdef _WIN32\nunsigned long GetModuleFileNameA(void*, char*, unsigned long);\n#elif defined(__APPLE__)\n#include <mach-o/dyld.h>\n#else\n#include <unistd.h>\n#endif\n");
     }
     v_ci = 0;
     while ((v_ci < arr_str_len(v_cincs))) {
@@ -6386,6 +6410,9 @@ const char* f_compile_to_c(const char* v_src) {
     v_out = scat(v_out, "static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return \"\"; return b; }\n");
     v_out = scat(v_out, "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n");
     v_out = scat(v_out, "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n");
+    if (v_needs_exedir) {
+        v_out = scat(v_out, "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n");
+    }
     if (v_needs_time) {
         v_out = scat(v_out, "static int64_t now_ms(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000+(int64_t)(ts.tv_nsec/1000000); }\n");
         v_out = scat(v_out, "static int64_t now_us(void){ struct timespec ts; if(clock_gettime(CLOCK_REALTIME,&ts)!=0) return 0; return (int64_t)ts.tv_sec*1000000+(int64_t)(ts.tv_nsec/1000); }\n");
@@ -6686,7 +6713,7 @@ const char* f_dirname(const char* v_path) {
     v_last = (0 - 1);
     v_i = 0;
     while ((v_i < ((int64_t)strlen(v_path)))) {
-        if ((((int64_t)(unsigned char)(v_path)[v_i]) == 47)) {
+        if (((((int64_t)(unsigned char)(v_path)[v_i]) == 47) || (((int64_t)(unsigned char)(v_path)[v_i]) == 92))) {
             v_last = v_i;
         }
         v_i = (v_i + 1);
@@ -6841,6 +6868,9 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     const char* v_root;
     const char* v_gfull;
     const char* v_gbody;
+    const char* v_ed;
+    const char* v_efull;
+    const char* v_ebody;
     if ((f_has_import(v_src) == (1 != 1))) {
         return v_src;
     }
@@ -6867,6 +6897,21 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                                 v_bdir = f_dirname(v_gfull);
                             }
                         }
+                    }
+                    if ((((int64_t)strlen(v_body)) == 0)) {
+                        v_ed = exe_dir();
+                        if ((((int64_t)strlen(v_ed)) > 0)) {
+                            v_efull = scat(scat(v_ed, "/"), v_imp);
+                            v_ebody = read_file_c(v_efull);
+                            if ((((int64_t)strlen(v_ebody)) > 0)) {
+                                v_body = v_ebody;
+                                v_bdir = f_dirname(v_efull);
+                            }
+                        }
+                    }
+                    if ((((int64_t)strlen(v_body)) == 0)) {
+                        printf("%s\n", scat(scat("error: cannot resolve import \"", v_imp), "\" — not found beside the source, in AILANG_STD, or next to ailc"));
+                        exit((int)(1));
                     }
                     v_out = scat(scat(v_out, f_resolve_imports(v_body, v_bdir, v_seen)), "\n");
                 }

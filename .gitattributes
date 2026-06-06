@@ -1,0 +1,12 @@
+# Keep AiLang sources and the self-host seed LF on every platform.
+#
+# The bootstrap fixpoint (selfhost/bootstrap.sh) diffs the checked-in C seed
+# byte-for-byte against the compiler's own codegen, which always emits LF. If a
+# clone on Windows checks the seed out with CRLF — Git for Windows defaults to
+# core.autocrlf=true — the diff fails spuriously even though nothing is wrong.
+# Pinning these to LF makes `git clone` + bootstrap reproducible regardless of
+# the user's autocrlf setting.
+selfhost/seed/ailc.c text eol=lf
+*.ail               text eol=lf
+*.c                 text eol=lf
+*.h                 text eol=lf

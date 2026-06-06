@@ -134,22 +134,19 @@ iwr -useb https://github.com/Ray-T-r/AiLang/releases/latest/download/install.ps1
 
 It installs the mingw64 toolchain (via `winget install MSYS2.MSYS2` if it's not
 already there), downloads `ailc.exe`, adds it + `mingw64\bin` to your `PATH`,
-installs an `ailrun` helper, and installs the AiLang skill for
+and installs the AiLang skill for
 [Claude Code](https://claude.com/claude-code).
 
 **2. Open a new terminal** (so `PATH` refreshes), then:
 
 ```
 echo 'println("hello")' > hi.ail
-ailc   hi.ail hi        # build a native, self-contained hi.exe
+ailc hi.ail hi          # build a native, self-contained hi.exe
 .\hi.exe                # → hello
-ailrun hi.ail           # or: compile + run in one step
 ```
 
-| command  | what you get | needs |
-|----------|--------------|-------|
-| `ailc`   | a **native, self-contained `.exe`** (no WSL, no extra DLLs) | mingw64 `clang` + `gc` (installed above) |
-| `ailrun` | compile **and run** in one step, output in your terminal | same |
+Just `ailc` — same as macOS/Linux. It produces a **native, self-contained `.exe`**
+(no WSL, no extra DLLs); compiling needs the mingw64 `clang` + `gc` installed above.
 
 The produced `.exe` depends only on Windows' own `KERNEL32` + `msvcrt` — copy it
 anywhere and it runs. `ailc` itself needs `clang` + Boehm GC on `PATH` to compile

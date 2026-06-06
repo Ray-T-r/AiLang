@@ -680,6 +680,7 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "clamp" && len(args) == 3 { rt "clamp(" + gen_args(sy, args) + ")" }
   if fname == "read_line" && len(args) == 0 { rt "read_line()" }
   if fname == "get_env" && len(args) == 1 { rt "get_env(" + gen_expr(sy, args[0]) + ")" }
+  if fname == "exe_dir" && len(args) == 0 { rt "exe_dir()" }
   if fname == "split" && len(args) == 2 { rt "split(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
   // Phase 2 native builtins → same-named C helpers (gated into the prelude).
   if fname == "now_ms" && len(args) == 0 { rt "now_ms()" }
