@@ -1308,6 +1308,7 @@ int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_v
 int64_t f_vn_has(arr_str v_vnames, const char* v_v);
 int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v);
 int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src);
+int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src);
 int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, arr_Expr v_guards, int64_t v_pos, const char* v_src);
 int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_lambda_arity(s_Expr v_e);
@@ -2590,8 +2591,16 @@ s_Expr f_parse_primary(s_P* v_p) {
     arr_Expr v_guards;
     const char* v_vname;
     const char* v_binds;
+    arr_str v_nest_tmps;
+    arr_str v_nest_vars;
+    arr_str v_nest_binds;
+    const char* v_fld;
+    int64_t v_fpos;
+    const char* v_tmp;
+    const char* v_ib;
     s_Expr v_guard;
     s_Expr v_body;
+    int64_t v_ni;
     s_Expr v_cond;
     s_Expr v_then_e;
     s_Expr v_els;
@@ -2688,14 +2697,40 @@ s_Expr f_parse_primary(s_P* v_p) {
             v_vname = f_ctext(v_p);
             f_adv(v_p);
             v_binds = "";
+            v_nest_tmps = ({ arr_str __a = arr_str_new(); __a; });
+            v_nest_vars = ({ arr_str __a = arr_str_new(); __a; });
+            v_nest_binds = ({ arr_str __a = arr_str_new(); __a; });
             if ((f_ckind(v_p) == f_TK_LPAREN())) {
                 f_adv(v_p);
                 while (((f_ckind(v_p) != f_TK_RPAREN()) && (f_ckind(v_p) != f_TK_EOF()))) {
+                    v_fld = f_ctext(v_p);
+                    v_fpos = (v_p)->pos;
+                    f_adv(v_p);
                     if ((((int64_t)strlen(v_binds)) > 0)) {
                         v_binds = scat(v_binds, ";");
                     }
-                    v_binds = scat(v_binds, f_ctext(v_p));
-                    f_adv(v_p);
+                    if (((f_is_lower_ident(v_fld) == (1 != 1)) && (f_ckind(v_p) == f_TK_LPAREN()))) {
+                        v_tmp = scat("__nest", i2s(v_fpos));
+                        v_binds = scat(v_binds, v_tmp);
+                        f_adv(v_p);
+                        v_ib = "";
+                        while (((f_ckind(v_p) != f_TK_RPAREN()) && (f_ckind(v_p) != f_TK_EOF()))) {
+                            if ((((int64_t)strlen(v_ib)) > 0)) {
+                                v_ib = scat(v_ib, ";");
+                            }
+                            v_ib = scat(v_ib, f_ctext(v_p));
+                            f_adv(v_p);
+                            if ((f_ckind(v_p) == f_TK_COMMA())) {
+                                f_adv(v_p);
+                            }
+                        }
+                        f_eat(v_p, f_TK_RPAREN());
+                        v_nest_tmps = arr_str_push(v_nest_tmps, v_tmp);
+                        v_nest_vars = arr_str_push(v_nest_vars, v_fld);
+                        v_nest_binds = arr_str_push(v_nest_binds, v_ib);
+                    } else {
+                        v_binds = scat(v_binds, v_fld);
+                    }
                     if ((f_ckind(v_p) == f_TK_COMMA())) {
                         f_adv(v_p);
                     }
@@ -2707,6 +2742,9 @@ s_Expr f_parse_primary(s_P* v_p) {
                 f_adv(v_p);
                 v_guard = f_parse_expr(v_p);
             }
+            if (((arr_str_len(v_nest_tmps) > 0) && (f_is_bad(v_guard) == (1 != 1)))) {
+                f_report_at((v_p)->src, (arr_Token_get((v_p)->toks, (v_p)->pos)).pos, "guard cannot be combined with a nested pattern in the same arm; destructure the inner value in a separate mt");
+            }
             if ((f_ckind(v_p) == f_TK_ASSIGN())) {
                 f_adv(v_p);
             }
@@ -2714,6 +2752,11 @@ s_Expr f_parse_primary(s_P* v_p) {
                 f_adv(v_p);
             }
             v_body = f_parse_expr(v_p);
+            v_ni = 0;
+            while ((v_ni < arr_str_len(v_nest_tmps))) {
+                v_body = mkv_Match(mkv_Var(arr_str_get(v_nest_tmps, v_ni)), ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, arr_str_get(v_nest_vars, v_ni)); __a; }), ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, arr_str_get(v_nest_binds, v_ni)); __a; }), ({ arr_Expr __a = arr_Expr_new(); __a = arr_Expr_push(__a, v_body); __a; }), ({ arr_Expr __a = arr_Expr_new(); __a = arr_Expr_push(__a, mkv_Bad()); __a; }));
+                v_ni = (v_ni + 1);
+            }
             v_vnames = arr_str_push(v_vnames, v_vname);
             v_vbinds = arr_str_push(v_vbinds, v_binds);
             v_bodies = arr_Expr_push(v_bodies, v_body);
@@ -7242,8 +7285,45 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
     return 0;
 }
 
+int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src) {
+    int64_t v_i;
+    const char* v_nm;
+    arr_str v_bs;
+    int64_t v_j;
+    const char* v_k;
+    const char* v_ft;
+    const char* v_ty;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        v_nm = arr_str_get(v_vnames, v_i);
+        v_bs = f_split_semi(arr_str_get(v_vbinds, v_i));
+        v_j = 0;
+        while ((v_j < arr_str_len(v_bs))) {
+            if (f_has_sub(arr_str_get(v_bs, v_j), "__nest")) {
+                v_k = scat(scat(scat("@vfld.", v_nm), "."), i2s(v_j));
+                if (map_str_str_has((v_sy)->evar, v_k)) {
+                    v_ft = map_str_str_get((v_sy)->evar, v_k);
+                    v_ty = ({ const char* __r; if (f_is_boxed_ft(v_ft)) { __r = f_boxed_enum(v_ft, map_str_str_get((v_sy)->evar, v_nm)); } else { __r = v_ft; } __r; });
+                    if (map_str_str_has((v_sy)->evar, scat("@order.", v_ty))) {
+                        f_set_ty(v_sy, arr_str_get(v_bs, v_j), v_ty);
+                    } else {
+                        f_report_at(v_src, v_pos, scat(scat("cannot destructure non-enum field of type ", v_ty), " with a nested pattern"));
+                    }
+                }
+            }
+            v_j = (v_j + 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
 int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, arr_Expr v_guards, int64_t v_pos, const char* v_src) {
     f_match_check(v_sy, v_sc, v_vnames, v_vbinds, v_guards, v_pos, v_src);
+    f_type_nest_temps(v_sy, v_vnames, v_vbinds, v_pos, v_src);
     f_check_expr(v_funcs, v_sy, v_sc, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_bd, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_guards, v_pos, v_src);

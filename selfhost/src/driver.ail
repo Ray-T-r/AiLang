@@ -493,8 +493,42 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   }
   0
 }
+// The nested-pattern desugar binds a `__nest*` temp to a variant field, then
+// matches on it in an inner (synthetic) match. Type those temps to their field's
+// enum so the inner match's exhaustiveness IS checked — a refutable nested
+// pattern (the inner enum has variants the pattern doesn't cover) then reports
+// "non-exhaustive", and destructuring a non-enum field reports "match on
+// non-enum". Scoped to `__nest*`, so non-nested code (incl. the compiler itself)
+// is untouched and the fixpoint is unaffected.
+fn type_nest_temps(sy:*Syms, vnames:[str], vbinds:[str], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu i := 0
+  lp i < len(vnames) {
+    nm := vnames[i]
+    bs := split_semi(vbinds[i])
+    mu j := 0
+    lp j < len(bs) {
+      if has_sub(bs[j], "__nest") {
+        k := "@vfld." + nm + "." + int_to_str(j)
+        if has(sy.evar, k) {
+          ft := sy.evar[k]                          // a sub-enum field is stored boxed
+          ty := if is_boxed_ft(ft) { boxed_enum(ft, sy.evar[nm]) } el { ft }
+          if has(sy.evar, "@order." + ty) {
+            set_ty(sy, bs[j], ty)                    // known enum → type the temp so the inner match checks
+          } el {
+            report_at(src, pos, "cannot destructure non-enum field of type " + ty + " with a nested pattern")
+          }
+        }
+      }
+      j += 1
+    }
+    i += 1
+  }
+  0
+}
 fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bd:[Expr], guards:[Expr], pos:i64, src:str) -> i64 {
   match_check(sy, sc, vnames, vbinds, guards, pos, src)
+  type_nest_temps(sy, vnames, vbinds, pos, src)
   check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); chk_args(funcs, sy, guards, pos, src); 0
 }
 fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
