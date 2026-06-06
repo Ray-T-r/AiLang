@@ -403,6 +403,7 @@ fn is_cmp_op(op:i64) -> bool {
 }
 fn binop_check(sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
+  if len(overload_class(sy, op, l)) > 0 rt 0        // operator overloaded on a class → valid, skip operand checks
   lt := type_confident(sy, l)
   rr := type_confident(sy, r)
   if confident(lt) == false || confident(rr) == false rt 0

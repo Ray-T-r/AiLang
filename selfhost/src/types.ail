@@ -21,6 +21,43 @@ fn op_c(op:i64) -> str {
   " ? "
 }
 
+// ----- operator overloading --------------------------------------------------
+// The conventional method name a binary operator dispatches to on a class operand,
+// or "" if the operator is not overloadable (logic / bitwise / shift / ++ / ??).
+fn op_method(op:i64) -> str {
+  if op == OP_ADD() rt "add"
+  if op == OP_SUB() rt "sub"
+  if op == OP_MUL() rt "mul"
+  if op == OP_DIV() rt "div"
+  if op == OP_MOD() rt "mod"
+  if op == OP_EQ() rt "eq"
+  if op == OP_NE() rt "ne"
+  if op == OP_LT() rt "lt"
+  if op == OP_GT() rt "gt"
+  if op == OP_LE() rt "le"
+  if op == OP_GE() rt "ge"
+  ""
+}
+// If `op` is overloadable AND the left operand is a class (or subclass) defining the
+// operator's method, that operand's class name (so gen_bin/bin_type can dispatch to
+// `cls.method(l, r)`); "" otherwise. Structural: no trait/impl needed. The SAME
+// predicate gates codegen, typing, and the checker so they never disagree.
+fn overload_class(sy:*Syms, op:i64, l:Expr) -> str {
+  m := op_method(op)
+  if len(m) == 0 rt ""
+  cls := under_ptr(type_of_expr(sy, l))
+  if has(sy.evar, "@class." + cls) && is_class_method(sy, cls, m) rt cls
+  ""
+}
+// A two-element [Expr] (receiver + operand) — the arg list for an overloaded op's
+// method call, matching the UFCS `l.method(r)` shape gen_method_call consumes.
+fn mkargs2(a:Expr, b:Expr) -> [Expr] {
+  mu xs:[Expr] := []
+  xs = push(xs, a)
+  xs = push(xs, b)
+  xs
+}
+
 // ===== type tracking =========================================================
 // Codegen tracks a *type name* per binding — "i64", "str", or a struct name.
 // `vty` maps varname → type; `fld` maps "Struct.field" → field's type; `ctors`
@@ -162,6 +199,8 @@ fn map_lit_type(mty:str) -> str {
 fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
   if op == OP_CAT() rt "str"        // `++` always concatenates strings
   if op == OP_QQ() rt type_of_expr(sy, l)   // `m[k] ?? d` → the map's value type
+  oc := overload_class(sy, op, l)            // overloaded operator on a class → its method's return type
+  if len(oc) > 0 rt call_type_a(sy, op_method(op), mkargs2(l, r))
   // `+` on two strings is concat → str.
   if op == OP_ADD() && type_of_expr(sy, l) == "str" && type_of_expr(sy, r) == "str" {
     rt "str"

@@ -1149,6 +1149,9 @@ s_Func f_parse_extern(s_P* v_p);
 const char* f_cty_proto(const char* v_ty);
 const char* f_gen_extern(s_Func v_f);
 const char* f_op_c(int64_t v_op);
+const char* f_op_method(int64_t v_op);
+const char* f_overload_class(s_Syms* v_sy, int64_t v_op, s_Expr v_l);
+arr_Expr f_mkargs2(s_Expr v_a, s_Expr v_b);
 const char* f_ty_of(s_Syms* v_sy, const char* v_name);
 int64_t f_declared(s_Syms* v_sy, const char* v_name);
 void f_set_ty(s_Syms* v_sy, const char* v_name, const char* v_ty);
@@ -4131,6 +4134,65 @@ const char* f_op_c(int64_t v_op) {
     return " ? ";
 }
 
+const char* f_op_method(int64_t v_op) {
+    if ((v_op == f_OP_ADD())) {
+        return "add";
+    }
+    if ((v_op == f_OP_SUB())) {
+        return "sub";
+    }
+    if ((v_op == f_OP_MUL())) {
+        return "mul";
+    }
+    if ((v_op == f_OP_DIV())) {
+        return "div";
+    }
+    if ((v_op == f_OP_MOD())) {
+        return "mod";
+    }
+    if ((v_op == f_OP_EQ())) {
+        return "eq";
+    }
+    if ((v_op == f_OP_NE())) {
+        return "ne";
+    }
+    if ((v_op == f_OP_LT())) {
+        return "lt";
+    }
+    if ((v_op == f_OP_GT())) {
+        return "gt";
+    }
+    if ((v_op == f_OP_LE())) {
+        return "le";
+    }
+    if ((v_op == f_OP_GE())) {
+        return "ge";
+    }
+    return "";
+}
+
+const char* f_overload_class(s_Syms* v_sy, int64_t v_op, s_Expr v_l) {
+    const char* v_m;
+    const char* v_cls;
+    v_m = f_op_method(v_op);
+    if ((((int64_t)strlen(v_m)) == 0)) {
+        return "";
+    }
+    v_cls = f_under_ptr(f_type_of_expr(v_sy, v_l));
+    if ((map_str_str_has((v_sy)->evar, scat("@class.", v_cls)) && f_is_class_method(v_sy, v_cls, v_m))) {
+        return v_cls;
+    }
+    return "";
+}
+
+arr_Expr f_mkargs2(s_Expr v_a, s_Expr v_b) {
+    arr_Expr v_xs;
+    v_xs = ({ arr_Expr __a = arr_Expr_new(); __a; });
+    v_xs = arr_Expr_push(v_xs, v_a);
+    v_xs = arr_Expr_push(v_xs, v_b);
+    return v_xs;
+}
+
 const char* f_ty_of(s_Syms* v_sy, const char* v_name) {
     if (map_str_str_has((v_sy)->vty, v_name)) {
         return map_str_str_get((v_sy)->vty, v_name);
@@ -4295,11 +4357,16 @@ const char* f_map_lit_type(const char* v_mty) {
 }
 
 const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
+    const char* v_oc;
     if ((v_op == f_OP_CAT())) {
         return "str";
     }
     if ((v_op == f_OP_QQ())) {
         return f_type_of_expr(v_sy, v_l);
+    }
+    v_oc = f_overload_class(v_sy, v_op, v_l);
+    if ((((int64_t)strlen(v_oc)) > 0)) {
+        return f_call_type_a(v_sy, f_op_method(v_op), f_mkargs2(v_l, v_r));
     }
     if ((((v_op == f_OP_ADD()) && (strcmp(f_type_of_expr(v_sy, v_l), "str") == 0)) && (strcmp(f_type_of_expr(v_sy, v_r), "str") == 0))) {
         return "str";
@@ -5885,6 +5952,7 @@ const char* f_gen_qq(s_Syms* v_sy, s_Expr v_l, s_Expr v_r) {
 }
 
 const char* f_gen_bin(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
+    const char* v_oc;
     if ((v_op == f_OP_QQ())) {
         return f_gen_qq(v_sy, v_l, v_r);
     }
@@ -5899,6 +5967,10 @@ const char* f_gen_bin(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
     }
     if ((((v_op == f_OP_NE()) && f_expr_is_str(v_l, v_sy)) && f_expr_is_str(v_r, v_sy))) {
         return scat(scat(scat(scat("(strcmp(", f_gen_expr(v_sy, v_l)), ", "), f_gen_expr(v_sy, v_r)), ") != 0)");
+    }
+    v_oc = f_overload_class(v_sy, v_op, v_l);
+    if ((((int64_t)strlen(v_oc)) > 0)) {
+        return f_gen_method_call(v_sy, v_oc, f_op_method(v_op), f_mkargs2(v_l, v_r));
     }
     return scat(scat(scat(scat("(", f_gen_expr(v_sy, v_l)), f_op_c(v_op)), f_gen_expr(v_sy, v_r)), ")");
 }
@@ -7287,6 +7359,9 @@ int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_
     const char* v_rr;
     int64_t v_bothstr;
     if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((((int64_t)strlen(f_overload_class(v_sy, v_op, v_l))) > 0)) {
         return 0;
     }
     v_lt = f_type_confident(v_sy, v_l);
