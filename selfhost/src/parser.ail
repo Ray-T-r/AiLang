@@ -1001,6 +1001,15 @@ fn stamp_if_empty(elems:[Expr], old:str, ety:str) -> Expr {
 fn parse_struct(p:*P) -> StructDef {
   adv(p)                            // `st`
   name := ctext(p); adv(p)          // Name
+  mu tparams:[str] := []            // optional generic params `<T, …>` → a generic struct template
+  if ckind(p) == TK_LT() {
+    adv(p)
+    lp ckind(p) != TK_GT() && ckind(p) != TK_EOF() {
+      if ckind(p) == TK_IDENT() { tparams = push(tparams, ctext(p)); adv(p) }
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_GT())
+  }
   eat(p, TK_LBRACE())
   mu fnames:[str] := []
   mu ftypes:[str] := []
@@ -1014,7 +1023,7 @@ fn parse_struct(p:*P) -> StructDef {
     }
   }
   eat(p, TK_RBRACE())
-  StructDef(name, fnames, ftypes)
+  StructDef(name, fnames, ftypes, tparams)
 }
 
 // A class method: `fn name(self, p:T, …) -> ret { … }` (the `vt`, if any, is
@@ -1300,7 +1309,21 @@ fn parse_type(p:*P) -> str {
     rt sig + ")" + ret
   }
   if ckind(p) == TK_IDENT() {
-    t := ctext(p); adv(p); rt t
+    t := ctext(p); adv(p)
+    if ckind(p) == TK_LT() {                   // `Name<T, …>` — a generic-struct instantiation
+      adv(p)
+      mu inner := t + "<"
+      mu n := 0
+      lp ckind(p) != TK_GT() && ckind(p) != TK_EOF() {
+        if n > 0 { inner = inner + "," }
+        inner = inner + parse_type(p)
+        n += 1
+        if ckind(p) == TK_COMMA() { adv(p) }
+      }
+      eat(p, TK_GT())
+      rt inner + ">"                            // kept as "Box<i64>"; lower_generic_structs mangles to "Box_i64"
+    }
+    rt t
   }
   "i64"
 }

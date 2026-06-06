@@ -54,7 +54,7 @@ en Expr {
 // A user struct: `st Name { f1:T1; f2:T2 }`. Field names and their type names
 // are kept in parallel arrays (a struct has no nested aggregate yet, so [str]
 // suffices). Type names are "i64" / "str" / another struct name.
-st StructDef { name:str; fnames:[str]; ftypes:[str] }
+st StructDef { name:str; fnames:[str]; ftypes:[str]; tparams:[str] }
 
 // A user enum `en Name { V0, V1(f:T,…), … }`. For each variant we keep its name
 // and its field types as parallel arrays (`vnames[i]` ↔ `vftypes[i]` where the

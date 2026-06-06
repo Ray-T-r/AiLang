@@ -29,6 +29,91 @@ fn join_semi(xs:[str]) -> str {
   s
 }
 
+// ----- generic data types: instantiation name mangling ----------------------
+// A generic-struct instantiation is carried as the type string "Box<i64>"
+// (parse_type keeps the brackets). These helpers mangle it to the concrete C
+// struct name "Box_i64" and recover its parts. 60 == '<'.
+fn inst_head(ty:str) -> str {                       // "Box<i64>" → "Box"
+  mu i := 0
+  lp i < len(ty) { if ty[i] == 60 rt substring(ty, 0, i)   i += 1 }
+  ty
+}
+fn inst_args(ty:str) -> [str] {                     // "Box<i64>" → ["i64"]; "Pair<i64,str>" → ["i64","str"]
+  mu lt := 0
+  lp lt < len(ty) { if ty[lt] == 60 { br } lt += 1 }
+  split(substring(ty, lt + 1, len(ty) - 1), ",")    // strip `<` … `>`, split on ','
+}
+fn mono_of(head:str, args:[str]) -> str {           // ("Box", ["i64"]) → "Box_i64"
+  mu nm := head
+  mu i := 0
+  lp i < len(args) { nm = nm + "_" + args[i]; i += 1 }
+  nm
+}
+// A direct generic-struct annotation ("Box<i64>") → its mono name; pass-through
+// for anything else (no '<', or a container/ptr wrapper — out of scope).
+fn mono_name(ty:str) -> str {
+  if has_sub(ty, "<") == false rt ty                // not a generic instantiation → unchanged
+  mono_of(inst_head(ty), inst_args(ty))
+}
+// Substitute a generic struct's type params in a field type: T→arg, [T]→[arg].
+fn subst_struct_ty(tparams:[str], args:[str], ty:str) -> str {
+  mu i := 0
+  lp i < len(tparams) {
+    if i < len(args) {
+      if ty == tparams[i] rt args[i]
+      if ty == "[" + tparams[i] + "]" rt "[" + args[i] + "]"
+    }
+    i += 1
+  }
+  ty
+}
+fn mk1(s:str) -> [str] { mu xs:[str] := []   xs = push(xs, s)   xs }
+// True if a struct named `nm` is already in `xs` (dedup of generated instances).
+fn has_struct(xs:[StructDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(xs) { if xs[i].name == nm rt true   i += 1 }
+  false
+}
+// One concrete StructDef from a generic template + concrete args (T substituted).
+fn gen_instance(gt:StructDef, args:[str]) -> StructDef {
+  mu fts:[str] := []
+  mu i := 0
+  lp i < len(gt.fnames) { fts = push(fts, subst_struct_ty(gt.tparams, args, gt.ftypes[i])); i += 1 }
+  mu notp:[str] := []
+  StructDef(mono_of(gt.name, args), gt.fnames, fts, notp)
+}
+// The generic template named `nm`, or an empty StructDef (name "") if none.
+fn find_gstruct(gstructs:[StructDef], nm:str) -> StructDef {
+  mu i := 0
+  lp i < len(gstructs) { if gstructs[i].name == nm rt gstructs[i]   i += 1 }
+  mu e:[str] := []
+  StructDef("", e, e, e)
+}
+// Rewrite a Func's param/return type strings, mangling any "Box<i64>" → "Box_i64".
+fn norm_func(f:Func) -> Func {
+  mu pts:[str] := []
+  mu i := 0
+  lp i < len(f.ptypes) { pts = push(pts, mono_name(f.ptypes[i])); i += 1 }
+  Func(f.name, f.params, pts, mono_name(f.ret), f.lib, f.tparams, f.body)
+}
+// Rewrite a StructDef's field type strings likewise.
+fn norm_struct(sd:StructDef) -> StructDef {
+  mu fts:[str] := []
+  mu i := 0
+  lp i < len(sd.fnames) { fts = push(fts, mono_name(sd.ftypes[i])); i += 1 }
+  StructDef(sd.name, sd.fnames, fts, sd.tparams)
+}
+// If `ty` is a generic-struct instantiation not yet generated, append its concrete
+// StructDef; return the (possibly extended) struct list.
+fn collect_struct_inst(structs:[StructDef], gstructs:[StructDef], ty:str) -> [StructDef] {
+  if has_sub(ty, "<") == false rt structs
+  gt := find_gstruct(gstructs, inst_head(ty))
+  if len(gt.name) == 0 rt structs
+  nm := mono_name(ty)
+  if has_struct(structs, nm) rt structs
+  push(structs, gen_instance(gt, inst_args(ty)))
+}
+
 // ----- empty `{}` usage inference -------------------------------------------
 // An un-annotated `m := {}` has no (K,V) until used. Before hoist/codegen we
 // scan the function body for the first `m[k]=v` and stamp the MapLit with
@@ -1121,6 +1206,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   // `@class.*` evar keys let gen_call route `obj.m(args)` → `f_<Class>_m`. Pushed
   // BEFORE the struct loop (so fields register) and the fn return-inference loop
   // (so method returns infer). Additive: classes==[] (e.g. main.ail) ⇒ no-op.
+  mu notp:[str] := []                         // lowered classes are never generic structs
   mu lci := 0
   lp lci < len(classes) {
     cd := classes[lci]
@@ -1151,7 +1237,7 @@ fn compile_to_c(src:str, dir:str) -> str {
     }
     mu fi := 0
     lp fi < len(cd.fnames) { allf = push(allf, cd.fnames[fi]); allt = push(allt, cd.ftypes[fi]); fi += 1 }
-    structs = push(structs, StructDef(cd.name, allf, allt))
+    structs = push(structs, StructDef(cd.name, allf, allt, notp))
 
     base.evar["@class." + cd.name] = "1"
     base.evar["@class.parent." + cd.name] = cd.parent
@@ -1197,6 +1283,61 @@ fn compile_to_c(src:str, dir:str) -> str {
     lp spi < len(sp) { if len(sp[spi]) > 0 { base.evar["@class.virt." + cd.name + "." + sp[spi]] = "1" } spi += 1 }
     lci += 1
   }
+
+  // Lower generic structs (`st Box<T>{…}`) → concrete monomorphic StructDefs, the
+  // same way lower_classes lowers a class: the registration + struct codegen below
+  // (ctor/printer/arr_/map_/res_) then handle each instance for free. Templates are
+  // split out of `structs` (not emitted); instances come from (a) the 3 scalar
+  // types — covering ctor-inferred `Box(5)`/`Box("x")` — and (b) any `G<Struct>`
+  // named in a fn param/return or struct field. Finally all decl type strings are
+  // mangled `Box<i64>`→`Box_i64` so the rest of the pipeline sees plain names.
+  // Additive: no generic structs (e.g. main.ail) ⇒ gstructs==[] ⇒ pure no-op.
+  mu gstructs:[StructDef] := []
+  mu cstructs:[StructDef] := []
+  mu gsi := 0
+  lp gsi < len(structs) {
+    if len(structs[gsi].tparams) > 0 {
+      gstructs = push(gstructs, structs[gsi])
+      base.evar["@gstruct." + structs[gsi].name] = join_semi(structs[gsi].tparams)
+      base.evar["@gstruct.fields." + structs[gsi].name] = join_semi(structs[gsi].ftypes)   // template field types (with T) → ctor-arg T inference
+    } el { cstructs = push(cstructs, structs[gsi]) }
+    gsi += 1
+  }
+  structs = cstructs
+  // (a) scalar instantiations for each single-param template
+  mu gscal:[str] := ["i64", "str", "f64"]
+  mu gti := 0
+  lp gti < len(gstructs) {
+    if len(gstructs[gti].tparams) == 1 {
+      mu sk := 0
+      lp sk < len(gscal) {
+        inst := gen_instance(gstructs[gti], mk1(gscal[sk]))
+        if has_struct(structs, inst.name) == false { structs = push(structs, inst) }
+        sk += 1
+      }
+    }
+    gti += 1
+  }
+  // (b) instantiations named explicitly in fn signatures / struct fields
+  mu afi := 0
+  lp afi < len(funcs) {
+    mu pj := 0
+    lp pj < len(funcs[afi].ptypes) { structs = collect_struct_inst(structs, gstructs, funcs[afi].ptypes[pj]); pj += 1 }
+    structs = collect_struct_inst(structs, gstructs, funcs[afi].ret)
+    afi += 1
+  }
+  mu asi := 0
+  lp asi < len(structs) {                       // note: only scans the structs present before this loop grows it; fields-of-generics are out of scope
+    mu fj := 0
+    lp fj < len(structs[asi].ftypes) { structs = collect_struct_inst(structs, gstructs, structs[asi].ftypes[fj]); fj += 1 }
+    asi += 1
+  }
+  // normalize: mangle every `G<…>` annotation in fn sigs + struct fields
+  mu nfi := 0
+  lp nfi < len(funcs) { funcs[nfi] = norm_func(funcs[nfi]); nfi += 1 }
+  mu nsi := 0
+  lp nsi < len(structs) { structs[nsi] = norm_struct(structs[nsi]); nsi += 1 }
+
   mu si := 0
   lp si < len(structs) {
     sd := structs[si]
