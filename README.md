@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 9,010 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 9,263 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -21,7 +21,8 @@ The core language plus the full standard library: functions and recursion,
 control flow, structs, classes (`cl` — single inheritance + `vt` virtual
 methods, lowered to C vtables), `en` enums + `mt` match (recursive ADTs,
 heap-boxed self-references; guards `if`, `_` catch-all, and nested
-destructuring), real generics, closures with capture, `[T]` arrays
+destructuring), real generics — including `tr` traits + `<T: Trait>` constrained
+generics (compile-time-checked, monomorphized) — closures with capture, `[T]` arrays
 and `{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
 multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), `cinc` C-header interop,
@@ -70,11 +71,11 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~6,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **9,010 lines, byte-identical** |
-| sample programs | **42**, each output-verified against a frozen fixture |
+| strict fixpoint | `stage2.c == stage3.c` — **9,263 lines, byte-identical** |
+| sample programs | **43**, each output-verified against a frozen fixture |
 | standard library | 11 modules, all compiling |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, and call/callback/generic arity. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field (*"did you mean …?"*) |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*) |
 | Rust in the build | **none** |
 
 ## Layout

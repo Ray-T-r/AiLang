@@ -89,6 +89,12 @@ st Func { name:str; params:[str]; ptypes:[str]; ret:str; lib:str; tparams:[str];
 // `parent` is the single base class name, "" if none. Lowered to a StructDef +
 // top-level Funcs by lower_classes (driver) — classes are not a codegen IR node.
 st ClassDef { name:str; parent:str; fnames:[str]; ftypes:[str]; methods:[Func]; vflags:[str] }
+// A trait `tr Name { fn m(self,…)->R; … }` — a named bundle of required method
+// NAMES used as a generic bound `<T: Name>`. Pure checker metadata: no codegen, no
+// lowering. `methods` holds the required method names (signatures are skipped in
+// this first slice). A type satisfies it structurally — it (or an ancestor class)
+// must define every method (checked via is_class_method).
+st TraitDef { name:str; methods:[str] }
 
 // ===== parser state =========================================================
 st P { toks: [Token]; pos: i64; src: str }

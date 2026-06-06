@@ -169,6 +169,7 @@ typedef struct s_StructDef s_StructDef;
 typedef struct s_EnumDef s_EnumDef;
 typedef struct s_Func s_Func;
 typedef struct s_ClassDef s_ClassDef;
+typedef struct s_TraitDef s_TraitDef;
 typedef struct s_P s_P;
 typedef struct s_Binds s_Binds;
 typedef struct s_Syms s_Syms;
@@ -183,6 +184,7 @@ typedef struct { int64_t len; int64_t cap; s_StructDef* data; } arr_StructDef;
 typedef struct { int64_t len; int64_t cap; s_EnumDef* data; } arr_EnumDef;
 typedef struct { int64_t len; int64_t cap; s_Func* data; } arr_Func;
 typedef struct { int64_t len; int64_t cap; s_ClassDef* data; } arr_ClassDef;
+typedef struct { int64_t len; int64_t cap; s_TraitDef* data; } arr_TraitDef;
 typedef struct { int64_t len; int64_t cap; s_P* data; } arr_P;
 typedef struct { int64_t len; int64_t cap; s_Binds* data; } arr_Binds;
 typedef struct { int64_t len; int64_t cap; s_Syms* data; } arr_Syms;
@@ -204,6 +206,8 @@ typedef struct map_str_Func_s map_str_Func_s;
 typedef map_str_Func_s* map_str_Func;
 typedef struct map_str_ClassDef_s map_str_ClassDef_s;
 typedef map_str_ClassDef_s* map_str_ClassDef;
+typedef struct map_str_TraitDef_s map_str_TraitDef_s;
+typedef map_str_TraitDef_s* map_str_TraitDef;
 typedef struct map_str_P_s map_str_P_s;
 typedef map_str_P_s* map_str_P;
 typedef struct map_str_Binds_s map_str_Binds_s;
@@ -230,6 +234,8 @@ typedef struct map_i64_Func_s map_i64_Func_s;
 typedef map_i64_Func_s* map_i64_Func;
 typedef struct map_i64_ClassDef_s map_i64_ClassDef_s;
 typedef map_i64_ClassDef_s* map_i64_ClassDef;
+typedef struct map_i64_TraitDef_s map_i64_TraitDef_s;
+typedef map_i64_TraitDef_s* map_i64_TraitDef;
 typedef struct map_i64_P_s map_i64_P_s;
 typedef map_i64_P_s* map_i64_P;
 typedef struct map_i64_Binds_s map_i64_Binds_s;
@@ -256,6 +262,8 @@ typedef struct map_f64_Func_s map_f64_Func_s;
 typedef map_f64_Func_s* map_f64_Func;
 typedef struct map_f64_ClassDef_s map_f64_ClassDef_s;
 typedef map_f64_ClassDef_s* map_f64_ClassDef;
+typedef struct map_f64_TraitDef_s map_f64_TraitDef_s;
+typedef map_f64_TraitDef_s* map_f64_TraitDef;
 typedef struct map_f64_P_s map_f64_P_s;
 typedef map_f64_P_s* map_f64_P;
 typedef struct map_f64_Binds_s map_f64_Binds_s;
@@ -272,6 +280,7 @@ struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; };
 struct s_EnumDef { const char* name; arr_str vnames; arr_str vftypes; };
 struct s_Func { const char* name; arr_str params; arr_str ptypes; const char* ret; const char* lib; arr_str tparams; arr_Stmt body; };
 struct s_ClassDef { const char* name; const char* parent; arr_str fnames; arr_str ftypes; arr_Func methods; arr_str vflags; };
+struct s_TraitDef { const char* name; arr_str methods; };
 struct s_P { arr_Token toks; int64_t pos; const char* src; };
 struct s_Binds { arr_str names; arr_Expr vals; };
 struct s_Syms { map_str_str vty; map_str_str fld; map_str_str ctors; map_str_str frets; map_str_str evar; map_str_str vft; arr_Func gfns; arr_Func lams; map_str_str errc; };
@@ -321,6 +330,7 @@ struct map_str_StructDef_s { int64_t cap; int64_t len; const char** keys; s_Stru
 struct map_str_EnumDef_s { int64_t cap; int64_t len; const char** keys; s_EnumDef* values; unsigned char* occupied; };
 struct map_str_Func_s { int64_t cap; int64_t len; const char** keys; s_Func* values; unsigned char* occupied; };
 struct map_str_ClassDef_s { int64_t cap; int64_t len; const char** keys; s_ClassDef* values; unsigned char* occupied; };
+struct map_str_TraitDef_s { int64_t cap; int64_t len; const char** keys; s_TraitDef* values; unsigned char* occupied; };
 struct map_str_P_s { int64_t cap; int64_t len; const char** keys; s_P* values; unsigned char* occupied; };
 struct map_str_Binds_s { int64_t cap; int64_t len; const char** keys; s_Binds* values; unsigned char* occupied; };
 struct map_str_Syms_s { int64_t cap; int64_t len; const char** keys; s_Syms* values; unsigned char* occupied; };
@@ -334,6 +344,7 @@ struct map_i64_StructDef_s { int64_t cap; int64_t len; int64_t* keys; s_StructDe
 struct map_i64_EnumDef_s { int64_t cap; int64_t len; int64_t* keys; s_EnumDef* values; unsigned char* occupied; };
 struct map_i64_Func_s { int64_t cap; int64_t len; int64_t* keys; s_Func* values; unsigned char* occupied; };
 struct map_i64_ClassDef_s { int64_t cap; int64_t len; int64_t* keys; s_ClassDef* values; unsigned char* occupied; };
+struct map_i64_TraitDef_s { int64_t cap; int64_t len; int64_t* keys; s_TraitDef* values; unsigned char* occupied; };
 struct map_i64_P_s { int64_t cap; int64_t len; int64_t* keys; s_P* values; unsigned char* occupied; };
 struct map_i64_Binds_s { int64_t cap; int64_t len; int64_t* keys; s_Binds* values; unsigned char* occupied; };
 struct map_i64_Syms_s { int64_t cap; int64_t len; int64_t* keys; s_Syms* values; unsigned char* occupied; };
@@ -347,6 +358,7 @@ struct map_f64_StructDef_s { int64_t cap; int64_t len; double* keys; s_StructDef
 struct map_f64_EnumDef_s { int64_t cap; int64_t len; double* keys; s_EnumDef* values; unsigned char* occupied; };
 struct map_f64_Func_s { int64_t cap; int64_t len; double* keys; s_Func* values; unsigned char* occupied; };
 struct map_f64_ClassDef_s { int64_t cap; int64_t len; double* keys; s_ClassDef* values; unsigned char* occupied; };
+struct map_f64_TraitDef_s { int64_t cap; int64_t len; double* keys; s_TraitDef* values; unsigned char* occupied; };
 struct map_f64_P_s { int64_t cap; int64_t len; double* keys; s_P* values; unsigned char* occupied; };
 struct map_f64_Binds_s { int64_t cap; int64_t len; double* keys; s_Binds* values; unsigned char* occupied; };
 struct map_f64_Syms_s { int64_t cap; int64_t len; double* keys; s_Syms* values; unsigned char* occupied; };
@@ -423,6 +435,13 @@ static int64_t arr_ClassDef_len(arr_ClassDef a){ return a.len; }
 static arr_ClassDef arr_ClassDef_pop(arr_ClassDef a){ if(a.len>0) a.len-=1; return a; }
 static arr_ClassDef arr_ClassDef_slice(arr_ClassDef a, int64_t lo, int64_t hi){ arr_ClassDef r=arr_ClassDef_new(); if(lo<0)lo=0; if(hi>a.len)hi=a.len; for(int64_t i=lo;i<hi;i++) r=arr_ClassDef_push(r,a.data[i]); return r; }
 static arr_ClassDef arr_ClassDef_reverse(arr_ClassDef a){ arr_ClassDef r=arr_ClassDef_new(); for(int64_t i=a.len-1;i>=0;i--) r=arr_ClassDef_push(r,a.data[i]); return r; }
+static arr_TraitDef arr_TraitDef_new(void){ arr_TraitDef a; a.len=0; a.cap=0; a.data=0; return a; }
+static arr_TraitDef arr_TraitDef_push(arr_TraitDef a, s_TraitDef x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; s_TraitDef* nd=(s_TraitDef*)GC_MALLOC(nc*sizeof(s_TraitDef)); if(a.len) memcpy(nd,a.data,a.len*sizeof(s_TraitDef)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
+static s_TraitDef arr_TraitDef_get(arr_TraitDef a, int64_t i){ return a.data[i]; }
+static int64_t arr_TraitDef_len(arr_TraitDef a){ return a.len; }
+static arr_TraitDef arr_TraitDef_pop(arr_TraitDef a){ if(a.len>0) a.len-=1; return a; }
+static arr_TraitDef arr_TraitDef_slice(arr_TraitDef a, int64_t lo, int64_t hi){ arr_TraitDef r=arr_TraitDef_new(); if(lo<0)lo=0; if(hi>a.len)hi=a.len; for(int64_t i=lo;i<hi;i++) r=arr_TraitDef_push(r,a.data[i]); return r; }
+static arr_TraitDef arr_TraitDef_reverse(arr_TraitDef a){ arr_TraitDef r=arr_TraitDef_new(); for(int64_t i=a.len-1;i>=0;i--) r=arr_TraitDef_push(r,a.data[i]); return r; }
 static arr_P arr_P_new(void){ arr_P a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_P arr_P_push(arr_P a, s_P x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; s_P* nd=(s_P*)GC_MALLOC(nc*sizeof(s_P)); if(a.len) memcpy(nd,a.data,a.len*sizeof(s_P)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
 static s_P arr_P_get(arr_P a, int64_t i){ return a.data[i]; }
@@ -538,6 +557,16 @@ static arr_str map_str_ClassDef_keys(map_str_ClassDef m){ arr_str r=arr_str_new(
 static arr_ClassDef map_str_ClassDef_values(map_str_ClassDef m){ arr_ClassDef r=arr_ClassDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_ClassDef_push(r,m->values[i]); return r; }
 static int64_t map_str_ClassDef_len(map_str_ClassDef m){ return m->len; }
 static void map_str_ClassDef_print(map_str_ClassDef m){ (void)m; }
+static uint64_t map_str_TraitDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_TraitDef map_str_TraitDef_new(void){ map_str_TraitDef m=(map_str_TraitDef)GC_MALLOC(sizeof(map_str_TraitDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(s_TraitDef*)GC_MALLOC(8*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_TraitDef_grow(map_str_TraitDef m){ int64_t oc=m->cap; const char** ok=m->keys; s_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(s_TraitDef*)GC_MALLOC(nc*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_TraitDef_set(map_str_TraitDef m, const char* k, s_TraitDef val){ if(m->len*10>=m->cap*7) map_str_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static s_TraitDef map_str_TraitDef_get(map_str_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (s_TraitDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (s_TraitDef){0}; }
+static int64_t map_str_TraitDef_has(map_str_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_TraitDef_keys(map_str_TraitDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static arr_TraitDef map_str_TraitDef_values(map_str_TraitDef m){ arr_TraitDef r=arr_TraitDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_TraitDef_push(r,m->values[i]); return r; }
+static int64_t map_str_TraitDef_len(map_str_TraitDef m){ return m->len; }
+static void map_str_TraitDef_print(map_str_TraitDef m){ (void)m; }
 static uint64_t map_str_P_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
 static map_str_P map_str_P_new(void){ map_str_P m=(map_str_P)GC_MALLOC(sizeof(map_str_P_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(s_P*)GC_MALLOC(8*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
 static void map_str_P_grow(map_str_P m){ int64_t oc=m->cap; const char** ok=m->keys; s_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(s_P*)GC_MALLOC(nc*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
@@ -668,6 +697,16 @@ static arr_i64 map_i64_ClassDef_keys(map_i64_ClassDef m){ arr_i64 r=arr_i64_new(
 static arr_ClassDef map_i64_ClassDef_values(map_i64_ClassDef m){ arr_ClassDef r=arr_ClassDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_ClassDef_push(r,m->values[i]); return r; }
 static int64_t map_i64_ClassDef_len(map_i64_ClassDef m){ return m->len; }
 static void map_i64_ClassDef_print(map_i64_ClassDef m){ (void)m; }
+static uint64_t map_i64_TraitDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_TraitDef map_i64_TraitDef_new(void){ map_i64_TraitDef m=(map_i64_TraitDef)GC_MALLOC(sizeof(map_i64_TraitDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(s_TraitDef*)GC_MALLOC(8*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_TraitDef_grow(map_i64_TraitDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; s_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(s_TraitDef*)GC_MALLOC(nc*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_TraitDef_set(map_i64_TraitDef m, int64_t k, s_TraitDef val){ if(m->len*10>=m->cap*7) map_i64_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static s_TraitDef map_i64_TraitDef_get(map_i64_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (s_TraitDef){0}; if(m->keys[i]==k) return m->values[i]; } return (s_TraitDef){0}; }
+static int64_t map_i64_TraitDef_has(map_i64_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_TraitDef_keys(map_i64_TraitDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static arr_TraitDef map_i64_TraitDef_values(map_i64_TraitDef m){ arr_TraitDef r=arr_TraitDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_TraitDef_push(r,m->values[i]); return r; }
+static int64_t map_i64_TraitDef_len(map_i64_TraitDef m){ return m->len; }
+static void map_i64_TraitDef_print(map_i64_TraitDef m){ (void)m; }
 static uint64_t map_i64_P_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
 static map_i64_P map_i64_P_new(void){ map_i64_P m=(map_i64_P)GC_MALLOC(sizeof(map_i64_P_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(s_P*)GC_MALLOC(8*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
 static void map_i64_P_grow(map_i64_P m){ int64_t oc=m->cap; int64_t* ok=m->keys; s_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(s_P*)GC_MALLOC(nc*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
@@ -798,6 +837,16 @@ static arr_f64 map_f64_ClassDef_keys(map_f64_ClassDef m){ arr_f64 r=arr_f64_new(
 static arr_ClassDef map_f64_ClassDef_values(map_f64_ClassDef m){ arr_ClassDef r=arr_ClassDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_ClassDef_push(r,m->values[i]); return r; }
 static int64_t map_f64_ClassDef_len(map_f64_ClassDef m){ return m->len; }
 static void map_f64_ClassDef_print(map_f64_ClassDef m){ (void)m; }
+static uint64_t map_f64_TraitDef_hash(double k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_f64_TraitDef map_f64_TraitDef_new(void){ map_f64_TraitDef m=(map_f64_TraitDef)GC_MALLOC(sizeof(map_f64_TraitDef_s)); m->cap=8; m->len=0; m->keys=(double*)GC_MALLOC(8*sizeof(double)); m->values=(s_TraitDef*)GC_MALLOC(8*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_f64_TraitDef_grow(map_f64_TraitDef m){ int64_t oc=m->cap; double* ok=m->keys; s_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(double*)GC_MALLOC(nc*sizeof(double)); m->values=(s_TraitDef*)GC_MALLOC(nc*sizeof(s_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_f64_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_f64_TraitDef_set(map_f64_TraitDef m, double k, s_TraitDef val){ if(m->len*10>=m->cap*7) map_f64_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_f64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static s_TraitDef map_f64_TraitDef_get(map_f64_TraitDef m, double k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_f64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (s_TraitDef){0}; if(m->keys[i]==k) return m->values[i]; } return (s_TraitDef){0}; }
+static int64_t map_f64_TraitDef_has(map_f64_TraitDef m, double k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_f64_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_f64 map_f64_TraitDef_keys(map_f64_TraitDef m){ arr_f64 r=arr_f64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_f64_push(r,m->keys[i]); return r; }
+static arr_TraitDef map_f64_TraitDef_values(map_f64_TraitDef m){ arr_TraitDef r=arr_TraitDef_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_TraitDef_push(r,m->values[i]); return r; }
+static int64_t map_f64_TraitDef_len(map_f64_TraitDef m){ return m->len; }
+static void map_f64_TraitDef_print(map_f64_TraitDef m){ (void)m; }
 static uint64_t map_f64_P_hash(double k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
 static map_f64_P map_f64_P_new(void){ map_f64_P m=(map_f64_P)GC_MALLOC(sizeof(map_f64_P_s)); m->cap=8; m->len=0; m->keys=(double*)GC_MALLOC(8*sizeof(double)); m->values=(s_P*)GC_MALLOC(8*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
 static void map_f64_P_grow(map_f64_P m){ int64_t oc=m->cap; double* ok=m->keys; s_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(double*)GC_MALLOC(nc*sizeof(double)); m->values=(s_P*)GC_MALLOC(nc*sizeof(s_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_f64_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
@@ -869,6 +918,9 @@ static res_Func mk_err_Func(const char* m){ res_Func r; r.tag=1; r.err=m; return
 typedef struct { int tag; s_ClassDef ok; const char* err; } res_ClassDef;
 static res_ClassDef mk_ok_ClassDef(s_ClassDef v){ res_ClassDef r; r.tag=0; r.ok=v; r.err=""; return r; }
 static res_ClassDef mk_err_ClassDef(const char* m){ res_ClassDef r; r.tag=1; r.err=m; return r; }
+typedef struct { int tag; s_TraitDef ok; const char* err; } res_TraitDef;
+static res_TraitDef mk_ok_TraitDef(s_TraitDef v){ res_TraitDef r; r.tag=0; r.ok=v; r.err=""; return r; }
+static res_TraitDef mk_err_TraitDef(const char* m){ res_TraitDef r; r.tag=1; r.err=m; return r; }
 typedef struct { int tag; s_P ok; const char* err; } res_P;
 static res_P mk_ok_P(s_P v){ res_P r; r.tag=0; r.ok=v; r.err=""; return r; }
 static res_P mk_err_P(const char* m){ res_P r; r.tag=1; r.err=m; return r; }
@@ -889,6 +941,7 @@ static s_StructDef mk_StructDef(const char* name, arr_str fnames, arr_str ftypes
 static s_EnumDef mk_EnumDef(const char* name, arr_str vnames, arr_str vftypes){ s_EnumDef __s; __s.name=name; __s.vnames=vnames; __s.vftypes=vftypes; return __s; }
 static s_Func mk_Func(const char* name, arr_str params, arr_str ptypes, const char* ret, const char* lib, arr_str tparams, arr_Stmt body){ s_Func __s; __s.name=name; __s.params=params; __s.ptypes=ptypes; __s.ret=ret; __s.lib=lib; __s.tparams=tparams; __s.body=body; return __s; }
 static s_ClassDef mk_ClassDef(const char* name, const char* parent, arr_str fnames, arr_str ftypes, arr_Func methods, arr_str vflags){ s_ClassDef __s; __s.name=name; __s.parent=parent; __s.fnames=fnames; __s.ftypes=ftypes; __s.methods=methods; __s.vflags=vflags; return __s; }
+static s_TraitDef mk_TraitDef(const char* name, arr_str methods){ s_TraitDef __s; __s.name=name; __s.methods=methods; return __s; }
 static s_P mk_P(arr_Token toks, int64_t pos, const char* src){ s_P __s; __s.toks=toks; __s.pos=pos; __s.src=src; return __s; }
 static s_Binds mk_Binds(arr_str names, arr_Expr vals){ s_Binds __s; __s.names=names; __s.vals=vals; return __s; }
 static s_Syms mk_Syms(map_str_str vty, map_str_str fld, map_str_str ctors, map_str_str frets, map_str_str evar, map_str_str vft, arr_Func gfns, arr_Func lams, map_str_str errc){ s_Syms __s; __s.vty=vty; __s.fld=fld; __s.ctors=ctors; __s.frets=frets; __s.evar=evar; __s.vft=vft; __s.gfns=gfns; __s.lams=lams; __s.errc=errc; return __s; }
@@ -897,6 +950,7 @@ static void print_StructDef(s_StructDef v){ printf("StructDef{"); printf("name: 
 static void print_EnumDef(s_EnumDef v){ printf("EnumDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("vnames: "); printf("?"); printf(", "); printf("vftypes: "); printf("?"); printf("}"); }
 static void print_Func(s_Func v){ printf("Func{"); printf("name: "); printf("%s", v.name); printf(", "); printf("params: "); printf("?"); printf(", "); printf("ptypes: "); printf("?"); printf(", "); printf("ret: "); printf("%s", v.ret); printf(", "); printf("lib: "); printf("%s", v.lib); printf(", "); printf("tparams: "); printf("?"); printf(", "); printf("body: "); printf("?"); printf("}"); }
 static void print_ClassDef(s_ClassDef v){ printf("ClassDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("parent: "); printf("%s", v.parent); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("methods: "); printf("?"); printf(", "); printf("vflags: "); printf("?"); printf("}"); }
+static void print_TraitDef(s_TraitDef v){ printf("TraitDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("methods: "); printf("?"); printf("}"); }
 static void print_P(s_P v){ printf("P{"); printf("toks: "); printf("?"); printf(", "); printf("pos: "); printf("%lld", (long long)(v.pos)); printf(", "); printf("src: "); printf("%s", v.src); printf("}"); }
 static void print_Binds(s_Binds v){ printf("Binds{"); printf("names: "); printf("?"); printf(", "); printf("vals: "); printf("?"); printf("}"); }
 static void print_Syms(s_Syms v){ printf("Syms{"); printf("vty: "); printf("?"); printf(", "); printf("fld: "); printf("?"); printf(", "); printf("ctors: "); printf("?"); printf(", "); printf("frets: "); printf("?"); printf(", "); printf("evar: "); printf("?"); printf(", "); printf("vft: "); printf("?"); printf(", "); printf("gfns: "); printf("?"); printf(", "); printf("lams: "); printf("?"); printf(", "); printf("errc: "); printf("?"); printf("}"); }
@@ -1062,6 +1116,7 @@ s_Expr f_stamp_if_empty(arr_Expr v_elems, const char* v_old, const char* v_ety);
 s_StructDef f_parse_struct(s_P* v_p);
 s_Func f_parse_method(s_P* v_p, const char* v_cls);
 s_ClassDef f_parse_class(s_P* v_p);
+s_TraitDef f_parse_trait(s_P* v_p);
 s_EnumDef f_parse_enum(s_P* v_p);
 int64_t f_is_boxed_ft(const char* v_ft);
 const char* f_boxed_enum(const char* v_ft, const char* v_selfname);
@@ -1269,6 +1324,9 @@ const char* f_stmt_return_type(s_Syms* v_sy, s_Stmt v_s);
 const char* f_decl_side(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 const char* f_either_return(s_Syms* v_sy, arr_Stmt v_b, arr_Stmt v_eb);
 int64_t f_has_sub(const char* v_s, const char* v_sub);
+const char* f_before_colon(const char* v_s);
+const char* f_after_colon(const char* v_s);
+const char* f_join_semi(arr_str v_xs);
 const char* f_var_name(s_Expr v_e);
 int64_t f_is_empty_maplit(s_Expr v_e);
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m);
@@ -1322,6 +1380,9 @@ int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Ex
 int64_t f_lambda_arity(s_Expr v_e);
 int64_t f_hof_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+const char* f_concrete_of_tparam(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args);
+arr_str f_class_methods(s_Syms* v_sy, const char* v_cls);
+int64_t f_generic_bound_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
@@ -3335,6 +3396,33 @@ s_ClassDef f_parse_class(s_P* v_p) {
     return mk_ClassDef(v_name, v_parent, v_fnames, v_ftypes, v_methods, v_vflags);
 }
 
+s_TraitDef f_parse_trait(s_P* v_p) {
+    const char* v_name;
+    arr_str v_methods;
+    f_adv(v_p);
+    v_name = f_ctext(v_p);
+    f_adv(v_p);
+    f_eat(v_p, f_TK_LBRACE());
+    v_methods = ({ arr_str __a = arr_str_new(); __a; });
+    while (((f_ckind(v_p) != f_TK_RBRACE()) && (f_ckind(v_p) != f_TK_EOF()))) {
+        if (((f_ckind(v_p) == f_TK_IDENT()) && (strcmp(f_ctext(v_p), "fn") == 0))) {
+            f_adv(v_p);
+            v_methods = arr_str_push(v_methods, f_ctext(v_p));
+            f_adv(v_p);
+            while ((((f_ckind(v_p) != f_TK_SEMI()) && (f_ckind(v_p) != f_TK_RBRACE())) && (f_ckind(v_p) != f_TK_EOF()))) {
+                f_adv(v_p);
+            }
+            if ((f_ckind(v_p) == f_TK_SEMI())) {
+                f_adv(v_p);
+            }
+        } else {
+            f_adv(v_p);
+        }
+    }
+    f_eat(v_p, f_TK_RBRACE());
+    return mk_TraitDef(v_name, v_methods);
+}
+
 s_EnumDef f_parse_enum(s_P* v_p) {
     const char* v_name;
     arr_str v_vnames;
@@ -3779,6 +3867,7 @@ const char* f_tuple_suffix(const char* v_ty) {
 s_Func f_parse_func(s_P* v_p) {
     const char* v_name;
     arr_str v_tparams;
+    const char* v_tp;
     arr_str v_pnames;
     arr_str v_ptypes;
     const char* v_ret;
@@ -3790,8 +3879,14 @@ s_Func f_parse_func(s_P* v_p) {
         f_adv(v_p);
         while (((f_ckind(v_p) != f_TK_GT()) && (f_ckind(v_p) != f_TK_EOF()))) {
             if ((f_ckind(v_p) == f_TK_IDENT())) {
-                v_tparams = arr_str_push(v_tparams, f_ctext(v_p));
+                v_tp = f_ctext(v_p);
                 f_adv(v_p);
+                if ((f_ckind(v_p) == f_TK_COLON())) {
+                    f_adv(v_p);
+                    v_tp = scat(scat(v_tp, ":"), f_ctext(v_p));
+                    f_adv(v_p);
+                }
+                v_tparams = arr_str_push(v_tparams, v_tp);
             }
             if ((f_ckind(v_p) == f_TK_COMMA())) {
                 f_adv(v_p);
@@ -6844,6 +6939,45 @@ int64_t f_has_sub(const char* v_s, const char* v_sub) {
     return (str_index_of(v_s, v_sub) >= 0);
 }
 
+const char* f_before_colon(const char* v_s) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_s)))) {
+        if ((((int64_t)(unsigned char)(v_s)[v_i]) == 58)) {
+            return substr(v_s, 0, v_i);
+        }
+        v_i = (v_i + 1);
+    }
+    return v_s;
+}
+
+const char* f_after_colon(const char* v_s) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_s)))) {
+        if ((((int64_t)(unsigned char)(v_s)[v_i]) == 58)) {
+            return substr(v_s, (v_i + 1), ((int64_t)strlen(v_s)));
+        }
+        v_i = (v_i + 1);
+    }
+    return "";
+}
+
+const char* f_join_semi(arr_str v_xs) {
+    const char* v_s;
+    int64_t v_i;
+    v_s = "";
+    v_i = 0;
+    while ((v_i < arr_str_len(v_xs))) {
+        if ((v_i > 0)) {
+            v_s = scat(v_s, ";");
+        }
+        v_s = scat(v_s, arr_str_get(v_xs, v_i));
+        v_i = (v_i + 1);
+    }
+    return v_s;
+}
+
 const char* f_var_name(s_Expr v_e) {
     return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = v_n; } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = ""; } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = ""; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
 }
@@ -7520,6 +7654,86 @@ int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args
     return 0;
 }
 
+const char* f_concrete_of_tparam(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len((v_f).ptypes))) {
+        if ((v_i < arr_Expr_len(v_args))) {
+            if ((strcmp(arr_str_get((v_f).ptypes, v_i), v_tp) == 0)) {
+                return f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i));
+            }
+            if ((strcmp(arr_str_get((v_f).ptypes, v_i), scat(scat("[", v_tp), "]")) == 0)) {
+                return f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i)));
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return "?";
+}
+
+arr_str f_class_methods(s_Syms* v_sy, const char* v_cls) {
+    arr_str v_out;
+    const char* v_c;
+    const char* v_pfx;
+    v_out = ({ arr_str __a = arr_str_new(); __a; });
+    v_c = v_cls;
+    while ((((int64_t)strlen(v_c)) > 0)) {
+        v_pfx = scat(scat("@class.defines.", v_c), ".");
+        { map_str_str __m_k = (v_sy)->evar;
+        for (int64_t __n_k = 0; __n_k < __m_k->cap; __n_k += 1) {
+            if (!__m_k->occupied[__n_k]) continue;
+            const char* v_k = __m_k->keys[__n_k];
+            const char* v_v = __m_k->values[__n_k];
+            if (((((int64_t)strlen(v_k)) >= ((int64_t)strlen(v_pfx))) && (strcmp(substr(v_k, 0, ((int64_t)strlen(v_pfx))), v_pfx) == 0))) {
+                v_out = arr_str_push(v_out, substr(v_k, ((int64_t)strlen(v_pfx)), ((int64_t)strlen(v_k))));
+            }
+        } }
+        v_c = f_class_parent(v_sy, v_c);
+    }
+    return v_out;
+}
+
+int64_t f_generic_bound_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    s_Func v_f;
+    int64_t v_ti;
+    const char* v_tp;
+    const char* v_bkey;
+    const char* v_trait;
+    const char* v_conc;
+    const char* v_cls;
+    arr_str v_ms;
+    int64_t v_mi;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((map_str_str_has((v_sy)->evar, scat("@generic.", v_fname)) == (1 != 1))) {
+        return 0;
+    }
+    v_f = f_find_gfn(v_sy, v_fname);
+    v_ti = 0;
+    while ((v_ti < arr_str_len((v_f).tparams))) {
+        v_tp = arr_str_get((v_f).tparams, v_ti);
+        v_bkey = scat(scat(scat("@bound.", v_fname), "."), v_tp);
+        if (map_str_str_has((v_sy)->evar, v_bkey)) {
+            v_trait = map_str_str_get((v_sy)->evar, v_bkey);
+            v_conc = f_concrete_of_tparam(v_sy, v_f, v_tp, v_args);
+            if ((f_confident(v_conc) && map_str_str_has((v_sy)->evar, scat("@trait.", v_trait)))) {
+                v_cls = f_under_ptr(v_conc);
+                v_ms = f_split_semi(map_str_str_get((v_sy)->evar, scat("@trait.", v_trait)));
+                v_mi = 0;
+                while ((v_mi < arr_str_len(v_ms))) {
+                    if (((((int64_t)strlen(arr_str_get(v_ms, v_mi))) > 0) && (f_is_class_method(v_sy, v_cls, arr_str_get(v_ms, v_mi)) == (1 != 1)))) {
+                        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type '", v_cls), "' does not satisfy bound '"), v_trait), "': missing method '"), arr_str_get(v_ms, v_mi)), "'"), f_suggest(arr_str_get(v_ms, v_mi), f_class_methods(v_sy, v_cls))));
+                    }
+                    v_mi = (v_mi + 1);
+                }
+            }
+        }
+        v_ti = (v_ti + 1);
+    }
+    return 0;
+}
+
 int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     const char* v_want;
     const char* v_got;
@@ -7549,6 +7763,7 @@ int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_hof_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_generic_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
+    f_generic_bound_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_ok_ret_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
     return 0;
@@ -7826,13 +8041,23 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     arr_str v_cincs;
     arr_str v_csrcs;
     arr_ClassDef v_classes;
+    arr_TraitDef v_traits;
     arr_Stmt v_mains;
     const char* v_fname;
     arr_Func v_gfuncs;
     arr_Func v_rfuncs;
+    arr_str v_bkeys;
+    arr_str v_bvals;
     int64_t v_gi;
+    s_Func v_f;
+    arr_str v_cleantp;
+    int64_t v_ti;
+    const char* v_nm;
+    const char* v_bd;
     arr_Func v_nolams;
     s_Syms v_base;
+    int64_t v_tri;
+    int64_t v_bi;
     int64_t v_lci;
     s_ClassDef v_cd;
     int64_t v_parent_hasvt;
@@ -7867,7 +8092,6 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_vpj;
     int64_t v_xi;
     int64_t v_fi2;
-    s_Func v_f;
     int64_t v_gj;
     int64_t v_cf;
     s_Syms v_csy;
@@ -7895,7 +8119,6 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_mve;
     int64_t v_vt1;
     arr_str v_tup_seen;
-    int64_t v_ti;
     const char* v_rt2;
     const char* v_suf;
     int64_t v_found;
@@ -7921,6 +8144,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_cincs = ({ arr_str __a = arr_str_new(); __a; });
     v_csrcs = ({ arr_str __a = arr_str_new(); __a; });
     v_classes = ({ arr_ClassDef __a = arr_ClassDef_new(); __a; });
+    v_traits = ({ arr_TraitDef __a = arr_TraitDef_new(); __a; });
     v_mains = ({ arr_Stmt __a = arr_Stmt_new(); __a; });
     while ((f_ckind((&v_p)) != f_TK_EOF())) {
         if ((f_ckind((&v_p)) == f_TK_SEMI())) {
@@ -7936,30 +8160,34 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
                 if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "cl") == 0))) {
                     v_classes = arr_ClassDef_push(v_classes, f_parse_class((&v_p)));
                 } else {
-                    if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "cinc") == 0))) {
-                        f_adv((&v_p));
-                        v_cincs = arr_str_push(v_cincs, f_ctext((&v_p)));
-                        f_adv((&v_p));
+                    if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "tr") == 0))) {
+                        v_traits = arr_TraitDef_push(v_traits, f_parse_trait((&v_p)));
                     } else {
-                        if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "csrc") == 0))) {
+                        if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "cinc") == 0))) {
                             f_adv((&v_p));
-                            if ((f_ckind((&v_p)) == f_TK_RAWSTR())) {
-                                v_fname = scat(scat("__ailinline_", i2s(arr_str_len(v_csrcs))), ".cpp");
-                                write_file_c(scat(v_dir, v_fname), f_ctext((&v_p)));
-                                f_adv((&v_p));
-                                v_csrcs = arr_str_push(v_csrcs, v_fname);
-                            } else {
-                                v_csrcs = arr_str_push(v_csrcs, f_ctext((&v_p)));
-                                f_adv((&v_p));
-                            }
+                            v_cincs = arr_str_push(v_cincs, f_ctext((&v_p)));
+                            f_adv((&v_p));
                         } else {
-                            if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "ex") == 0))) {
-                                v_externs = arr_Func_push(v_externs, f_parse_extern((&v_p)));
-                            } else {
-                                if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "fn") == 0))) {
-                                    v_funcs = arr_Func_push(v_funcs, f_parse_func((&v_p)));
+                            if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "csrc") == 0))) {
+                                f_adv((&v_p));
+                                if ((f_ckind((&v_p)) == f_TK_RAWSTR())) {
+                                    v_fname = scat(scat("__ailinline_", i2s(arr_str_len(v_csrcs))), ".cpp");
+                                    write_file_c(scat(v_dir, v_fname), f_ctext((&v_p)));
+                                    f_adv((&v_p));
+                                    v_csrcs = arr_str_push(v_csrcs, v_fname);
                                 } else {
-                                    v_mains = arr_Stmt_push(v_mains, f_parse_stmt((&v_p)));
+                                    v_csrcs = arr_str_push(v_csrcs, f_ctext((&v_p)));
+                                    f_adv((&v_p));
+                                }
+                            } else {
+                                if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "ex") == 0))) {
+                                    v_externs = arr_Func_push(v_externs, f_parse_extern((&v_p)));
+                                } else {
+                                    if (((f_ckind((&v_p)) == f_TK_IDENT()) && (strcmp(f_ctext((&v_p)), "fn") == 0))) {
+                                        v_funcs = arr_Func_push(v_funcs, f_parse_func((&v_p)));
+                                    } else {
+                                        v_mains = arr_Stmt_push(v_mains, f_parse_stmt((&v_p)));
+                                    }
                                 }
                             }
                         }
@@ -7970,10 +8198,25 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     v_gfuncs = ({ arr_Func __a = arr_Func_new(); __a; });
     v_rfuncs = ({ arr_Func __a = arr_Func_new(); __a; });
+    v_bkeys = ({ arr_str __a = arr_str_new(); __a; });
+    v_bvals = ({ arr_str __a = arr_str_new(); __a; });
     v_gi = 0;
     while ((v_gi < arr_Func_len(v_funcs))) {
         if ((arr_str_len((arr_Func_get(v_funcs, v_gi)).tparams) > 0)) {
-            v_gfuncs = arr_Func_push(v_gfuncs, arr_Func_get(v_funcs, v_gi));
+            v_f = arr_Func_get(v_funcs, v_gi);
+            v_cleantp = ({ arr_str __a = arr_str_new(); __a; });
+            v_ti = 0;
+            while ((v_ti < arr_str_len((v_f).tparams))) {
+                v_nm = f_before_colon(arr_str_get((v_f).tparams, v_ti));
+                v_bd = f_after_colon(arr_str_get((v_f).tparams, v_ti));
+                if ((((int64_t)strlen(v_bd)) > 0)) {
+                    v_bkeys = arr_str_push(v_bkeys, scat(scat(scat("@bound.", (v_f).name), "."), v_nm));
+                    v_bvals = arr_str_push(v_bvals, v_bd);
+                }
+                v_cleantp = arr_str_push(v_cleantp, v_nm);
+                v_ti = (v_ti + 1);
+            }
+            v_gfuncs = arr_Func_push(v_gfuncs, mk_Func((v_f).name, (v_f).params, (v_f).ptypes, (v_f).ret, (v_f).lib, v_cleantp, (v_f).body));
         } else {
             v_rfuncs = arr_Func_push(v_rfuncs, arr_Func_get(v_funcs, v_gi));
         }
@@ -7982,6 +8225,16 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_funcs = v_rfuncs;
     v_nolams = ({ arr_Func __a = arr_Func_new(); __a; });
     v_base = mk_Syms(map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), v_gfuncs, v_nolams, map_str_str_new());
+    v_tri = 0;
+    while ((v_tri < arr_TraitDef_len(v_traits))) {
+        map_str_str_set((v_base).evar, scat("@trait.", (arr_TraitDef_get(v_traits, v_tri)).name), f_join_semi((arr_TraitDef_get(v_traits, v_tri)).methods));
+        v_tri = (v_tri + 1);
+    }
+    v_bi = 0;
+    while ((v_bi < arr_str_len(v_bkeys))) {
+        map_str_str_set((v_base).evar, arr_str_get(v_bkeys, v_bi), arr_str_get(v_bvals, v_bi));
+        v_bi = (v_bi + 1);
+    }
     v_lci = 0;
     while ((v_lci < arr_ClassDef_len(v_classes))) {
         v_cd = arr_ClassDef_get(v_classes, v_lci);

@@ -9,6 +9,26 @@ fn has_sub(s:str, sub:str) -> bool {
   index_of(s, sub) >= 0
 }
 
+// Split a "name:bound" tparam (from `<T: Bound>`): the part before / after the
+// first ':' (the whole string / "" when there's no ':'). 58 == ':'.
+fn before_colon(s:str) -> str {
+  mu i := 0
+  lp i < len(s) { if s[i] == 58 rt substring(s, 0, i)   i += 1 }
+  s
+}
+fn after_colon(s:str) -> str {
+  mu i := 0
+  lp i < len(s) { if s[i] == 58 rt substring(s, i + 1, len(s))   i += 1 }
+  ""
+}
+// Join with ';' — inverse of split_semi; used to store a trait's method list.
+fn join_semi(xs:[str]) -> str {
+  mu s := ""
+  mu i := 0
+  lp i < len(xs) { if i > 0 { s = s + ";" }   s = s + xs[i]   i += 1 }
+  s
+}
+
 // ----- empty `{}` usage inference -------------------------------------------
 // An un-annotated `m := {}` has no (K,V) until used. Before hoist/codegen we
 // scan the function body for the first `m[k]=v` and stamp the MapLit with
@@ -680,6 +700,67 @@ fn generic_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i6
   }
   0
 }
+// ----- constrained generics / traits ----------------------------------------
+// The concrete type bound to type-param `tp` at a call: the type of the arg whose
+// generic param is exactly `tp` (or the element type for a `[tp]` param). "?" when
+// none/unknown. Mirrors generic_T (codegen) but for a specific named param.
+fn concrete_of_tparam(sy:*Syms, f:Func, tp:str, args:[Expr]) -> str {
+  mu i := 0
+  lp i < len(f.ptypes) {
+    if i < len(args) {
+      if f.ptypes[i] == tp rt type_of_expr(sy, args[i])
+      if f.ptypes[i] == "[" + tp + "]" rt elem_of_ann(type_of_expr(sy, args[i]))
+    }
+    i += 1
+  }
+  "?"
+}
+// Method names a class (or an ancestor) defines — for "did you mean?" on a missing
+// trait method. Scans "@class.defines.<cls>.<m>" up the inheritance chain.
+fn class_methods(sy:*Syms, cls:str) -> [str] {
+  mu out:[str] := []
+  mu c := cls
+  lp len(c) > 0 {
+    pfx := "@class.defines." + c + "."
+    lp (k, v) in sy.evar {
+      if len(k) >= len(pfx) && substring(k, 0, len(pfx)) == pfx { out = push(out, substring(k, len(pfx), len(k))) }
+    }
+    c = class_parent(sy, c)
+  }
+  out
+}
+// When a generic call's `<T: Trait>` bound applies, the concrete T must be a class
+// (or ancestor) defining every method the trait requires (structural satisfaction,
+// via is_class_method). Conservative: skips unknown T and unregistered traits, so
+// it never rejects code that compiles today. The bound is erased at codegen — the
+// inline-monomorphization already dispatches each method per concrete class.
+fn generic_bound_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if has(sy.evar, "@generic." + fname) == false rt 0
+  f := find_gfn(sy, fname)
+  mu ti := 0
+  lp ti < len(f.tparams) {
+    tp := f.tparams[ti]
+    bkey := "@bound." + fname + "." + tp
+    if has(sy.evar, bkey) {
+      trait := sy.evar[bkey]
+      conc := concrete_of_tparam(sy, f, tp, args)
+      if confident(conc) && has(sy.evar, "@trait." + trait) {
+        cls := under_ptr(conc)
+        ms := split_semi(sy.evar["@trait." + trait])
+        mu mi := 0
+        lp mi < len(ms) {
+          if len(ms[mi]) > 0 && is_class_method(sy, cls, ms[mi]) == false {
+            report_chk(sy, src, pos, "type '" + cls + "' does not satisfy bound '" + trait + "': missing method '" + ms[mi] + "'" + suggest(ms[mi], class_methods(sy, cls)))
+          }
+          mi += 1
+        }
+      }
+    }
+    ti += 1
+  }
+  0
+}
 // `ok(x)` is monomorphic on the ENCLOSING fn's result type — it builds a
 // `res_<T>` where T is that fn's ok type, stashed as @ret by seed_fn for every
 // `-> !T` fn. So x must be compatible with T. (incompatible() treats `!T` itself
@@ -703,6 +784,7 @@ fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) ->
   variant_arg_check(sy, fname, args, pos, src)
   hof_arity_check(sy, fname, args, pos, src)
   generic_arity_check(sy, fname, args, pos, src)
+  generic_bound_check(sy, fname, args, pos, src)
   ok_ret_check(sy, fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
 }
@@ -961,6 +1043,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   mu cincs:[str] := []
   mu csrcs:[str] := []
   mu classes:[ClassDef] := []
+  mu traits:[TraitDef] := []
   mu mains:[Stmt] := []
 
   lp ckind(&p) != TK_EOF() {
@@ -971,6 +1054,8 @@ fn compile_to_c(src:str, dir:str) -> str {
       enums = push(enums, parse_enum(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cl" {
       classes = push(classes, parse_class(&p))
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "tr" {
+      traits = push(traits, parse_trait(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cinc" {
       adv(&p); cincs = push(cincs, ctext(&p)); adv(&p)   // cinc "header.h"
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "csrc" {
@@ -995,9 +1080,26 @@ fn compile_to_c(src:str, dir:str) -> str {
   // emitted as C functions. Regular fns emit normally.
   mu gfuncs:[Func] := []
   mu rfuncs:[Func] := []
+  mu bkeys:[str] := []                                // parallel: "@bound.<fn>.<T>" keys + trait names, applied to base.evar below
+  mu bvals:[str] := []
   mu gi := 0
   lp gi < len(funcs) {
-    if len(funcs[gi].tparams) > 0 { gfuncs = push(gfuncs, funcs[gi]) } el { rfuncs = push(rfuncs, funcs[gi]) }
+    if len(funcs[gi].tparams) > 0 {
+      f := funcs[gi]
+      // tparams may carry a bound from `<T: Bound>` encoded "T:Bound". Strip it to a
+      // clean name (so codegen's is_tparam/subst_tparam match the `T` annotation) and
+      // record the bound for the checker.
+      mu cleantp:[str] := []
+      mu ti := 0
+      lp ti < len(f.tparams) {
+        nm := before_colon(f.tparams[ti])
+        bd := after_colon(f.tparams[ti])
+        if len(bd) > 0 { bkeys = push(bkeys, "@bound." + f.name + "." + nm); bvals = push(bvals, bd) }
+        cleantp = push(cleantp, nm)
+        ti += 1
+      }
+      gfuncs = push(gfuncs, Func(f.name, f.params, f.ptypes, f.ret, f.lib, cleantp, f.body))
+    } el { rfuncs = push(rfuncs, funcs[gi]) }
     gi += 1
   }
   funcs = rfuncs
@@ -1005,6 +1107,12 @@ fn compile_to_c(src:str, dir:str) -> str {
   // Build the shared type context: struct ctors + field-type map + enum tables.
   mu nolams:[Func] := []
   mu base := Syms({}, {}, {}, {}, {}, {}, gfuncs, nolams, {})
+  // Trait metadata for the generic-bound checker (codegen never reads these):
+  // "@trait.<Name>" → ";"-joined required method names; "@bound.<fn>.<T>" → trait.
+  mu tri := 0
+  lp tri < len(traits) { base.evar["@trait." + traits[tri].name] = join_semi(traits[tri].methods); tri += 1 }
+  mu bi := 0
+  lp bi < len(bkeys) { base.evar[bkeys[bi]] = bvals[bi]; bi += 1 }
   // Lower classes (B1: data struct + statically-dispatched methods). Each class
   // → a StructDef (so the struct registration below + all the struct codegen —
   // ctor, printer, arr_/map_/res_ — handle it for free) plus one top-level Func
