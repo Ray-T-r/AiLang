@@ -37,6 +37,7 @@ st Syms {
   vft: {str:str}      // VariantName → ";"-joined field type names ("" for a unit variant)
   gfns: [Func]        // generic functions (tparams non-empty) — inlined at call sites
   lams: [Func]        // lifted first-class lambdas (name=<lamid>, ptypes all i64, ret=body type, body=[SReturn(b)]); ordered registry driving deterministic env/__lam emission. Captures ride evar["@lamcaps.<id>"]/["@lamcapt.<id>"].
+  errc: {str:str}     // diagnostic accumulator: "bad"="1" once any checker error fired, "n"=count. A SHARED (reference) map — seed_fn passes it through unchanged, so every per-fn `sy` copy mutates the SAME object as `base` (like evar). Lets `report_chk` collect all type errors instead of exit(1) on the first; the driver checks base.errc after check_program.
 }
 
 fn ty_of(sy:*Syms, name:str) -> str {
