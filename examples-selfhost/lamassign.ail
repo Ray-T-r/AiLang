@@ -1,0 +1,28 @@
+// Regression: a lambda whose block body's TAIL is an assignment or a loop (a
+// non-value statement, not a trailing expression). The block still produces a
+// value — codegen emits a trailing `0` — so the lifted `__lam` returns int64_t.
+// The old self-host bug inferred an EMPTY return type, which cty("") spelled as
+// the bogus C type `s_` (clang: "unknown type name 's_'"), so the program failed
+// to compile at all. We assert the captured-array SIDE EFFECTS, visible because
+// arrays share their data buffer through a by-value capture.
+// Expected output: 3 / 42 / 15
+
+// (1) nullary lambda, tail = index-assignment on a captured array.
+mu a:[i64] := [0]
+bump := fn() { a[0] = a[0] + 1 }
+bump()
+bump()
+bump()
+println(a[0])             // -> 3
+
+// (2) the minimal repro shape: tail is a single index-assignment.
+mu b:[i64] := [10]
+setb := fn() { b[0] = 42 }
+setb()
+println(b[0])             // -> 42
+
+// (3) tail = a loop statement (also a non-value tail).
+mu total:[i64] := [0]
+sumup := fn() { mu i := 1; lp i <= 5 { total[0] = total[0] + i; i += 1 } }
+sumup()
+println(total[0])         // -> 15

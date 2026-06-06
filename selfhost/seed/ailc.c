@@ -5797,11 +5797,16 @@ const char* f_gen_tuple_typedef(const char* v_ty) {
 
 const char* f_block_type(s_Syms* v_sy, arr_Stmt v_body) {
     int64_t v_n;
+    const char* v_t;
     v_n = arr_Stmt_len(v_body);
     if ((v_n == 0)) {
         return "i64";
     }
-    return f_last_expr_type(v_sy, arr_Stmt_get(v_body, (v_n - 1)));
+    v_t = f_last_expr_type(v_sy, arr_Stmt_get(v_body, (v_n - 1)));
+    if ((((int64_t)strlen(v_t)) == 0)) {
+        return "i64";
+    }
+    return v_t;
 }
 
 const char* f_gen_blk_decl(s_Syms* v_sy, const char* v_name, s_Expr v_e) {
