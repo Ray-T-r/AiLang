@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 8,714 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 8,871 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -20,7 +20,8 @@ toolchain anywhere in the loop**.
 The core language plus the full standard library: functions and recursion,
 control flow, structs, classes (`cl` — single inheritance + `vt` virtual
 methods, lowered to C vtables), `en` enums + `mt` match (recursive ADTs,
-heap-boxed self-references), real generics, closures with capture, `[T]` arrays
+heap-boxed self-references; guards `if`, `_` catch-all, and nested
+destructuring), real generics, closures with capture, `[T]` arrays
 and `{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
 multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), `cinc` C-header interop,
@@ -69,11 +70,11 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~6,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **8,714 lines, byte-identical** |
-| sample programs | **39**, each output-verified against a frozen fixture |
+| strict fixpoint | `stage2.c == stage3.c` — **8,871 lines, byte-identical** |
+| sample programs | **42**, each output-verified against a frozen fixture |
 | standard library | 11 modules, all compiling |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness/variants/bindings, and call/callback/generic arity |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, and call/callback/generic arity |
 | Rust in the build | **none** |
 
 ## Layout
