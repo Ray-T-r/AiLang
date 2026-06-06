@@ -1,0 +1,18 @@
+// Stage B1: a class = data + statically-dispatched methods (no inheritance, no
+// virtual). Methods take an implicit `self:*Circle`; a call `c.area()` lowers to
+// `f_Circle_area(&c)`. Because a class lowers to a struct, the constructor
+// `Circle(...)`, field access, and println(c) all work for free.
+cl Circle {
+  x:i64; y:i64; r:i64
+  fn area(self) -> i64 { 3 * self.r * self.r }
+  fn shifted(self, dx:i64) -> i64 { self.x + dx }
+}
+
+c := Circle(0, 0, 5)
+println(c.area())          // 75
+println(c.shifted(10))     // 10
+
+mu p := Circle(2, 3, 4)
+println(p.area())          // 48
+println(p.shifted(8))      // 10
+println(p)                 // free struct printer

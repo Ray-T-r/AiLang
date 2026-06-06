@@ -1,0 +1,20 @@
+// Stage B2: single inheritance. `Dog : Animal` flattens Animal's fields first, so
+// a Dog lays out [legs, name] (inherited) then [tricks]. An inherited method
+// (legs_x2/id, defined on Animal) called on a Dog dispatches to f_Animal_* with
+// the receiver cast (s_Animal*)&dog — valid by prefix layout. An own method
+// (score) reaches both inherited and own fields through self.
+cl Animal {
+  legs:i64; name:i64
+  fn legs_x2(self) -> i64 { self.legs * 2 }
+  fn id(self) -> i64 { self.name }
+}
+cl Dog : Animal {
+  tricks:i64
+  fn score(self) -> i64 { self.legs + self.tricks }
+}
+
+d := Dog(4, 7, 3)          // legs=4, name=7 (inherited), tricks=3
+println(d.legs_x2())       // 8   inherited method
+println(d.id())            // 7   inherited method + inherited field
+println(d.score())         // 7   own method, inherited + own field
+println(d)                 // flattened struct printer

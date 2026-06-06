@@ -261,7 +261,15 @@ fn stamp_empty_maps(sy:*Syms, body:[Stmt]) -> [Stmt] {
   out
 }
 
-fn compile_to_c(src:str) -> str {
+// Is method m already a slot in the ";"-joined vtable slot list?
+fn slot_has(slots:str, m:str) -> bool {
+  parts := split(slots, ";")
+  mu i := 0
+  lp i < len(parts) { if parts[i] == m rt true; i += 1 }
+  false
+}
+
+fn compile_to_c(src:str, dir:str) -> str {
   toks := lex(src)
   mu p := P(toks, 0, src)
 
@@ -270,6 +278,8 @@ fn compile_to_c(src:str) -> str {
   mu funcs:[Func] := []
   mu externs:[Func] := []
   mu cincs:[str] := []
+  mu csrcs:[str] := []
+  mu classes:[ClassDef] := []
   mu mains:[Stmt] := []
 
   lp ckind(&p) != TK_EOF() {
@@ -278,8 +288,19 @@ fn compile_to_c(src:str) -> str {
       structs = push(structs, parse_struct(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "en" {
       enums = push(enums, parse_enum(&p))
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cl" {
+      classes = push(classes, parse_class(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "cinc" {
       adv(&p); cincs = push(cincs, ctext(&p)); adv(&p)   // cinc "header.h"
+    } el if ckind(&p) == TK_IDENT() && ctext(&p) == "csrc" {
+      adv(&p)
+      if ckind(&p) == TK_RAWSTR() {                       // csrc `…inline C++…` → write a temp .cpp beside the input
+        fname := "__ailinline_" + int_to_str(len(csrcs)) + ".cpp"
+        write_file(dir + fname, ctext(&p)); adv(&p)
+        csrcs = push(csrcs, fname)                        // same one-file UX as csrc "shim.cpp"
+      } el {                                              // csrc "shim.cpp" → external file path
+        csrcs = push(csrcs, ctext(&p)); adv(&p)
+      }
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "ex" {
       externs = push(externs, parse_extern(&p))
     } el if ckind(&p) == TK_IDENT() && ctext(&p) == "fn" {
@@ -303,6 +324,89 @@ fn compile_to_c(src:str) -> str {
   // Build the shared type context: struct ctors + field-type map + enum tables.
   mu nolams:[Func] := []
   mu base := Syms({}, {}, {}, {}, {}, {}, gfuncs, nolams)
+  // Lower classes (B1: data struct + statically-dispatched methods). Each class
+  // → a StructDef (so the struct registration below + all the struct codegen —
+  // ctor, printer, arr_/map_/res_ — handle it for free) plus one top-level Func
+  // per method, mangled `<Class>_<method>` with `self:*Class` as params[0]. The
+  // `@class.*` evar keys let gen_call route `obj.m(args)` → `f_<Class>_m`. Pushed
+  // BEFORE the struct loop (so fields register) and the fn return-inference loop
+  // (so method returns infer). Additive: classes==[] (e.g. main.ail) ⇒ no-op.
+  mu lci := 0
+  lp lci < len(classes) {
+    cd := classes[lci]
+    // Does this class (or an ancestor) have any virtual method? Drives the hidden
+    // __vt field and the vtable emission.
+    parent_hasvt := len(cd.parent) > 0 && has(base.evar, "@class.hasvt." + cd.parent)
+    mu own_virt := false
+    mu vci := 0
+    lp vci < len(cd.vflags) { if cd.vflags[vci] == "1" { own_virt = true } vci += 1 }
+    hasvt := own_virt || parent_hasvt
+
+    // Flatten fields: [__vt?] + parent (flattened) + own — so s_<Derived> begins
+    // with s_<Base>'s layout (a Derived* upcasts to Base*, cfront/GObject style).
+    // __vt is prepended only at the ROOT of a virtual hierarchy; a derived class
+    // inherits the parent's. Base must precede the derived class in source order.
+    mu allf:[str] := []
+    mu allt:[str] := []
+    if hasvt && (parent_hasvt == false) { allf = push(allf, "__vt"); allt = push(allt, "@vtp") }
+    if len(cd.parent) > 0 {
+      mu k := 0
+      lp k < len(structs) {
+        if structs[k].name == cd.parent {
+          mu pj := 0
+          lp pj < len(structs[k].fnames) { allf = push(allf, structs[k].fnames[pj]); allt = push(allt, structs[k].ftypes[pj]); pj += 1 }
+        }
+        k += 1
+      }
+    }
+    mu fi := 0
+    lp fi < len(cd.fnames) { allf = push(allf, cd.fnames[fi]); allt = push(allt, cd.ftypes[fi]); fi += 1 }
+    structs = push(structs, StructDef(cd.name, allf, allt))
+
+    base.evar["@class." + cd.name] = "1"
+    base.evar["@class.parent." + cd.name] = cd.parent
+    if hasvt { base.evar["@class.hasvt." + cd.name] = "1" }
+
+    // Methods → top-level Funcs; record defines, owning class, and (for virtuals)
+    // the slot signature (return C type + arg C types after the `void*` self).
+    mu mi := 0
+    lp mi < len(cd.methods) {
+      m := cd.methods[mi]
+      funcs = push(funcs, Func(cd.name + "_" + m.name, m.params, m.ptypes, m.ret, "", m.tparams, m.body))
+      base.evar["@class.defines." + cd.name + "." + m.name] = "1"
+      base.evar["@mclass." + cd.name + "_" + m.name] = cd.name
+      if cd.vflags[mi] == "1" {
+        mu vr := "void"
+        if len(m.ret) > 0 { vr = cty(m.ret) }
+        base.evar["@class.vret." + cd.name + "." + m.name] = vr
+        mu va := ""
+        mu ai := 1
+        lp ai < len(m.ptypes) { va = va + ", " + cty(m.ptypes[ai]); ai += 1 }
+        base.evar["@class.vargs." + cd.name + "." + m.name] = va
+      }
+      mi += 1
+    }
+
+    // vslots: the parent's slot list, then this class's NEW virtuals (an override
+    // reuses the inherited slot). Then mark each slot virtual-for-this-class.
+    mu slots := ""
+    if parent_hasvt { slots = base.evar["@class.vslots." + cd.parent] }
+    mu vm := 0
+    lp vm < len(cd.methods) {
+      if cd.vflags[vm] == "1" {
+        mn := cd.methods[vm].name
+        if slot_has(slots, mn) == false {
+          if len(slots) == 0 { slots = mn } el { slots = slots + ";" + mn }
+        }
+      }
+      vm += 1
+    }
+    base.evar["@class.vslots." + cd.name] = slots
+    mu sp := split(slots, ";")
+    mu spi := 0
+    lp spi < len(sp) { if len(sp[spi]) > 0 { base.evar["@class.virt." + cd.name + "." + sp[spi]] = "1" } spi += 1 }
+    lci += 1
+  }
   mu si := 0
   lp si < len(structs) {
     sd := structs[si]
@@ -385,6 +489,16 @@ fn compile_to_c(src:str) -> str {
     lk += 1
   }
   if len(libline) > 0 { out = "// @links:" + libline + "\n" }
+
+  // C++ shim marker: one comment line listing the `csrc "..."` .cpp paths, read
+  // back by main()'s driver to compile each with clang++ and link with clang++.
+  // Absent when no `csrc` is used (e.g. main.ail itself), so the emitted C — and
+  // the link command main() picks — are unchanged (fixpoint-safe, same mold as
+  // the `// @links:` marker above).
+  mu cline := ""
+  mu cs := 0
+  lp cs < len(csrcs) { cline = cline + " " + csrcs[cs]; cs += 1 }
+  if len(cline) > 0 { out = out + "// @csrc:" + cline + "\n" }
 
   // C prelude: headers (system, then `cinc` headers) + string/runtime helpers.
   // Runtime allocates via Boehm GC (`GC_MALLOC` + `<gc.h>`, linked `-lgc`) to
@@ -583,6 +697,18 @@ fn compile_to_c(src:str) -> str {
   out = out + gen_map_nodes_all(mapkeys, mapvals)
   out = out + "\n"
 
+  // vtable types + forward decls for classes with virtual methods (B3). The
+  // `extern` decl lets the ctor (phase 4) reference &__vtbl_<C> before the
+  // instance is defined (after the fn prototypes — it points at f_<impl>_<m>).
+  mu vt1 := 0
+  lp vt1 < len(classes) {
+    if has(base.evar, "@class.hasvt." + classes[vt1].name) {
+      out = out + gen_vtable_typedef(&base, classes[vt1].name)
+      out = out + "extern const vt_" + classes[vt1].name + " __vtbl_" + classes[vt1].name + ";\n"
+    }
+    vt1 += 1
+  }
+
   // Phase 4: array/map helpers (need complete element types) + aggregate ctors.
   out = out + gen_arr_helpers("i64", "int64_t")
   out = out + gen_arr_helpers("str", "const char*")
@@ -644,6 +770,14 @@ fn compile_to_c(src:str) -> str {
   lp i < len(funcs) { out = out + gen_sig(funcs[i], base.frets[funcs[i].name]) + ";\n"; i += 1 }
   out = out + "\n"
 
+  // vtable instances (B3) — emitted after the fn prototypes they point at.
+  mu vt2 := 0
+  lp vt2 < len(classes) {
+    if has(base.evar, "@class.hasvt." + classes[vt2].name) { out = out + gen_vtable_instance(&base, classes[vt2].name) }
+    vt2 += 1
+  }
+  if len(classes) > 0 { out = out + "\n" }
+
   // Lifted lambdas (gated): env structs (fields use fully-defined phase-4
   // aggregates), then `__lam_<id>` fwd decls, then bodies. Driven by the ordered
   // `base.lams` so emission is deterministic (no map iteration).
@@ -668,6 +802,9 @@ fn compile_to_c(src:str) -> str {
     fb := stamp_empty_maps(&sy, f.body)          // infer un-annotated `m := {}`
     sy = seed_fn(&base, f)                        // discard inference's scratch typing
     decls := hoist_decls(&sy, fb, "    ")
+    // mark the enclosing class (if f is a method) so `super.m()` in the body
+    // resolves to the parent impl; cleared otherwise.
+    if has(sy.evar, "@mclass." + f.name) { sy.evar["@curclass"] = sy.evar["@mclass." + f.name] } el { sy.evar["@curclass"] = "" }
     out = out + gen_sig(f, base.frets[f.name]) + " {\n" + decls + gen_fn_body(&sy, fb, base.frets[f.name], "    ") + "}\n\n"
     i += 1
   }
@@ -709,6 +846,40 @@ fn link_flags(cprog:str) -> str {
     i += 1
   }
   if start >= 0 { out = out + " -l" + substring(libs, start, len(libs)) }
+  out
+}
+
+// Read the `// @csrc:` marker — the .cpp shim paths from `csrc "..."` decls.
+// Line-scanned (NOT offset-0 like link_flags) because `// @links:`, when present,
+// occupies the first line and pushes `// @csrc:` to the second. Returns [] when
+// absent (the common case → main() takes the unchanged single-clang link path).
+fn csrc_list(cprog:str) -> [str] {
+  pre := "// @csrc:"
+  np := len(pre)
+  mu out:[str] := []
+  mu ls := 0
+  mu i := 0
+  lp i < len(cprog) {
+    if cprog[i] == 10 {
+      if (i - ls >= np) && (substring(cprog, ls, ls + np) == pre) {
+        seg := substring(cprog, ls + np, i)        // the " path1 path2" tail
+        mu start := 0 - 1
+        mu j := 0
+        lp j < len(seg) {
+          if seg[j] == 32 {
+            if start >= 0 { out = push(out, substring(seg, start, j)); start = 0 - 1 }
+          } el {
+            if start < 0 { start = j }
+          }
+          j += 1
+        }
+        if start >= 0 { out = push(out, substring(seg, start, len(seg))) }
+        rt out
+      }
+      ls = i + 1
+    }
+    i += 1
+  }
   out
 }
 

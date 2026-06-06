@@ -1,6 +1,6 @@
 ---
 name: ailang
-description: Write, read, and compile AiLang (`.ail`) source with the self-hosted `ailc` compiler. Use whenever the user asks for AiLang code, references AiLang syntax, mentions an `.ail` file, asks about the `ailc` compiler, or works inside an AiLang project. AiLang is a compiled, statically-typed language with a deliberately minimal-token syntax — 2-char keywords (`fn`/`lp`/`mt`/`rt`/`el`/`en`/`st`), optional type annotations (default `i64`), implicit `main`, implicit return. It compiles to C and links via `clang -O2`. Supports structs, enums/recursive ADTs, real generics, closures with capture, `!T`/`?` error propagation, string interpolation `"${e}"`, UFCS, and a 10-module stdlib (sockets/HTTP/TLS/Postgres/Redis/WebSocket/JSON/time/str/math).
+description: Write, read, and compile AiLang (`.ail`) source with the self-hosted `ailc` compiler. Use whenever the user asks for AiLang code, references AiLang syntax, mentions an `.ail` file, asks about the `ailc` compiler, or works inside an AiLang project. AiLang is a compiled, statically-typed language with a deliberately minimal-token syntax — 2-char keywords (`fn`/`lp`/`mt`/`rt`/`el`/`en`/`st`), optional type annotations (default `i64`), implicit `main`, implicit return. It compiles to C and links via `clang -O2`. Supports structs, classes (single inheritance + virtual methods), enums/recursive ADTs, real generics, closures with capture, `!T`/`?` error propagation, string interpolation `"${e}"`, UFCS, C++ library interop via `csrc`, and a 10-module stdlib (sockets/HTTP/TLS/Postgres/Redis/WebSocket/JSON/time/str/math).
 ---
 
 # AiLang Quick Reference (self-hosted `ailc`)
@@ -53,8 +53,10 @@ those under WSL, not native `ailc`.
 | `br` / `ct` | break / continue | `ex` | extern C function |
 | `mu` | mutable binding | `cinc` | include a C header |
 | `in` | iterator separator in `lp` | `true` `false` | bool literals |
+| `cl` | class (single inheritance) | `vt` | virtual-method marker |
+| `csrc` | compile + link a C++ shim | `super` | parent-method call (in a method) |
 
-`println` / `print` are **builtins, not keywords**. There is no `for`, `while`, `else`, `return`, `match`, `struct`, `enum`, `import`, `let`, `var`, `class`, `def`.
+`println` / `print` are **builtins, not keywords**. Full-word forms do **not** exist — use the short keyword: `cl` (not `class`), `st` (not `struct`), `en` (not `enum`), `lp` (not `for`/`while`), `el` (not `else`), `rt` (not `return`), `mt` (not `match`). Also no `def` / `let` / `var`.
 
 ## Operators
 
@@ -142,6 +144,28 @@ q := Point{ x: 0, y: 1 }                // named (order-independent)
 println(p.x)                            // field access
 ```
 
+## Classes (single inheritance + explicit virtual)
+
+```
+cl Shape {
+  tag:i64
+  fn describe(self) -> i64 { self.tag }            // method: implicit self (*Shape)
+  vt fn area(self) -> i64 { 0 }                    // `vt` = virtual (vtable dispatch)
+}
+cl Circle : Shape {                                // `: Base` = single inheritance
+  r:i64
+  vt fn area(self) -> i64 { 3*self.r*self.r }      // override
+  vt fn name(self) -> str { "c/" ++ super.name() } // override + super call
+}
+c := Circle(0, 5)        // ctor: inherited fields first, then own → (tag, r)
+println(c.area())        // 75  — UFCS call; virtual → Circle::area
+println(c.describe())    // 0   — inherited static method
+```
+- Methods take an implicit `self` (typed `*ClassName`); call with UFCS `obj.m(args)`.
+- `fn` = static dispatch (by the receiver's static type); `vt fn` = **virtual** (runtime dispatch via a vtable). A same-named `vt fn` in a subclass **overrides** it; `super.m()` calls the parent's impl.
+- A class IS a struct under the hood — `Name(...)` construction, `println(obj)`, `[Name]` arrays, `{str:Name}` maps and `!Name` all work for free.
+- **Single inheritance only.** Lowers to plain C (vtables = function-pointer tables) → works on macOS, Linux, and Windows.
+
 ## Enums / ADTs (recursive OK — self-references are heap-boxed)
 
 ```
@@ -212,6 +236,19 @@ cinc "math.h"                            // pull a C header into scope
 ex fn sqrt(x:f64) -> f64                 // then bind its symbols
 ex fn printf(fmt:str, ...) -> i32        // variadic extern
 ex "z" fn zlibVersion() -> str           // "lib" → adds -lz
+
+csrc "shim.cpp"                          // C++ interop (POSIX only): compile a C++
+ex fn Acc_new() -> i64                    //   shim with clang++ & link it; bind its
+ex fn Acc_free(h:i64)                     //   extern "C" fns. C++ objects = i64 handles
+```
+`csrc` links a C++ shim: expose `extern "C"` functions, declare them with `ex fn`, pass opaque C++ objects across as `i64` handles (`reinterpret_cast`). macOS/Linux only — on Windows a `csrc` program errors clearly. Two forms — external file `csrc "shim.cpp"`, or **inline in one file** with a backtick block (the C++ is extracted, compiled with clang++, and cleaned up):
+
+```
+csrc `
+#include <set>
+extern "C" { int64_t set_new(){ return (int64_t)new std::set<int64_t>(); } }
+`
+ex fn set_new() -> i64
 ```
 
 ## Builtins (always in scope — no `im`)

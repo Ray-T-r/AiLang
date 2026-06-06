@@ -32,6 +32,10 @@ CLAUDE.md
 # fresh clone can't compile imports.ail (verify.sh would fail on a clean checkout)
 !/examples-selfhost/lib/
 !/examples-selfhost/lib/*.ail
+# the cppinterop sample ships a C++ shim (csrc "shim.cpp"); re-include shim
+# sources/headers so a fresh clone can compile it (else verify.sh fails on CI)
+!/examples-selfhost/*.cpp
+!/examples-selfhost/*.h
 
 # selfhost/ bootstrap build outputs are covered by selfhost/.gitignore
 

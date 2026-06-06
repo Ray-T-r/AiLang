@@ -505,10 +505,132 @@ fn gen_closure_call(sy:*Syms, fname:str, ret:str, args:[Expr]) -> str {
   out + "))"
 }
 
+// ----- class method dispatch (static, across single inheritance) ------------
+// A method call `obj.m(a)` parses (UFCS) to Call("m", [obj, a]); when obj's
+// static type is a known class declaring (or inheriting) m, route it to the
+// mangled `f_<DefiningClass>_m`.
+fn class_parent(sy:*Syms, cls:str) -> str {
+  if has(sy.evar, "@class.parent." + cls) rt sy.evar["@class.parent." + cls]
+  ""
+}
+// m is declared on cls or any ancestor.
+fn is_class_method(sy:*Syms, cls:str, m:str) -> bool {
+  mu c := cls
+  lp len(c) > 0 {
+    if has(sy.evar, "@class.defines." + c + "." + m) rt true
+    c = class_parent(sy, c)
+  }
+  false
+}
+// The class (cls or an ancestor) that declares m — names the `f_<def>_<m>` impl.
+fn defining_class(sy:*Syms, cls:str, m:str) -> str {
+  mu c := cls
+  lp len(c) > 0 {
+    if has(sy.evar, "@class.defines." + c + "." + m) rt c
+    c = class_parent(sy, c)
+  }
+  cls
+}
+// The receiver C-expression: a pointer passes as-is; a value is address-taken
+// (methods take `self:*Class`; there is no autoref — cf. pointers.ail's `&ctr`).
+fn recv_ptr(sy:*Syms, e:Expr) -> str {
+  if is_ptr_ann(type_of_expr(sy, e)) rt gen_expr(sy, e)
+  "(&" + gen_expr(sy, e) + ")"
+}
+// Dispatch a method call. Virtual → indirect through the vtable; static → a
+// direct `f_<defining-class>_<m>(recv, …)`, upcasting the receiver for inherited
+// methods (valid because s_<Derived> shares s_<Base>'s leading layout).
+fn gen_method_call(sy:*Syms, cls:str, m:str, args:[Expr]) -> str {
+  recv := recv_ptr(sy, args[0])
+  // virtual: ((vt_<cls>*)recv->__vt)->m((void*)recv, …)
+  if has(sy.evar, "@class.virt." + cls + "." + m) {
+    mu vo := "((vt_" + cls + "*)(" + recv + ")->__vt)->" + m + "((void*)" + recv
+    mu vi := 1
+    lp vi < len(args) { vo = vo + ", " + gen_expr(sy, args[vi]); vi += 1 }
+    rt vo + ")"
+  }
+  // static
+  def := defining_class(sy, cls, m)
+  mu r := recv
+  if def != cls { r = "(s_" + def + "*)" + recv }
+  mu out := "f_" + def + "_" + m + "(" + r
+  mu i := 1
+  lp i < len(args) { out = out + ", " + gen_expr(sy, args[i]); i += 1 }
+  out + ")"
+}
+
+// ----- vtable emission (B3: explicit virtual) -------------------------------
+// A vtable slot's signature: return C type + the C arg types after the `void*`
+// self. Walked up the chain because an inherited slot's signature is recorded on
+// the ancestor that declared it.
+fn vsig_ret(sy:*Syms, cls:str, m:str) -> str {
+  mu c := cls
+  lp len(c) > 0 {
+    if has(sy.evar, "@class.vret." + c + "." + m) rt sy.evar["@class.vret." + c + "." + m]
+    c = class_parent(sy, c)
+  }
+  "void"
+}
+fn vsig_args(sy:*Syms, cls:str, m:str) -> str {
+  mu c := cls
+  lp len(c) > 0 {
+    if has(sy.evar, "@class.vargs." + c + "." + m) rt sy.evar["@class.vargs." + c + "." + m]
+    c = class_parent(sy, c)
+  }
+  ""
+}
+// `typedef struct vt_<C> { R (*m)(void*, …); … } vt_<C>;` — one function-pointer
+// slot per virtual method, inherited slots first (the @class.vslots order). All
+// slots take `void*` self, so vt_<Sub> is layout-compatible with vt_<Base> over
+// the shared prefix (a vt_<Sub>* read as vt_<Base>* finds the same slots).
+fn gen_vtable_typedef(sy:*Syms, cls:str) -> str {
+  mu out := "typedef struct vt_" + cls + " {\n"
+  parts := split(sy.evar["@class.vslots." + cls], ";")
+  mu i := 0
+  lp i < len(parts) {
+    m := parts[i]
+    if len(m) > 0 { out = out + "  " + vsig_ret(sy, cls, m) + " (*" + m + ")(void*" + vsig_args(sy, cls, m) + ");\n" }
+    i += 1
+  }
+  out + "} vt_" + cls + ";\n"
+}
+// `const vt_<C> __vtbl_<C> = { (cast)f_<impl>_<m>, … };` — each slot filled with
+// the most-derived impl at/above C, cast to the slot's void*-self signature.
+fn gen_vtable_instance(sy:*Syms, cls:str) -> str {
+  mu out := "const vt_" + cls + " __vtbl_" + cls + " = { "
+  parts := split(sy.evar["@class.vslots." + cls], ";")
+  mu i := 0
+  mu first := true
+  lp i < len(parts) {
+    m := parts[i]
+    if len(m) > 0 {
+      if first == false { out = out + ", " }
+      first = false
+      out = out + "(" + vsig_ret(sy, cls, m) + "(*)(void*" + vsig_args(sy, cls, m) + "))f_" + defining_class(sy, cls, m) + "_" + m
+    }
+    i += 1
+  }
+  out + " };\n"
+}
+
 // `to_str(x)` → i2s; struct ctor → mk_Name; `len`/`push` on an array → the
 // monomorphic helper; any other call is a user fn → `f_<name>(args)`.
 fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if is_generic(sy, fname) { rt gen_generic_call(sy, fname, args) }
+  // super.m(args) inside a method → static call to the parent's impl; the current
+  // receiver (v_self) is cast to the parent pointer.
+  if len(args) >= 1 && var_name(args[0]) == "super" && has(sy.evar, "@curclass") {
+    pdef := defining_class(sy, class_parent(sy, sy.evar["@curclass"]), fname)
+    mu so := "f_" + pdef + "_" + fname + "((s_" + pdef + "*)v_self"
+    mu sj := 1
+    lp sj < len(args) { so = so + ", " + gen_expr(sy, args[sj]); sj += 1 }
+    rt so + ")"
+  }
+  // class method? (guarded on a class receiver, so non-class calls are unaffected)
+  if len(args) >= 1 {
+    rcv := under_ptr(type_of_expr(sy, args[0]))
+    if has(sy.evar, "@class." + rcv) && is_class_method(sy, rcv, fname) { rt gen_method_call(sy, rcv, fname, args) }
+  }
   if fname == "map" && len(args) == 2 { rt gen_map(sy, args[0], args[1]) }
   if fname == "filter" && len(args) == 2 { rt gen_filter(sy, args[0], args[1]) }
   if fname == "reduce" && len(args) == 3 { rt gen_reduce(sy, args[0], args[1], args[2]) }
@@ -1486,8 +1608,11 @@ fn gen_struct_body(sd:StructDef) -> str {
 fn gen_struct_printer(sd:StructDef) -> str {
   mu out := "static void print_" + sd.name + "(s_" + sd.name + " v){ printf(\"" + sd.name + "{\");"
   mu i := 0
+  mu first := true
   lp i < len(sd.fnames) {
-    if i > 0 { out = out + " printf(\", \");" }
+    if sd.fnames[i] == "__vt" { i += 1; ct }     // hidden vtable pointer — not printed
+    if first == false { out = out + " printf(\", \");" }
+    first = false
     out = out + " printf(\"" + sd.fnames[i] + ": \");"
     ft := sd.ftypes[i]
     if ft == "str" {
@@ -1506,8 +1631,11 @@ fn gen_struct_printer(sd:StructDef) -> str {
 fn gen_struct_ctor(sd:StructDef) -> str {
   mu out := "static s_" + sd.name + " mk_" + sd.name + "("
   mu i := 0
+  mu firstp := true
   lp i < len(sd.fnames) {
-    if i > 0 { out = out + ", " }
+    if sd.fnames[i] == "__vt" { i += 1; ct }   // vtable pointer is installed, not a param
+    if firstp == false { out = out + ", " }
+    firstp = false
     out = out + cty(sd.ftypes[i]) + " " + sd.fnames[i]
     i += 1
   }
@@ -1516,7 +1644,11 @@ fn gen_struct_ctor(sd:StructDef) -> str {
   out = out + "){ s_" + sd.name + " __s; "
   i = 0
   lp i < len(sd.fnames) {
-    out = out + "__s." + sd.fnames[i] + "=" + sd.fnames[i] + "; "
+    if sd.fnames[i] == "__vt" {
+      out = out + "__s.__vt = (void*)&__vtbl_" + sd.name + "; "   // install this class's vtable
+    } el {
+      out = out + "__s." + sd.fnames[i] + "=" + sd.fnames[i] + "; "
+    }
     i += 1
   }
   out + "return __s; }\n"

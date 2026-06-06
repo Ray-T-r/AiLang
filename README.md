@@ -18,14 +18,16 @@ toolchain anywhere in the loop**.
 ## What it compiles
 
 The core language plus the full standard library: functions and recursion,
-control flow, structs, `en` enums + `mt` match (recursive ADTs, heap-boxed
-self-references), real generics, closures with capture, `[T]` arrays and
-`{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
+control flow, structs, classes (`cl` — single inheritance + `vt` virtual
+methods, lowered to C vtables), `en` enums + `mt` match (recursive ADTs,
+heap-boxed self-references), real generics, closures with capture, `[T]` arrays
+and `{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
 multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), `cinc` C-header interop,
-variadic externs (`ex fn printf(fmt, ...)`), and the 10 `std/*` modules —
-sockets, HTTP, TLS, Postgres, Redis, WebSocket, JSON, time, str, math — pulled
-in via `im`.
+C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or an
+external `.cpp`, POSIX), variadic externs
+(`ex fn printf(fmt, ...)`), and the 10 `std/*` modules — sockets, HTTP, TLS,
+Postgres, Redis, WebSocket, JSON, time, str, math — pulled in via `im`.
 
 ## Benchmarks
 
@@ -64,9 +66,9 @@ matching `clang -O2`).
 
 | | |
 |---|---|
-| compiler source | ~4,800 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **6,962 lines, byte-identical** |
-| sample programs | **32**, each output-verified against a frozen fixture |
+| compiler source | ~5,300 lines across `main.ail` + 6 `src/` modules |
+| strict fixpoint | `stage2.c == stage3.c` — **7,646 lines, byte-identical** |
+| sample programs | **36**, each output-verified against a frozen fixture |
 | standard library | 10 modules, all compiling |
 | Rust in the build | **none** |
 

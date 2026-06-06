@@ -970,6 +970,74 @@ fn parse_struct(p:*P) -> StructDef {
   StructDef(name, fnames, ftypes)
 }
 
+// A class method: `fn name(self, p:T, …) -> ret { … }` (the `vt`, if any, is
+// already consumed by parse_class). `self` is the receiver; its type is implicit
+// (`*Class`) unless explicitly annotated. The returned Func's name is the BARE
+// method name — lower_classes applies the `<Class>_` mangling.
+fn parse_method(p:*P, cls:str) -> Func {
+  adv(p)                            // `fn`
+  name := ctext(p); adv(p)          // method name
+  eat(p, TK_LPAREN())
+  mu pnames:[str] := []
+  mu ptypes:[str] := []
+  mu first := true
+  lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() && ctext(p) == "mu" { adv(p) }
+    if ckind(p) == TK_IDENT() {
+      pn := ctext(p); adv(p)
+      pnames = push(pnames, pn)
+      if ckind(p) == TK_COLON() {
+        adv(p); ptypes = push(ptypes, parse_type(p))      // explicit annotation
+      } el if first && pn == "self" {
+        ptypes = push(ptypes, "*" + cls)                   // implicit receiver type → *Class
+      } el {
+        ptypes = push(ptypes, "i64")                       // unannotated → i64
+      }
+      first = false
+    }
+    if ckind(p) == TK_COMMA() { adv(p) }
+  }
+  eat(p, TK_RPAREN())
+  mu ret := ""
+  if ckind(p) == TK_MINUS() { adv(p) }
+  if ckind(p) == TK_GT() { adv(p); ret = parse_type(p) }
+  mu mtp:[str] := []
+  Func(name, pnames, ptypes, ret, "", mtp, parse_block(p))
+}
+
+// `cl Name [: Base] { f:T; [vt] fn m(self,…){…} }` — a class. Fields use the same
+// `name:Type` form as `st`; methods are `fn` (static) or `vt fn` (virtual).
+// Lowered to a StructDef + per-method Funcs by lower_classes (driver).
+fn parse_class(p:*P) -> ClassDef {
+  adv(p)                            // `cl`
+  name := ctext(p); adv(p)          // Name
+  mu parent := ""
+  if ckind(p) == TK_COLON() { adv(p); parent = ctext(p); adv(p) }   // : Base
+  eat(p, TK_LBRACE())
+  mu fnames:[str] := []
+  mu ftypes:[str] := []
+  mu methods:[Func] := []
+  mu vflags:[str] := []
+  lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() && ctext(p) == "vt" {
+      adv(p)                                          // `vt`
+      methods = push(methods, parse_method(p, name))
+      vflags = push(vflags, "1")
+    } el if ckind(p) == TK_IDENT() && ctext(p) == "fn" {
+      methods = push(methods, parse_method(p, name))
+      vflags = push(vflags, "0")
+    } el if ckind(p) == TK_IDENT() {
+      fnames = push(fnames, ctext(p)); adv(p)         // field name
+      eat(p, TK_COLON())
+      ftypes = push(ftypes, parse_type(p))            // : Type
+    } el {
+      adv(p)                                          // skip ; / stray
+    }
+  }
+  eat(p, TK_RBRACE())
+  ClassDef(name, parent, fnames, ftypes, methods, vflags)
+}
+
 // `en Name { V0, V1(f:T, …), … }` — collect variant names + ";"-joined field
 // type lists (parallel arrays). A field whose type is the enclosing enum itself
 // is recorded as "@self" so codegen boxes it (heap pointer) to break the cycle.

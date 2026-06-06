@@ -41,6 +41,7 @@ fn TK_PIPEGT() -> i64 { 39 }   // |>  (pipe-forward)
 fn TK_CHAR() -> i64   { 40 }   // 'a' (char literal → i64 code)
 fn TK_CONCAT() -> i64 { 41 }   // ++  (string concat)
 fn TK_QQ() -> i64     { 42 }   // ??  (nil-coalesce; `?` is TK_QUEST)
+fn TK_RAWSTR() -> i64 { 43 }   // `...` raw string (verbatim, may span lines) — inline C++ for `csrc`
 fn TK_ERR() -> i64    { 31 }
 
 st Token { kind: i64; text: str; pos: i64 }
@@ -85,6 +86,17 @@ fn lex(src:str) -> [Token] {
       }
       toks = push(toks, Token(TK_STR(), substring(src, i + 1, j), i))
       i = j + 1                   // past closing "
+      ct
+    }
+
+    // raw string `...` (backtick, 96): verbatim inner text, no escapes, may span
+    // lines. Used for inline C++ via `csrc`. Line comments + "strings" are matched
+    // above, so a backtick inside one never reaches here.
+    if c == 96 {                 // opening `
+      mu j := i + 1
+      lp j < len(src) { if src[j] == 96 { br } j += 1 }   // closing `
+      toks = push(toks, Token(TK_RAWSTR(), substring(src, i + 1, j), i))
+      i = j + 1
       ct
     }
 
