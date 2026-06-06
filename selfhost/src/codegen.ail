@@ -35,7 +35,7 @@ fn gen_expr(sy:*Syms, e:Expr) -> str {
     Array(elems,ety) => gen_array(sy, elems, ety);
     MapLit(mty,mks,mvs) => gen_maplit(sy, mty, mks, mvs);
     Addr(x)          => "(&" + gen_expr(sy, x) + ")";
-    Match(sc,vn,vb,bd) => gen_match(sy, sc, vn, vb, bd);
+    Match(sc,vn,vb,bd,gd) => gen_match(sy, sc, vn, vb, bd, gd);
     IfE(c,t,el2)     => gen_ife(sy, c, t, el2);
     Try(e)           => gen_try(sy, e);
     Lambda(ps,pts,b,id)  => gen_lambda(sy, id);
@@ -65,7 +65,7 @@ fn gen_try(sy:*Syms, e:Expr) -> str {
 //      else if(…){…} __m; })
 // Variant bindings read `__s.u.<Variant>.f<i>` (a recursive/self-ref field is
 // stored boxed, so it's dereferenced). The scrutinee type drives tag indices.
-fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr]) -> str {
+fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr], guards:[Expr]) -> str {
   sty := type_of_expr(sy, sc)                 // the enum type name
   // Type arm-0's bindings before inferring the result type: the result type is
   // arm-0's body type, which may itself BE a binding (e.g. `Lambda(ps,b) => ps`,
@@ -73,6 +73,15 @@ fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr]) -> st
   // arm assignment `__m = <arr_str>` would be a C type error.
   if len(vnames) > 0 { bind_arm_types(sy, vnames[0], split_semi(vbinds[0])) }
   rty := match_type(sy, bodies)
+  // Any arm with a guard, or a `_` catch-all, needs the general lowering (a
+  // tag-matched-but-guard-failed arm must fall through to LATER arms, which
+  // if/else-if can't express). Plain variant enumerations keep the historical
+  // if/else-if form byte-for-byte — that's what main.ail + the samples use, so
+  // their generated C is unchanged and the fixpoint holds.
+  mu special := false
+  mu g := 0
+  lp g < len(vnames) { if is_bad(guards[g]) == false || vnames[g] == "_" { special = true } g += 1 }
+  if special { rt gen_match_g(sy, sc, sty, vnames, vbinds, bodies, guards, rty) }
   mu out := "({ " + cty(rty) + " __m; " + cty(sty) + " __s = " + gen_expr(sy, sc) + "; "
   mu i := 0
   lp i < len(vnames) {
@@ -85,6 +94,34 @@ fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr]) -> st
     // type the binds so the body's gen_expr knows their types
     bind_arm_types(sy, vname, binds)
     out = out + "__m = " + gen_expr(sy, bodies[i]) + "; } "
+    i += 1
+  }
+  out + "__m; })"
+}
+
+// Guarded / catch-all lowering: a `__done` flag instead of else-if, so an arm
+// whose tag matches but whose guard fails falls through to the next arm. binds
+// are emitted as C locals BEFORE the guard, so the guard (and body) can read
+// `v_<name>`. A `_` arm matches unconditionally; an unguarded arm sets __done.
+fn gen_match_g(sy:*Syms, sc:Expr, sty:str, vnames:[str], vbinds:[str], bodies:[Expr], guards:[Expr], rty:str) -> str {
+  mu out := "({ " + cty(rty) + " __m; int __done=0; " + cty(sty) + " __s = " + gen_expr(sy, sc) + "; "
+  mu i := 0
+  lp i < len(vnames) {
+    vname := vnames[i]
+    binds := split_semi(vbinds[i])
+    if vname == "_" {
+      out = out + "if(!__done){ "
+    } el {
+      tag := variant_tag(sy, sty, vname)
+      out = out + "if(!__done && __s.tag==" + int_to_str(tag) + "){ "
+    }
+    out = out + gen_arm_binds(sy, vname, binds)
+    bind_arm_types(sy, vname, binds)
+    if is_bad(guards[i]) {
+      out = out + "__m = " + gen_expr(sy, bodies[i]) + "; __done=1; } "
+    } el {
+      out = out + "if(" + gen_expr(sy, guards[i]) + "){ __m = " + gen_expr(sy, bodies[i]) + "; __done=1; } } "
+    }
     i += 1
   }
   out + "__m; })"
@@ -303,7 +340,7 @@ fn fv_walk(e:Expr, acc:[str]) -> [str] {
     Index(obj,idx)   => fv_walk(idx, fv_walk(obj, acc));
     Array(elems,ety) => fv_args(elems, acc);
     Addr(x)          => fv_walk(x, acc);
-    Match(sc,vn,vb,bd) => fv_args(bd, fv_walk(sc, acc));   // scrutinee + every arm body
+    Match(sc,vn,vb,bd,gd) => fv_args(gd, fv_args(bd, fv_walk(sc, acc)));   // scrutinee + arm bodies + guards
     IfE(c,t,el2)     => fv_walk(el2, fv_walk(t, fv_walk(c, acc)));
     Try(x)           => fv_walk(x, acc);
     Lambda(ps,pts,b,id)  => fv_walk(b, acc);                  // nested lambda body
@@ -1806,9 +1843,10 @@ fn collect_kv(base:*Syms, sy:*Syms, keys:[Expr], vals:[Expr]) -> i64 {
   collect_args(base, sy, vals)
   0
 }
-fn collect_match_e(base:*Syms, sy:*Syms, sc:Expr, bodies:[Expr]) -> i64 {
+fn collect_match_e(base:*Syms, sy:*Syms, sc:Expr, bodies:[Expr], guards:[Expr]) -> i64 {
   collect_lams_expr(base, sy, sc)
   collect_args(base, sy, bodies)
+  collect_args(base, sy, guards)   // a guard may hold a lambda / array / map literal too
   0
 }
 fn collect_if_s(base:*Syms, sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt]) -> i64 {
@@ -1852,7 +1890,7 @@ fn collect_lams_expr(base:*Syms, sy:*Syms, e:Expr) -> i64 {
     Index(obj,idx)   => collect2(base, sy, obj, idx);
     Array(elems,ety) => collect_args(base, sy, elems);
     Addr(x)          => collect_lams_expr(base, sy, x);
-    Match(sc,vn,vb,bd) => collect_match_e(base, sy, sc, bd);
+    Match(sc,vn,vb,bd,gd) => collect_match_e(base, sy, sc, bd, gd);
     IfE(c,t,el2)     => collect3(base, sy, c, t, el2);
     Try(x)           => collect_lams_expr(base, sy, x);
     Num(v)           => 0;

@@ -314,7 +314,7 @@ fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
     Array(es,et)       => Array(subst_args(es,nm,repl), et);
     MapLit(ml,ks,vs)   => MapLit(ml, subst_args(ks,nm,repl), subst_args(vs,nm,repl));
     Addr(x)            => Addr(subst_var(x,nm,repl));
-    Match(sc,vn,vb,bd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl));
+    Match(sc,vn,vb,bd,gd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl), subst_args(gd,nm,repl));
     IfE(c,t,el2)       => IfE(subst_var(c,nm,repl), subst_var(t,nm,repl), subst_var(el2,nm,repl));
     Try(x)             => Try(subst_var(x,nm,repl));
     Lambda(ps,pts,b,id)    => Lambda(ps, pts, subst_var(b,nm,repl), id);
@@ -497,8 +497,9 @@ fn parse_primary(p:*P) -> Expr {
     mu vnames:[str] := []
     mu vbinds:[str] := []
     mu bodies:[Expr] := []
+    mu guards:[Expr] := []
     lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
-      vname := ctext(p); adv(p)         // Variant name
+      vname := ctext(p); adv(p)         // Variant name (or `_` catch-all)
       mu binds:str := ""                 // ";"-joined binding names
       if ckind(p) == TK_LPAREN() {
         adv(p)
@@ -509,6 +510,11 @@ fn parse_primary(p:*P) -> Expr {
         }
         eat(p, TK_RPAREN())
       }
+      // optional `if <expr>` guard before `=>` (Bad = unguarded). parse_expr
+      // stops at the `=` of `=>`, so the comparison `>` in `n > 0` is consumed
+      // as part of the guard, not the arrow.
+      mu guard := Bad
+      if ckind(p) == TK_IDENT() && ctext(p) == "if" { adv(p); guard = parse_expr(p) }
       // `=>`  is lexed as `=` then `>` (no fat-arrow token)
       if ckind(p) == TK_ASSIGN() { adv(p) }
       if ckind(p) == TK_GT() { adv(p) }
@@ -516,10 +522,11 @@ fn parse_primary(p:*P) -> Expr {
       vnames = push(vnames, vname)
       vbinds = push(vbinds, binds)
       bodies = push(bodies, body)
+      guards = push(guards, guard)
       if ckind(p) == TK_SEMI() { adv(p) }   // arm separator
     }
     eat(p, TK_RBRACE())
-    rt Match(scrut, vnames, vbinds, bodies)
+    rt Match(scrut, vnames, vbinds, bodies, guards)
   }
   // `if cond { e } el { e }` as an expression (branches are single expressions
   // in the subset). Distinct from the statement `if` handled in parse_stmt.

@@ -35,11 +35,14 @@ en Expr {
   Array(elems:[Expr], ety:str),  // [a, b, …]  — array literal (ety = annotated elem type, "" if inferred)
   MapLit(mty:str, keys:[Expr], vals:[Expr]),   // {} or {k:v, …}; mty = annotation ("" if bare)
   Addr(e:Expr),                  // &x         — address-of
-  // mt scrut { Variant(b…) => body; … } — arms as parallel arrays (avoids a
-  // `MArm` struct that would hold `Expr` by value and close a by-value cycle
-  // `Expr→MArm→Expr`; `[Expr]` bodies are heap-backed, breaking it). `vbinds[i]`
-  // is the i-th arm's ";"-joined binding names ("" for none).
-  Match(scrut:Expr, vnames:[str], vbinds:[str], bodies:[Expr]),
+  // mt scrut { Variant(b…) [if guard] => body; … } — arms as parallel arrays
+  // (avoids a `MArm` struct that would hold `Expr` by value and close a by-value
+  // cycle `Expr→MArm→Expr`; `[Expr]` bodies are heap-backed, breaking it).
+  // `vbinds[i]` is the i-th arm's ";"-joined binding names ("" for none);
+  // `vnames[i]=="_"` is a catch-all arm; `guards[i]` is its guard expr (`Bad` =
+  // unguarded). Binding fewer than 5 fields when destructuring a Match elsewhere
+  // is legal (ignores `guards`), so the constant-returning walkers stay as-is.
+  Match(scrut:Expr, vnames:[str], vbinds:[str], bodies:[Expr], guards:[Expr]),
   IfE(cond:Expr, then:Expr, els:Expr),   // if c { e } el { e } as an expression
   Try(e:Expr),                           // e?  — propagate err to the enclosing fn
   Lambda(params:[str], ptypes:[str], body:Expr, lamid:i64),   // fn(a:T,b) expr — HOF arg (inlined) OR first-class closure value (lifted); ptypes parallel to params ("i64" if unannotated); lamid = parse-time token pos, names the lifted __lam_<id>/__env_<id>
