@@ -79,6 +79,7 @@ st Syms {
 
 fn ty_of(sy:*Syms, name:str) -> str {
   if has(sy.vty, name) rt sy.vty[name]
+  if is_gvariant(sy, name) { gm := gvariant_mangle(sy, name, no_exprs()); if len(gm) > 0 && has(sy.evar, gm) rt sy.evar[gm] }
   if is_variant(sy, name) rt sy.evar[name]    // a bare nullary variant → its enum
   "i64"
 }
@@ -248,8 +249,45 @@ fn gstruct_mono(sy:*Syms, name:str, args:[Expr]) -> str {
   mono_of(name, targs)
 }
 
+// True if `name` is a bare variant of some generic enum template (e.g. "Some").
+fn is_gvariant(sy:*Syms, name:str) -> bool { has(sy.evar, "@gvariant." + name) }
+// Map a bare generic-enum variant ctor (`Some(5)` / `None`) to its concrete mangled
+// variant ("Option_i64_Some"). T is inferred from the variant's payload arg whose
+// template field is `T`; a payload-less variant (None) falls back to the enclosing
+// fn's return type (@curret, e.g. `-> Option<i64>` → Option_i64). "" if unresolved.
+fn gvariant_mangle(sy:*Syms, bareV:str, args:[Expr]) -> str {
+  tmpl := sy.evar["@gvariant." + bareV]
+  tps := split_semi(sy.evar["@genum." + tmpl])
+  vfs := split_semi(sy.evar["@gvar.fields." + tmpl + "." + bareV])
+  mu targs:[str] := []
+  mu allfound := true
+  mu ti := 0
+  lp ti < len(tps) {
+    mu found := ""
+    mu fi := 0
+    lp fi < len(vfs) {
+      if fi < len(args) {
+        if vfs[fi] == tps[ti] { found = type_of_expr(sy, args[fi]) }
+        if vfs[fi] == "[" + tps[ti] + "]" { found = elem_of_ann(type_of_expr(sy, args[fi])) }
+      }
+      fi += 1
+    }
+    if len(found) == 0 { allfound = false }
+    targs = push(targs, found)
+    ti += 1
+  }
+  if allfound { rt mono_variant(mono_of(tmpl, targs), bareV) }
+  cr := ty_of(sy, "@curret")                              // payload-less (None): use the enclosing fn's return type
+  if len(cr) > 0 && has(sy.evar, "@order." + cr) { rt mono_variant(cr, bareV) }
+  ""
+}
+
 fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if is_gstruct(sy, fname) rt gstruct_mono(sy, fname, args)   // generic-struct ctor → its concrete instance type
+  if is_gvariant(sy, fname) {                                 // generic-enum variant ctor → its concrete enum instance
+    gm := gvariant_mangle(sy, fname, args)
+    if len(gm) > 0 && has(sy.evar, gm) rt sy.evar[gm]
+  }
   // A generic call's type: its return type with the type param substituted.
   if is_generic(sy, fname) {
     f := find_gfn(sy, fname)
@@ -369,6 +407,7 @@ fn is_num(t:str) -> bool {
 
 fn tcon_var(sy:*Syms, name:str) -> str {
   if has(sy.vty, name) rt sy.vty[name]
+  if is_gvariant(sy, name) { gm := gvariant_mangle(sy, name, no_exprs()); if len(gm) > 0 && has(sy.evar, gm) rt sy.evar[gm] }
   if is_variant(sy, name) rt sy.evar[name]     // a bare nullary variant → its enum
   "?"                                           // unknown identifier → NOT confident (vs ty_of's i64)
 }
@@ -387,6 +426,11 @@ fn builtin_fixed_ret(fname:str) -> str {
 }
 fn tcon_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if is_gstruct(sy, fname) rt gstruct_mono(sy, fname, args)   // generic-struct ctor → its concrete instance
+  if is_gvariant(sy, fname) {                                 // generic-enum variant ctor → its concrete enum
+    gm := gvariant_mangle(sy, fname, args)
+    if len(gm) > 0 && has(sy.evar, gm) rt sy.evar[gm]
+    rt "?"
+  }
   if is_ctor(sy, fname) rt fname               // a struct ctor → that struct
   if is_variant(sy, fname) rt sy.evar[fname]   // a variant ctor → its enum
   if is_generic(sy, fname) rt "?"              // generic return may be a type-param

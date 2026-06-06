@@ -17,6 +17,10 @@ fn gen_str(s:str) -> str { "\"" + s + "\"" }
 // A bare identifier: a nullary enum variant (`Bad`, `SBreak`) constructs via
 // `mkv_<name>()`; anything else is a local/param `v_<name>`.
 fn gen_var(sy:*Syms, name:str) -> str {
+  if is_gvariant(sy, name) {                                 // bare nullary generic-enum variant (e.g. `None`)
+    gm := gvariant_mangle(sy, name, no_exprs())
+    if len(gm) > 0 rt "mkv_" + gm + "()"
+  }
   if is_variant(sy, name) rt "mkv_" + name + "()"
   "v_" + name
 }
@@ -65,13 +69,20 @@ fn gen_try(sy:*Syms, e:Expr) -> str {
 //      else if(…){…} __m; })
 // Variant bindings read `__s.u.<Variant>.f<i>` (a recursive/self-ref field is
 // stored boxed, so it's dereferenced). The scrutinee type drives tag indices.
+// A match pattern's effective variant name: a bare generic-enum variant (`Some`)
+// mangled to the scrutinee instance's variant (`Option_i64_Some`), so the existing
+// tag/bind machinery resolves it; anything else (`_`, a normal variant) unchanged.
+fn eff_variant(sy:*Syms, sty:str, vname:str) -> str {
+  if is_gvariant(sy, vname) rt mono_variant(sty, vname)
+  vname
+}
 fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr], guards:[Expr]) -> str {
   sty := type_of_expr(sy, sc)                 // the enum type name
   // Type arm-0's bindings before inferring the result type: the result type is
   // arm-0's body type, which may itself BE a binding (e.g. `Lambda(ps,b) => ps`,
   // where `ps:[str]`). Without this the `__m` decl would default to i64 and the
   // arm assignment `__m = <arr_str>` would be a C type error.
-  if len(vnames) > 0 { bind_arm_types(sy, vnames[0], split_semi(vbinds[0])) }
+  if len(vnames) > 0 { bind_arm_types(sy, eff_variant(sy, sty, vnames[0]), split_semi(vbinds[0])) }
   rty := match_type(sy, bodies)
   // Any arm with a guard, or a `_` catch-all, needs the general lowering (a
   // tag-matched-but-guard-failed arm must fall through to LATER arms, which
@@ -85,7 +96,7 @@ fn gen_match(sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bodies:[Expr], guard
   mu out := "({ " + cty(rty) + " __m; " + cty(sty) + " __s = " + gen_expr(sy, sc) + "; "
   mu i := 0
   lp i < len(vnames) {
-    vname := vnames[i]
+    vname := eff_variant(sy, sty, vnames[i])
     binds := split_semi(vbinds[i])
     tag := variant_tag(sy, sty, vname)
     kw := if i == 0 { "if" } el { "else if" }
@@ -107,7 +118,7 @@ fn gen_match_g(sy:*Syms, sc:Expr, sty:str, vnames:[str], vbinds:[str], bodies:[E
   mu out := "({ " + cty(rty) + " __m; int __done=0; " + cty(sty) + " __s = " + gen_expr(sy, sc) + "; "
   mu i := 0
   lp i < len(vnames) {
-    vname := vnames[i]
+    vname := eff_variant(sy, sty, vnames[i])
     binds := split_semi(vbinds[i])
     if vname == "_" {
       out = out + "if(!__done){ "
@@ -903,6 +914,10 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   }
   if is_ctor(sy, fname) {
     rt "mk_" + fname + "(" + gen_args(sy, args) + ")"
+  }
+  if is_gvariant(sy, fname) {                              // generic-enum variant ctor → its mangled mkv_Option_i64_Some
+    gm := gvariant_mangle(sy, fname, args)
+    if len(gm) > 0 { rt "mkv_" + gm + "(" + gen_args(sy, args) + ")" }
   }
   if is_variant(sy, fname) {
     rt "mkv_" + fname + "(" + gen_args(sy, args) + ")"   // variant constructor
@@ -1787,6 +1802,7 @@ fn seed_fn(base:*Syms, f:Func) -> Syms {
   sy.vty = {}
   seed_params(&sy, f)
   if is_result_ann(f.ret) { set_ty(&sy, "@ret", result_inner(f.ret)) }
+  set_ty(&sy, "@curret", f.ret)        // enclosing fn's (normalized) return type — disambiguates a payload-less generic variant ctor like `None`
   sy
 }
 

@@ -114,6 +114,58 @@ fn collect_struct_inst(structs:[StructDef], gstructs:[StructDef], ty:str) -> [St
   push(structs, gen_instance(gt, inst_args(ty)))
 }
 
+// ----- generic enums: monomorphize instantiations (variants mangled per-instance) -
+// `mono_variant("Option_i64", "Some")` → "Option_i64_Some" — a per-instance variant
+// name so the existing enum machinery (evar/@order/@vfld/mkv_/union) handles each
+// instance with NO collision; bare `Some`/`None` map to it at ctor + match sites.
+fn mono_variant(inst:str, bareV:str) -> str { inst + "_" + bareV }
+fn has_enum(xs:[EnumDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(xs) { if xs[i].name == nm rt true   i += 1 }
+  false
+}
+fn find_genum(genums:[EnumDef], nm:str) -> EnumDef {
+  mu i := 0
+  lp i < len(genums) { if genums[i].name == nm rt genums[i]   i += 1 }
+  mu e:[str] := []
+  EnumDef("", e, e, e)
+}
+// One concrete EnumDef from a generic template + concrete args: name mangled
+// (Option_i64), variants mangled (Option_i64_Some), T substituted in each field.
+fn gen_enum_instance(gt:EnumDef, args:[str]) -> EnumDef {
+  inst := mono_of(gt.name, args)
+  mu vns:[str] := []
+  mu vfts:[str] := []
+  mu i := 0
+  lp i < len(gt.vnames) {
+    vns = push(vns, mono_variant(inst, gt.vnames[i]))
+    raw := gt.vftypes[i]
+    if len(raw) == 0 { vfts = push(vfts, "") } el {
+      parts := split_semi(raw)
+      mu nf := ""
+      mu fj := 0
+      lp fj < len(parts) {
+        sft := subst_struct_ty(gt.tparams, args, parts[fj])
+        if fj == 0 { nf = sft } el { nf = nf + ";" + sft }
+        fj += 1
+      }
+      vfts = push(vfts, nf)
+    }
+    i += 1
+  }
+  mu notp:[str] := []
+  EnumDef(inst, vns, vfts, notp)
+}
+// If `ty` is a generic-enum instantiation not yet generated, append it.
+fn collect_enum_inst(enums:[EnumDef], genums:[EnumDef], ty:str) -> [EnumDef] {
+  if has_sub(ty, "<") == false rt enums
+  gt := find_genum(genums, inst_head(ty))
+  if len(gt.name) == 0 rt enums
+  nm := mono_name(ty)
+  if has_enum(enums, nm) rt enums
+  push(enums, gen_enum_instance(gt, inst_args(ty)))
+}
+
 // ----- empty `{}` usage inference -------------------------------------------
 // An un-annotated `m := {}` has no (K,V) until used. Before hoist/codegen we
 // scan the function body for the first `m[k]=v` and stamp the MapLit with
@@ -649,16 +701,23 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   // Binding fewer ignores trailing fields (legal); binding more would read a
   // nonexistent union member. @vfldn is registered only for tuple/fn-free
   // variants, so subtler variants degrade to no-op (has → false).
+  // Map bare generic-enum patterns (`Some`) to the scrutinee instance's mangled
+  // variant (`Option_i64_Some`) so the registered variant tables resolve; normal
+  // enums + `_` are unchanged.
+  mu mv:[str] := []
+  mu mk := 0
+  lp mk < len(vnames) { mv = push(mv, eff_variant(sy, ty, vnames[mk])); mk += 1 }
   mu i := 0
   lp i < len(vnames) {
     nm := vnames[i]
+    emn := mv[i]
     if nm != "_" {
-      if is_variant(sy, nm) == false || sy.evar[nm] != ty {
+      if is_variant(sy, emn) == false || sy.evar[emn] != ty {
         report_chk(sy, src, pos, "unknown variant '" + nm + "' in match on " + ty + suggest(nm, split_semi(sy.evar["@order." + ty])))
       }
       nb := len(split_semi(vbinds[i]))
-      if has(sy.evar, "@vfldn." + nm) {
-        nf := str_to_int(sy.evar["@vfldn." + nm])
+      if has(sy.evar, "@vfldn." + emn) {
+        nf := str_to_int(sy.evar["@vfldn." + emn])
         if nb > nf {
           report_chk(sy, src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
         }
@@ -669,12 +728,14 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   // (2) exhaustiveness — every variant of enum `ty` must have an UNGUARDED arm
   // (a guarded arm may not fire at runtime). An unguarded `_` catch-all covers
   // everything, so it satisfies exhaustiveness outright.
-  if vn_has_ug(vnames, guards, "_") rt 0
+  if vn_has_ug(mv, guards, "_") rt 0
   all := split_semi(sy.evar["@order." + ty])
   mu j := 0
   lp j < len(all) {
-    if vn_has_ug(vnames, guards, all[j]) == false {
-      report_chk(sy, src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
+    if vn_has_ug(mv, guards, all[j]) == false {
+      mu miss := all[j]
+      if has_sub(miss, ty + "_") { miss = substring(miss, len(ty) + 1, len(miss)) }   // de-mangle Option_i64_Some → Some for the message
+      report_chk(sy, src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + miss + "'")
     }
     j += 1
   }
@@ -1332,7 +1393,55 @@ fn compile_to_c(src:str, dir:str) -> str {
     lp fj < len(structs[asi].ftypes) { structs = collect_struct_inst(structs, gstructs, structs[asi].ftypes[fj]); fj += 1 }
     asi += 1
   }
-  // normalize: mangle every `G<…>` annotation in fn sigs + struct fields
+  // Lower generic enums (`en Option<T>{…}`) → concrete monomorphic EnumDefs with
+  // per-instance-mangled variants (Option_i64_Some), the same way generic structs
+  // lower. Bare `Some`/`None` route to the mangled variant at the ctor + match sites
+  // (via @gvariant). Instances: the 3 scalars (covers ctor-inferred `Some(5)`) + any
+  // `Option<X>` in a fn sig / struct field. Templates are split out (not emitted).
+  // Must run BEFORE the normalize below so annotations still carry `<…>` to collect.
+  mu genums:[EnumDef] := []
+  mu cenums:[EnumDef] := []
+  mu gnei := 0
+  lp gnei < len(enums) {
+    if len(enums[gnei].tparams) > 0 {
+      genums = push(genums, enums[gnei])
+      base.evar["@genum." + enums[gnei].name] = join_semi(enums[gnei].tparams)
+      mu evk := 0
+      lp evk < len(enums[gnei].vnames) {
+        base.evar["@gvariant." + enums[gnei].vnames[evk]] = enums[gnei].name                                  // bare variant → template enum
+        base.evar["@gvar.fields." + enums[gnei].name + "." + enums[gnei].vnames[evk]] = enums[gnei].vftypes[evk]  // its template field types → T inference
+        evk += 1
+      }
+    } el { cenums = push(cenums, enums[gnei]) }
+    gnei += 1
+  }
+  enums = cenums
+  mu gnti := 0
+  lp gnti < len(genums) {
+    if len(genums[gnti].tparams) == 1 {
+      mu esk := 0
+      lp esk < len(gscal) {
+        einst := gen_enum_instance(genums[gnti], mk1(gscal[esk]))
+        if has_enum(enums, einst.name) == false { enums = push(enums, einst) }
+        esk += 1
+      }
+    }
+    gnti += 1
+  }
+  mu aei := 0
+  lp aei < len(funcs) {
+    mu epj := 0
+    lp epj < len(funcs[aei].ptypes) { enums = collect_enum_inst(enums, genums, funcs[aei].ptypes[epj]); epj += 1 }
+    enums = collect_enum_inst(enums, genums, funcs[aei].ret)
+    aei += 1
+  }
+  mu aesi := 0
+  lp aesi < len(structs) {
+    mu efj := 0
+    lp efj < len(structs[aesi].ftypes) { enums = collect_enum_inst(enums, genums, structs[aesi].ftypes[efj]); efj += 1 }
+    aesi += 1
+  }
+  // normalize: mangle every `G<…>` annotation (struct OR enum) in fn sigs + struct fields
   mu nfi := 0
   lp nfi < len(funcs) { funcs[nfi] = norm_func(funcs[nfi]); nfi += 1 }
   mu nsi := 0
@@ -1981,9 +2090,95 @@ fn auto_imports(src:str) -> str {
   if need_sock { out = out + "im \"std/sock.ail\"\n" }
   out
 }
+// ----- module namespacing: `im "path" as m` + qualified `m.fn()` ---------------
+// The alias in `im "path" as NAME` (else ""). Mirrors import_path's quote scan, then
+// looks for `as <ident>` after the closing quote.
+fn import_alias(line:str) -> str {
+  mu i := 0
+  lp i < len(line) { if line[i] != 32 { br } i += 1 }
+  if i + 3 > len(line) rt ""
+  if line[i] != 105 rt ""                 // 'i'
+  if line[i + 1] != 109 rt ""             // 'm'
+  mu j := i + 3
+  lp j < len(line) { if line[j] == 34 { br } j += 1 }   // opening '"'
+  mu k := j + 1
+  lp k < len(line) { if line[k] == 34 { br } k += 1 }   // closing '"'
+  if k >= len(line) rt ""
+  mu p := k + 1
+  lp p < len(line) { if line[p] != 32 { br } p += 1 }   // spaces
+  if p + 2 > len(line) rt ""
+  if line[p] != 97 rt ""                  // 'a'
+  if line[p + 1] != 115 rt ""             // 's'
+  p = p + 2
+  lp p < len(line) { if line[p] != 32 { br } p += 1 }
+  mu q := p
+  lp q < len(line) {
+    c := line[q]
+    if (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 95 { q += 1 } el { br }
+  }
+  substring(line, p, q)
+}
+fn name_in(names:[str], n:str) -> bool {
+  mu i := 0
+  lp i < len(names) { if names[i] == n rt true   i += 1 }
+  false
+}
+// The top-level (non-extern) function names defined in `body`: `fn NAME`, but not
+// `ex fn NAME` (renaming an extern would break its C symbol).
+fn module_fn_names(body:str) -> [str] {
+  toks := lex(body)
+  mu out:[str] := []
+  mu i := 0
+  lp i + 1 < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "fn" && toks[i + 1].kind == TK_IDENT() {
+      if i == 0 || toks[i - 1].text != "ex" { out = push(out, toks[i + 1].text) }
+    }
+    i += 1
+  }
+  out
+}
+// Prefix every IDENT token in `src` whose text is in `names` with `pfx` — a
+// position-based edit (insert before the token start), so strings/comments/spacing
+// are preserved verbatim. Renames a module's own `fn` defs + their internal calls.
+fn prefix_idents(src:str, names:[str], pfx:str) -> str {
+  toks := lex(src)
+  mu out := ""
+  mu cur := 0
+  mu i := 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && name_in(names, toks[i].text) {
+      p := toks[i].pos
+      if p >= cur { out = out + substring(src, cur, p) + pfx; cur = p }
+    }
+    i += 1
+  }
+  out + substring(src, cur, len(src))
+}
+// Rewrite qualified accesses `alias.name` → `alias_name` for each known alias.
+// Fast path: no aliases → returns `src` byte-identical (so the no-`as` self-compile
+// is unchanged → fixpoint-safe).
+fn rewrite_qualified(src:str, aliases:[str]) -> str {
+  if len(aliases) == 0 rt src
+  toks := lex(src)
+  mu out := ""
+  mu cur := 0
+  mu i := 0
+  lp i < len(toks) {
+    if i + 2 < len(toks) && toks[i].kind == TK_IDENT() && name_in(aliases, toks[i].text) && toks[i + 1].kind == TK_DOT() && toks[i + 2].kind == TK_IDENT() {
+      mp := toks[i].pos
+      nend := toks[i + 2].pos + len(toks[i + 2].text)
+      if mp >= cur { out = out + substring(src, cur, mp) + toks[i].text + "_" + toks[i + 2].text; cur = nend }
+      i += 3
+      ct
+    }
+    i += 1
+  }
+  out + substring(src, cur, len(src))
+}
 fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
   if has_import(src) == false rt src
   mu out := ""
+  mu aliases:[str] := []                  // `im "…" as m` aliases declared in THIS source
   mu i := 0
   mu lstart := 0
   lp i <= len(src) {
@@ -1991,6 +2186,8 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
       line := substring(src, lstart, i)
       imp := import_path(line)
       if len(imp) > 0 {
+        alias := import_alias(line)
+        if len(alias) > 0 { aliases = push(aliases, alias) }
         full := dir + imp
         if has(seen, full) == false {
           seen[full] = "1"
@@ -2026,7 +2223,9 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
             exit(1)
           }
-          out = out + resolve_imports(body, bdir, seen) + "\n"
+          mu rb := resolve_imports(body, bdir, seen)
+          if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
+          out = out + rb + "\n"
         }
       } el {
         out = out + line + "\n"
@@ -2035,6 +2234,6 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
     }
     i += 1
   }
-  out
+  rewrite_qualified(out, aliases)        // `m.fn` → `m_fn`; no aliases → byte-identical (fixpoint-safe)
 }
 

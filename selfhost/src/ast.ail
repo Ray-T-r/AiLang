@@ -60,7 +60,7 @@ st StructDef { name:str; fnames:[str]; ftypes:[str]; tparams:[str] }
 // and its field types as parallel arrays (`vnames[i]` ↔ `vftypes[i]` where the
 // latter is a ";"-joined list of field type names, "" for a unit variant). The
 // field *names* aren't needed (match binds positionally), only the count+types.
-st EnumDef { name:str; vnames:[str]; vftypes:[str] }
+st EnumDef { name:str; vnames:[str]; vftypes:[str]; tparams:[str] }
 
 en Stmt {
   SDecl(name:str, e:Expr, pos:i64),       // name := expr  (or  mu name := expr)  — declares; pos = byte offset of the stmt (-1 if synthetic)
