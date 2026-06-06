@@ -1,0 +1,16 @@
+// Generic data types: `st Box<T>` / `st Pair<T>` are templates that monomorphize
+// per use — `Box(5)` → Box_i64, `Box("x")` → Box_str — with full field access,
+// whole-struct printing, and use through typed function parameters (`Box<i64>`).
+st Box<T> { val: T }
+st Pair<T> { a: T  b: T }
+fn unbox(b: Box<i64>) -> i64 { b.val }
+bi := Box(10)
+bs := Box("hello")
+println(bi.val)
+println(bs.val)
+println(unbox(Box(32)))
+p := Pair(3, 4)
+println(p.a + p.b)
+ps := Pair("x", "y")
+println(ps.a)
+println(ps.b)

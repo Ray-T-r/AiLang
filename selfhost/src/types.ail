@@ -222,7 +222,34 @@ fn is_native_call(fname:str) -> bool {
   false
 }
 
+// True if `name` is a generic-struct template (registered by lower_generic_structs).
+fn is_gstruct(sy:*Syms, name:str) -> bool { has(sy.evar, "@gstruct." + name) }
+// The concrete instantiation name for a generic-struct ctor call `Box(args)`: infer
+// each type param from the arg whose template field is `T` (or `[T]` → its element),
+// then mangle → "Box_i64". Mirrors generic_T but for struct ctor args.
+fn gstruct_mono(sy:*Syms, name:str, args:[Expr]) -> str {
+  tps := split_semi(sy.evar["@gstruct." + name])
+  fts := split_semi(sy.evar["@gstruct.fields." + name])
+  mu targs:[str] := []
+  mu ti := 0
+  lp ti < len(tps) {
+    mu found := "i64"
+    mu fi := 0
+    lp fi < len(fts) {
+      if fi < len(args) {
+        if fts[fi] == tps[ti] { found = type_of_expr(sy, args[fi]) }
+        if fts[fi] == "[" + tps[ti] + "]" { found = elem_of_ann(type_of_expr(sy, args[fi])) }
+      }
+      fi += 1
+    }
+    targs = push(targs, found)
+    ti += 1
+  }
+  mono_of(name, targs)
+}
+
 fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if is_gstruct(sy, fname) rt gstruct_mono(sy, fname, args)   // generic-struct ctor → its concrete instance type
   // A generic call's type: its return type with the type param substituted.
   if is_generic(sy, fname) {
     f := find_gfn(sy, fname)
@@ -359,6 +386,7 @@ fn builtin_fixed_ret(fname:str) -> str {
   "?"
 }
 fn tcon_call(sy:*Syms, fname:str, args:[Expr]) -> str {
+  if is_gstruct(sy, fname) rt gstruct_mono(sy, fname, args)   // generic-struct ctor → its concrete instance
   if is_ctor(sy, fname) rt fname               // a struct ctor → that struct
   if is_variant(sy, fname) rt sy.evar[fname]   // a variant ctor → its enum
   if is_generic(sy, fname) rt "?"              // generic return may be a type-param

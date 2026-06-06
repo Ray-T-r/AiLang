@@ -276,7 +276,7 @@ typedef struct map_f64_Stmt_s map_f64_Stmt_s;
 typedef map_f64_Stmt_s* map_f64_Stmt;
 
 struct s_Token { int64_t kind; const char* text; int64_t pos; };
-struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; };
+struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; arr_str tparams; };
 struct s_EnumDef { const char* name; arr_str vnames; arr_str vftypes; };
 struct s_Func { const char* name; arr_str params; arr_str ptypes; const char* ret; const char* lib; arr_str tparams; arr_Stmt body; };
 struct s_ClassDef { const char* name; const char* parent; arr_str fnames; arr_str ftypes; arr_Func methods; arr_str vflags; };
@@ -937,7 +937,7 @@ typedef struct { int tag; s_Stmt ok; const char* err; } res_Stmt;
 static res_Stmt mk_ok_Stmt(s_Stmt v){ res_Stmt r; r.tag=0; r.ok=v; r.err=""; return r; }
 static res_Stmt mk_err_Stmt(const char* m){ res_Stmt r; r.tag=1; r.err=m; return r; }
 static s_Token mk_Token(int64_t kind, const char* text, int64_t pos){ s_Token __s; __s.kind=kind; __s.text=text; __s.pos=pos; return __s; }
-static s_StructDef mk_StructDef(const char* name, arr_str fnames, arr_str ftypes){ s_StructDef __s; __s.name=name; __s.fnames=fnames; __s.ftypes=ftypes; return __s; }
+static s_StructDef mk_StructDef(const char* name, arr_str fnames, arr_str ftypes, arr_str tparams){ s_StructDef __s; __s.name=name; __s.fnames=fnames; __s.ftypes=ftypes; __s.tparams=tparams; return __s; }
 static s_EnumDef mk_EnumDef(const char* name, arr_str vnames, arr_str vftypes){ s_EnumDef __s; __s.name=name; __s.vnames=vnames; __s.vftypes=vftypes; return __s; }
 static s_Func mk_Func(const char* name, arr_str params, arr_str ptypes, const char* ret, const char* lib, arr_str tparams, arr_Stmt body){ s_Func __s; __s.name=name; __s.params=params; __s.ptypes=ptypes; __s.ret=ret; __s.lib=lib; __s.tparams=tparams; __s.body=body; return __s; }
 static s_ClassDef mk_ClassDef(const char* name, const char* parent, arr_str fnames, arr_str ftypes, arr_Func methods, arr_str vflags){ s_ClassDef __s; __s.name=name; __s.parent=parent; __s.fnames=fnames; __s.ftypes=ftypes; __s.methods=methods; __s.vflags=vflags; return __s; }
@@ -946,7 +946,7 @@ static s_P mk_P(arr_Token toks, int64_t pos, const char* src){ s_P __s; __s.toks
 static s_Binds mk_Binds(arr_str names, arr_Expr vals){ s_Binds __s; __s.names=names; __s.vals=vals; return __s; }
 static s_Syms mk_Syms(map_str_str vty, map_str_str fld, map_str_str ctors, map_str_str frets, map_str_str evar, map_str_str vft, arr_Func gfns, arr_Func lams, map_str_str errc){ s_Syms __s; __s.vty=vty; __s.fld=fld; __s.ctors=ctors; __s.frets=frets; __s.evar=evar; __s.vft=vft; __s.gfns=gfns; __s.lams=lams; __s.errc=errc; return __s; }
 static void print_Token(s_Token v){ printf("Token{"); printf("kind: "); printf("%lld", (long long)(v.kind)); printf(", "); printf("text: "); printf("%s", v.text); printf(", "); printf("pos: "); printf("%lld", (long long)(v.pos)); printf("}"); }
-static void print_StructDef(s_StructDef v){ printf("StructDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf("}"); }
+static void print_StructDef(s_StructDef v){ printf("StructDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("tparams: "); printf("?"); printf("}"); }
 static void print_EnumDef(s_EnumDef v){ printf("EnumDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("vnames: "); printf("?"); printf(", "); printf("vftypes: "); printf("?"); printf("}"); }
 static void print_Func(s_Func v){ printf("Func{"); printf("name: "); printf("%s", v.name); printf(", "); printf("params: "); printf("?"); printf(", "); printf("ptypes: "); printf("?"); printf(", "); printf("ret: "); printf("%s", v.ret); printf(", "); printf("lib: "); printf("%s", v.lib); printf(", "); printf("tparams: "); printf("?"); printf(", "); printf("body: "); printf("?"); printf("}"); }
 static void print_ClassDef(s_ClassDef v){ printf("ClassDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("parent: "); printf("%s", v.parent); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("methods: "); printf("?"); printf(", "); printf("vflags: "); printf("?"); printf("}"); }
@@ -1172,6 +1172,8 @@ const char* f_array_type_of(s_Syms* v_sy, arr_Expr v_elems, const char* v_ety);
 const char* f_map_lit_type(const char* v_mty);
 const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r);
 int64_t f_is_native_call(const char* v_fname);
+int64_t f_is_gstruct(s_Syms* v_sy, const char* v_name);
+const char* f_gstruct_mono(s_Syms* v_sy, const char* v_name, arr_Expr v_args);
 const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args);
 const char* f_field_type(s_Syms* v_sy, s_Expr v_obj, const char* v_fname);
 int64_t f_expr_is_str(s_Expr v_e, s_Syms* v_sy);
@@ -1330,6 +1332,18 @@ int64_t f_has_sub(const char* v_s, const char* v_sub);
 const char* f_before_colon(const char* v_s);
 const char* f_after_colon(const char* v_s);
 const char* f_join_semi(arr_str v_xs);
+const char* f_inst_head(const char* v_ty);
+arr_str f_inst_args(const char* v_ty);
+const char* f_mono_of(const char* v_head, arr_str v_args);
+const char* f_mono_name(const char* v_ty);
+const char* f_subst_struct_ty(arr_str v_tparams, arr_str v_args, const char* v_ty);
+arr_str f_mk1(const char* v_s);
+int64_t f_has_struct(arr_StructDef v_xs, const char* v_nm);
+s_StructDef f_gen_instance(s_StructDef v_gt, arr_str v_args);
+s_StructDef f_find_gstruct(arr_StructDef v_gstructs, const char* v_nm);
+s_Func f_norm_func(s_Func v_f);
+s_StructDef f_norm_struct(s_StructDef v_sd);
+arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gstructs, const char* v_ty);
 const char* f_var_name(s_Expr v_e);
 int64_t f_is_empty_maplit(s_Expr v_e);
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m);
@@ -3279,11 +3293,26 @@ s_Expr f_stamp_if_empty(arr_Expr v_elems, const char* v_old, const char* v_ety) 
 
 s_StructDef f_parse_struct(s_P* v_p) {
     const char* v_name;
+    arr_str v_tparams;
     arr_str v_fnames;
     arr_str v_ftypes;
     f_adv(v_p);
     v_name = f_ctext(v_p);
     f_adv(v_p);
+    v_tparams = ({ arr_str __a = arr_str_new(); __a; });
+    if ((f_ckind(v_p) == f_TK_LT())) {
+        f_adv(v_p);
+        while (((f_ckind(v_p) != f_TK_GT()) && (f_ckind(v_p) != f_TK_EOF()))) {
+            if ((f_ckind(v_p) == f_TK_IDENT())) {
+                v_tparams = arr_str_push(v_tparams, f_ctext(v_p));
+                f_adv(v_p);
+            }
+            if ((f_ckind(v_p) == f_TK_COMMA())) {
+                f_adv(v_p);
+            }
+        }
+        f_eat(v_p, f_TK_GT());
+    }
     f_eat(v_p, f_TK_LBRACE());
     v_fnames = ({ arr_str __a = arr_str_new(); __a; });
     v_ftypes = ({ arr_str __a = arr_str_new(); __a; });
@@ -3298,7 +3327,7 @@ s_StructDef f_parse_struct(s_P* v_p) {
         }
     }
     f_eat(v_p, f_TK_RBRACE());
-    return mk_StructDef(v_name, v_fnames, v_ftypes);
+    return mk_StructDef(v_name, v_fnames, v_ftypes, v_tparams);
 }
 
 s_Func f_parse_method(s_P* v_p, const char* v_cls) {
@@ -3688,6 +3717,23 @@ const char* f_parse_type(s_P* v_p) {
     if ((f_ckind(v_p) == f_TK_IDENT())) {
         v_t = f_ctext(v_p);
         f_adv(v_p);
+        if ((f_ckind(v_p) == f_TK_LT())) {
+            f_adv(v_p);
+            v_inner = scat(v_t, "<");
+            v_n = 0;
+            while (((f_ckind(v_p) != f_TK_GT()) && (f_ckind(v_p) != f_TK_EOF()))) {
+                if ((v_n > 0)) {
+                    v_inner = scat(v_inner, ",");
+                }
+                v_inner = scat(v_inner, f_parse_type(v_p));
+                v_n = (v_n + 1);
+                if ((f_ckind(v_p) == f_TK_COMMA())) {
+                    f_adv(v_p);
+                }
+            }
+            f_eat(v_p, f_TK_GT());
+            return scat(v_inner, ">");
+        }
         return v_t;
     }
     return "i64";
@@ -4392,6 +4438,41 @@ int64_t f_is_native_call(const char* v_fname) {
     return (1 != 1);
 }
 
+int64_t f_is_gstruct(s_Syms* v_sy, const char* v_name) {
+    return map_str_str_has((v_sy)->evar, scat("@gstruct.", v_name));
+}
+
+const char* f_gstruct_mono(s_Syms* v_sy, const char* v_name, arr_Expr v_args) {
+    arr_str v_tps;
+    arr_str v_fts;
+    arr_str v_targs;
+    int64_t v_ti;
+    const char* v_found;
+    int64_t v_fi;
+    v_tps = f_split_semi(map_str_str_get((v_sy)->evar, scat("@gstruct.", v_name)));
+    v_fts = f_split_semi(map_str_str_get((v_sy)->evar, scat("@gstruct.fields.", v_name)));
+    v_targs = ({ arr_str __a = arr_str_new(); __a; });
+    v_ti = 0;
+    while ((v_ti < arr_str_len(v_tps))) {
+        v_found = "i64";
+        v_fi = 0;
+        while ((v_fi < arr_str_len(v_fts))) {
+            if ((v_fi < arr_Expr_len(v_args))) {
+                if ((strcmp(arr_str_get(v_fts, v_fi), arr_str_get(v_tps, v_ti)) == 0)) {
+                    v_found = f_type_of_expr(v_sy, arr_Expr_get(v_args, v_fi));
+                }
+                if ((strcmp(arr_str_get(v_fts, v_fi), scat(scat("[", arr_str_get(v_tps, v_ti)), "]")) == 0)) {
+                    v_found = f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, v_fi)));
+                }
+            }
+            v_fi = (v_fi + 1);
+        }
+        v_targs = arr_str_push(v_targs, v_found);
+        v_ti = (v_ti + 1);
+    }
+    return f_mono_of(v_name, v_targs);
+}
+
 const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     s_Func v_f;
     const char* v_gt;
@@ -4400,6 +4481,9 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_mk;
     const char* v_et;
     arr_str v_ps;
+    if (f_is_gstruct(v_sy, v_fname)) {
+        return f_gstruct_mono(v_sy, v_fname, v_args);
+    }
     if (f_is_generic(v_sy, v_fname)) {
         v_f = f_find_gfn(v_sy, v_fname);
         v_gt = f_generic_T(v_sy, v_f, v_args);
@@ -4648,6 +4732,9 @@ const char* f_builtin_fixed_ret(const char* v_fname) {
 
 const char* f_tcon_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_bf;
+    if (f_is_gstruct(v_sy, v_fname)) {
+        return f_gstruct_mono(v_sy, v_fname, v_args);
+    }
     if (f_is_ctor(v_sy, v_fname)) {
         return v_fname;
     }
@@ -5926,6 +6013,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (f_is_native_call(v_fname)) {
         return scat(scat(scat(v_fname, "("), f_gen_args(v_sy, v_args)), ")");
     }
+    if (f_is_gstruct(v_sy, v_fname)) {
+        return scat(scat(scat(scat("mk_", f_gstruct_mono(v_sy, v_fname, v_args)), "("), f_gen_args(v_sy, v_args)), ")");
+    }
     if (f_is_ctor(v_sy, v_fname)) {
         return scat(scat(scat(scat("mk_", v_fname), "("), f_gen_args(v_sy, v_args)), ")");
     }
@@ -7050,6 +7140,154 @@ const char* f_join_semi(arr_str v_xs) {
     return v_s;
 }
 
+const char* f_inst_head(const char* v_ty) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_ty)))) {
+        if ((((int64_t)(unsigned char)(v_ty)[v_i]) == 60)) {
+            return substr(v_ty, 0, v_i);
+        }
+        v_i = (v_i + 1);
+    }
+    return v_ty;
+}
+
+arr_str f_inst_args(const char* v_ty) {
+    int64_t v_lt;
+    v_lt = 0;
+    while ((v_lt < ((int64_t)strlen(v_ty)))) {
+        if ((((int64_t)(unsigned char)(v_ty)[v_lt]) == 60)) {
+            break;
+        }
+        v_lt = (v_lt + 1);
+    }
+    return split(substr(v_ty, (v_lt + 1), (((int64_t)strlen(v_ty)) - 1)), ",");
+}
+
+const char* f_mono_of(const char* v_head, arr_str v_args) {
+    const char* v_nm;
+    int64_t v_i;
+    v_nm = v_head;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_args))) {
+        v_nm = scat(scat(v_nm, "_"), arr_str_get(v_args, v_i));
+        v_i = (v_i + 1);
+    }
+    return v_nm;
+}
+
+const char* f_mono_name(const char* v_ty) {
+    if ((f_has_sub(v_ty, "<") == (1 != 1))) {
+        return v_ty;
+    }
+    return f_mono_of(f_inst_head(v_ty), f_inst_args(v_ty));
+}
+
+const char* f_subst_struct_ty(arr_str v_tparams, arr_str v_args, const char* v_ty) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_tparams))) {
+        if ((v_i < arr_str_len(v_args))) {
+            if ((strcmp(v_ty, arr_str_get(v_tparams, v_i)) == 0)) {
+                return arr_str_get(v_args, v_i);
+            }
+            if ((strcmp(v_ty, scat(scat("[", arr_str_get(v_tparams, v_i)), "]")) == 0)) {
+                return scat(scat("[", arr_str_get(v_args, v_i)), "]");
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return v_ty;
+}
+
+arr_str f_mk1(const char* v_s) {
+    arr_str v_xs;
+    v_xs = ({ arr_str __a = arr_str_new(); __a; });
+    v_xs = arr_str_push(v_xs, v_s);
+    return v_xs;
+}
+
+int64_t f_has_struct(arr_StructDef v_xs, const char* v_nm) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_StructDef_len(v_xs))) {
+        if ((strcmp((arr_StructDef_get(v_xs, v_i)).name, v_nm) == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+s_StructDef f_gen_instance(s_StructDef v_gt, arr_str v_args) {
+    arr_str v_fts;
+    int64_t v_i;
+    arr_str v_notp;
+    v_fts = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len((v_gt).fnames))) {
+        v_fts = arr_str_push(v_fts, f_subst_struct_ty((v_gt).tparams, v_args, arr_str_get((v_gt).ftypes, v_i)));
+        v_i = (v_i + 1);
+    }
+    v_notp = ({ arr_str __a = arr_str_new(); __a; });
+    return mk_StructDef(f_mono_of((v_gt).name, v_args), (v_gt).fnames, v_fts, v_notp);
+}
+
+s_StructDef f_find_gstruct(arr_StructDef v_gstructs, const char* v_nm) {
+    int64_t v_i;
+    arr_str v_e;
+    v_i = 0;
+    while ((v_i < arr_StructDef_len(v_gstructs))) {
+        if ((strcmp((arr_StructDef_get(v_gstructs, v_i)).name, v_nm) == 0)) {
+            return arr_StructDef_get(v_gstructs, v_i);
+        }
+        v_i = (v_i + 1);
+    }
+    v_e = ({ arr_str __a = arr_str_new(); __a; });
+    return mk_StructDef("", v_e, v_e, v_e);
+}
+
+s_Func f_norm_func(s_Func v_f) {
+    arr_str v_pts;
+    int64_t v_i;
+    v_pts = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len((v_f).ptypes))) {
+        v_pts = arr_str_push(v_pts, f_mono_name(arr_str_get((v_f).ptypes, v_i)));
+        v_i = (v_i + 1);
+    }
+    return mk_Func((v_f).name, (v_f).params, v_pts, f_mono_name((v_f).ret), (v_f).lib, (v_f).tparams, (v_f).body);
+}
+
+s_StructDef f_norm_struct(s_StructDef v_sd) {
+    arr_str v_fts;
+    int64_t v_i;
+    v_fts = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len((v_sd).fnames))) {
+        v_fts = arr_str_push(v_fts, f_mono_name(arr_str_get((v_sd).ftypes, v_i)));
+        v_i = (v_i + 1);
+    }
+    return mk_StructDef((v_sd).name, (v_sd).fnames, v_fts, (v_sd).tparams);
+}
+
+arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gstructs, const char* v_ty) {
+    s_StructDef v_gt;
+    const char* v_nm;
+    if ((f_has_sub(v_ty, "<") == (1 != 1))) {
+        return v_structs;
+    }
+    v_gt = f_find_gstruct(v_gstructs, f_inst_head(v_ty));
+    if ((((int64_t)strlen((v_gt).name)) == 0)) {
+        return v_structs;
+    }
+    v_nm = f_mono_name(v_ty);
+    if (f_has_struct(v_structs, v_nm)) {
+        return v_structs;
+    }
+    return arr_StructDef_push(v_structs, f_gen_instance(v_gt, f_inst_args(v_ty)));
+}
+
 const char* f_var_name(s_Expr v_e) {
     return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = v_n; } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = ""; } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = ""; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
 }
@@ -8133,6 +8371,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     s_Syms v_base;
     int64_t v_tri;
     int64_t v_bi;
+    arr_str v_notp;
     int64_t v_lci;
     s_ClassDef v_cd;
     int64_t v_parent_hasvt;
@@ -8154,6 +8393,18 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_mn;
     arr_str v_sp;
     int64_t v_spi;
+    arr_StructDef v_gstructs;
+    arr_StructDef v_cstructs;
+    int64_t v_gsi;
+    arr_str v_gscal;
+    int64_t v_gti;
+    int64_t v_sk;
+    s_StructDef v_inst;
+    int64_t v_afi;
+    int64_t v_asi;
+    int64_t v_fj;
+    int64_t v_nfi;
+    int64_t v_nsi;
     int64_t v_si;
     s_StructDef v_sd;
     int64_t v_uidx;
@@ -8310,6 +8561,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         map_str_str_set((v_base).evar, arr_str_get(v_bkeys, v_bi), arr_str_get(v_bvals, v_bi));
         v_bi = (v_bi + 1);
     }
+    v_notp = ({ arr_str __a = arr_str_new(); __a; });
     v_lci = 0;
     while ((v_lci < arr_ClassDef_len(v_classes))) {
         v_cd = arr_ClassDef_get(v_classes, v_lci);
@@ -8349,7 +8601,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
             v_allt = arr_str_push(v_allt, arr_str_get((v_cd).ftypes, v_fi));
             v_fi = (v_fi + 1);
         }
-        v_structs = arr_StructDef_push(v_structs, mk_StructDef((v_cd).name, v_allf, v_allt));
+        v_structs = arr_StructDef_push(v_structs, mk_StructDef((v_cd).name, v_allf, v_allt, v_notp));
         map_str_str_set((v_base).evar, scat("@class.", (v_cd).name), "1");
         map_str_str_set((v_base).evar, scat("@class.parent.", (v_cd).name), (v_cd).parent);
         if (v_hasvt) {
@@ -8405,6 +8657,64 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
             v_spi = (v_spi + 1);
         }
         v_lci = (v_lci + 1);
+    }
+    v_gstructs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
+    v_cstructs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
+    v_gsi = 0;
+    while ((v_gsi < arr_StructDef_len(v_structs))) {
+        if ((arr_str_len((arr_StructDef_get(v_structs, v_gsi)).tparams) > 0)) {
+            v_gstructs = arr_StructDef_push(v_gstructs, arr_StructDef_get(v_structs, v_gsi));
+            map_str_str_set((v_base).evar, scat("@gstruct.", (arr_StructDef_get(v_structs, v_gsi)).name), f_join_semi((arr_StructDef_get(v_structs, v_gsi)).tparams));
+            map_str_str_set((v_base).evar, scat("@gstruct.fields.", (arr_StructDef_get(v_structs, v_gsi)).name), f_join_semi((arr_StructDef_get(v_structs, v_gsi)).ftypes));
+        } else {
+            v_cstructs = arr_StructDef_push(v_cstructs, arr_StructDef_get(v_structs, v_gsi));
+        }
+        v_gsi = (v_gsi + 1);
+    }
+    v_structs = v_cstructs;
+    v_gscal = ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, "i64"); __a = arr_str_push(__a, "str"); __a = arr_str_push(__a, "f64"); __a; });
+    v_gti = 0;
+    while ((v_gti < arr_StructDef_len(v_gstructs))) {
+        if ((arr_str_len((arr_StructDef_get(v_gstructs, v_gti)).tparams) == 1)) {
+            v_sk = 0;
+            while ((v_sk < arr_str_len(v_gscal))) {
+                v_inst = f_gen_instance(arr_StructDef_get(v_gstructs, v_gti), f_mk1(arr_str_get(v_gscal, v_sk)));
+                if ((f_has_struct(v_structs, (v_inst).name) == (1 != 1))) {
+                    v_structs = arr_StructDef_push(v_structs, v_inst);
+                }
+                v_sk = (v_sk + 1);
+            }
+        }
+        v_gti = (v_gti + 1);
+    }
+    v_afi = 0;
+    while ((v_afi < arr_Func_len(v_funcs))) {
+        v_pj = 0;
+        while ((v_pj < arr_str_len((arr_Func_get(v_funcs, v_afi)).ptypes))) {
+            v_structs = f_collect_struct_inst(v_structs, v_gstructs, arr_str_get((arr_Func_get(v_funcs, v_afi)).ptypes, v_pj));
+            v_pj = (v_pj + 1);
+        }
+        v_structs = f_collect_struct_inst(v_structs, v_gstructs, (arr_Func_get(v_funcs, v_afi)).ret);
+        v_afi = (v_afi + 1);
+    }
+    v_asi = 0;
+    while ((v_asi < arr_StructDef_len(v_structs))) {
+        v_fj = 0;
+        while ((v_fj < arr_str_len((arr_StructDef_get(v_structs, v_asi)).ftypes))) {
+            v_structs = f_collect_struct_inst(v_structs, v_gstructs, arr_str_get((arr_StructDef_get(v_structs, v_asi)).ftypes, v_fj));
+            v_fj = (v_fj + 1);
+        }
+        v_asi = (v_asi + 1);
+    }
+    v_nfi = 0;
+    while ((v_nfi < arr_Func_len(v_funcs))) {
+        (v_funcs).data[v_nfi] = f_norm_func(arr_Func_get(v_funcs, v_nfi));
+        v_nfi = (v_nfi + 1);
+    }
+    v_nsi = 0;
+    while ((v_nsi < arr_StructDef_len(v_structs))) {
+        (v_structs).data[v_nsi] = f_norm_struct(arr_StructDef_get(v_structs, v_nsi));
+        v_nsi = (v_nsi + 1);
     }
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {

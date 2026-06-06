@@ -898,6 +898,9 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   }
   // Phase 3 TLS/PG native builtins → same-named C helper (gated into the prelude).
   if is_native_call(fname) { rt fname + "(" + gen_args(sy, args) + ")" }
+  if is_gstruct(sy, fname) {                                  // generic-struct ctor → its monomorphic mk_Box_i64
+    rt "mk_" + gstruct_mono(sy, fname, args) + "(" + gen_args(sy, args) + ")"
+  }
   if is_ctor(sy, fname) {
     rt "mk_" + fname + "(" + gen_args(sy, args) + ")"
   }
