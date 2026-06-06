@@ -966,6 +966,10 @@ fn gen_bin(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
   if op == OP_NE() && expr_is_str(l, sy) && expr_is_str(r, sy) {
     rt "(strcmp(" + gen_expr(sy, l) + ", " + gen_expr(sy, r) + ") != 0)"
   }
+  // operator overloading: `a <op> b` where a's class defines the op's method →
+  // dispatch to it (`f_<Class>_<m>(&a, b)`), reusing the UFCS method-call path.
+  oc := overload_class(sy, op, l)
+  if len(oc) > 0 { rt gen_method_call(sy, oc, op_method(op), mkargs2(l, r)) }
   "(" + gen_expr(sy, l) + op_c(op) + gen_expr(sy, r) + ")"
 }
 

@@ -1,0 +1,20 @@
+// Operator overloading (structural): a class that defines a conventionally-named
+// method gets the operator — `a + b` → a.add(b), `a - b` → a.sub(b),
+// `a == b` → a.eq(b), `a < b` → a.lt(b). No trait or annotation required; the
+// operator dispatches when the left operand's class defines the method.
+cl Vec2 {
+  x: i64
+  y: i64
+  fn add(self, o:Vec2) -> Vec2 { Vec2(self.x + o.x, self.y + o.y) }
+  fn sub(self, o:Vec2) -> Vec2 { Vec2(self.x - o.x, self.y - o.y) }
+  fn eq(self, o:Vec2) -> bool { self.x == o.x && self.y == o.y }
+  fn show(self) -> str { "(" + int_to_str(self.x) + "," + int_to_str(self.y) + ")" }
+}
+a := Vec2(1, 2)
+b := Vec2(3, 4)
+sum := a + b
+diff := b - a
+println(sum.show())
+println(diff.show())
+println(a == b)
+println(a == Vec2(1, 2))

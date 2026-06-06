@@ -1,0 +1,12 @@
+// EXPECT: operator + on P and P
+// Operator overloading is structural: `+` dispatches to a class's `add` method only
+// if it defines one. P has no `add`, so `a + b` is a type error at the source line
+// (not a silent miscompile / cryptic clang error).
+cl P {
+  x: i64
+  fn show(self) -> str { "p" }
+}
+a := P(1)
+b := P(2)
+c := a + b
+println(c.show())
