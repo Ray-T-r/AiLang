@@ -1,0 +1,7 @@
+// EXPECT: missing variant 'None'
+// A generic enum monomorphizes per use, but exhaustiveness still applies: a match on
+// Option<i64> that omits None is non-exhaustive. The missing variant is reported
+// de-mangled ('None', not the internal 'Option_i64_None').
+en Option<T> { Some(v:T), None }
+fn f(o:Option<i64>) -> i64 { mt o { Some(v) => v } }
+println(f(Some(1)))

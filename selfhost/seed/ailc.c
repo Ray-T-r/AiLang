@@ -277,7 +277,7 @@ typedef map_f64_Stmt_s* map_f64_Stmt;
 
 struct s_Token { int64_t kind; const char* text; int64_t pos; };
 struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; arr_str tparams; };
-struct s_EnumDef { const char* name; arr_str vnames; arr_str vftypes; };
+struct s_EnumDef { const char* name; arr_str vnames; arr_str vftypes; arr_str tparams; };
 struct s_Func { const char* name; arr_str params; arr_str ptypes; const char* ret; const char* lib; arr_str tparams; arr_Stmt body; };
 struct s_ClassDef { const char* name; const char* parent; arr_str fnames; arr_str ftypes; arr_Func methods; arr_str vflags; };
 struct s_TraitDef { const char* name; arr_str methods; };
@@ -938,7 +938,7 @@ static res_Stmt mk_ok_Stmt(s_Stmt v){ res_Stmt r; r.tag=0; r.ok=v; r.err=""; ret
 static res_Stmt mk_err_Stmt(const char* m){ res_Stmt r; r.tag=1; r.err=m; return r; }
 static s_Token mk_Token(int64_t kind, const char* text, int64_t pos){ s_Token __s; __s.kind=kind; __s.text=text; __s.pos=pos; return __s; }
 static s_StructDef mk_StructDef(const char* name, arr_str fnames, arr_str ftypes, arr_str tparams){ s_StructDef __s; __s.name=name; __s.fnames=fnames; __s.ftypes=ftypes; __s.tparams=tparams; return __s; }
-static s_EnumDef mk_EnumDef(const char* name, arr_str vnames, arr_str vftypes){ s_EnumDef __s; __s.name=name; __s.vnames=vnames; __s.vftypes=vftypes; return __s; }
+static s_EnumDef mk_EnumDef(const char* name, arr_str vnames, arr_str vftypes, arr_str tparams){ s_EnumDef __s; __s.name=name; __s.vnames=vnames; __s.vftypes=vftypes; __s.tparams=tparams; return __s; }
 static s_Func mk_Func(const char* name, arr_str params, arr_str ptypes, const char* ret, const char* lib, arr_str tparams, arr_Stmt body){ s_Func __s; __s.name=name; __s.params=params; __s.ptypes=ptypes; __s.ret=ret; __s.lib=lib; __s.tparams=tparams; __s.body=body; return __s; }
 static s_ClassDef mk_ClassDef(const char* name, const char* parent, arr_str fnames, arr_str ftypes, arr_Func methods, arr_str vflags){ s_ClassDef __s; __s.name=name; __s.parent=parent; __s.fnames=fnames; __s.ftypes=ftypes; __s.methods=methods; __s.vflags=vflags; return __s; }
 static s_TraitDef mk_TraitDef(const char* name, arr_str methods){ s_TraitDef __s; __s.name=name; __s.methods=methods; return __s; }
@@ -947,7 +947,7 @@ static s_Binds mk_Binds(arr_str names, arr_Expr vals){ s_Binds __s; __s.names=na
 static s_Syms mk_Syms(map_str_str vty, map_str_str fld, map_str_str ctors, map_str_str frets, map_str_str evar, map_str_str vft, arr_Func gfns, arr_Func lams, map_str_str errc){ s_Syms __s; __s.vty=vty; __s.fld=fld; __s.ctors=ctors; __s.frets=frets; __s.evar=evar; __s.vft=vft; __s.gfns=gfns; __s.lams=lams; __s.errc=errc; return __s; }
 static void print_Token(s_Token v){ printf("Token{"); printf("kind: "); printf("%lld", (long long)(v.kind)); printf(", "); printf("text: "); printf("%s", v.text); printf(", "); printf("pos: "); printf("%lld", (long long)(v.pos)); printf("}"); }
 static void print_StructDef(s_StructDef v){ printf("StructDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("tparams: "); printf("?"); printf("}"); }
-static void print_EnumDef(s_EnumDef v){ printf("EnumDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("vnames: "); printf("?"); printf(", "); printf("vftypes: "); printf("?"); printf("}"); }
+static void print_EnumDef(s_EnumDef v){ printf("EnumDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("vnames: "); printf("?"); printf(", "); printf("vftypes: "); printf("?"); printf(", "); printf("tparams: "); printf("?"); printf("}"); }
 static void print_Func(s_Func v){ printf("Func{"); printf("name: "); printf("%s", v.name); printf(", "); printf("params: "); printf("?"); printf(", "); printf("ptypes: "); printf("?"); printf(", "); printf("ret: "); printf("%s", v.ret); printf(", "); printf("lib: "); printf("%s", v.lib); printf(", "); printf("tparams: "); printf("?"); printf(", "); printf("body: "); printf("?"); printf("}"); }
 static void print_ClassDef(s_ClassDef v){ printf("ClassDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("parent: "); printf("%s", v.parent); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("methods: "); printf("?"); printf(", "); printf("vflags: "); printf("?"); printf("}"); }
 static void print_TraitDef(s_TraitDef v){ printf("TraitDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("methods: "); printf("?"); printf("}"); }
@@ -1174,6 +1174,8 @@ const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r);
 int64_t f_is_native_call(const char* v_fname);
 int64_t f_is_gstruct(s_Syms* v_sy, const char* v_name);
 const char* f_gstruct_mono(s_Syms* v_sy, const char* v_name, arr_Expr v_args);
+int64_t f_is_gvariant(s_Syms* v_sy, const char* v_name);
+const char* f_gvariant_mangle(s_Syms* v_sy, const char* v_bareV, arr_Expr v_args);
 const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args);
 const char* f_field_type(s_Syms* v_sy, s_Expr v_obj, const char* v_fname);
 int64_t f_expr_is_str(s_Expr v_e, s_Syms* v_sy);
@@ -1197,6 +1199,7 @@ const char* f_gen_var(s_Syms* v_sy, const char* v_name);
 const char* f_gen_expr(s_Syms* v_sy, s_Expr v_e);
 const char* f_gen_ife(s_Syms* v_sy, s_Expr v_c, s_Expr v_t, s_Expr v_el2);
 const char* f_gen_try(s_Syms* v_sy, s_Expr v_e);
+const char* f_eff_variant(s_Syms* v_sy, const char* v_sty, const char* v_vname);
 const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards);
 const char* f_gen_match_g(s_Syms* v_sy, s_Expr v_sc, const char* v_sty, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards, const char* v_rty);
 const char* f_gen_arm_binds(s_Syms* v_sy, const char* v_vname, arr_str v_binds);
@@ -1344,6 +1347,11 @@ s_StructDef f_find_gstruct(arr_StructDef v_gstructs, const char* v_nm);
 s_Func f_norm_func(s_Func v_f);
 s_StructDef f_norm_struct(s_StructDef v_sd);
 arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gstructs, const char* v_ty);
+const char* f_mono_variant(const char* v_inst, const char* v_bareV);
+int64_t f_has_enum(arr_EnumDef v_xs, const char* v_nm);
+s_EnumDef f_find_genum(arr_EnumDef v_genums, const char* v_nm);
+s_EnumDef f_gen_enum_instance(s_EnumDef v_gt, arr_str v_args);
+arr_EnumDef f_collect_enum_inst(arr_EnumDef v_enums, arr_EnumDef v_genums, const char* v_ty);
 const char* f_var_name(s_Expr v_e);
 int64_t f_is_empty_maplit(s_Expr v_e);
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m);
@@ -3457,6 +3465,7 @@ s_TraitDef f_parse_trait(s_P* v_p) {
 
 s_EnumDef f_parse_enum(s_P* v_p) {
     const char* v_name;
+    arr_str v_tparams;
     arr_str v_vnames;
     arr_str v_vftypes;
     const char* v_vn;
@@ -3466,6 +3475,20 @@ s_EnumDef f_parse_enum(s_P* v_p) {
     f_adv(v_p);
     v_name = f_ctext(v_p);
     f_adv(v_p);
+    v_tparams = ({ arr_str __a = arr_str_new(); __a; });
+    if ((f_ckind(v_p) == f_TK_LT())) {
+        f_adv(v_p);
+        while (((f_ckind(v_p) != f_TK_GT()) && (f_ckind(v_p) != f_TK_EOF()))) {
+            if ((f_ckind(v_p) == f_TK_IDENT())) {
+                v_tparams = arr_str_push(v_tparams, f_ctext(v_p));
+                f_adv(v_p);
+            }
+            if ((f_ckind(v_p) == f_TK_COMMA())) {
+                f_adv(v_p);
+            }
+        }
+        f_eat(v_p, f_TK_GT());
+    }
     f_eat(v_p, f_TK_LBRACE());
     v_vnames = ({ arr_str __a = arr_str_new(); __a; });
     v_vftypes = ({ arr_str __a = arr_str_new(); __a; });
@@ -3508,7 +3531,7 @@ s_EnumDef f_parse_enum(s_P* v_p) {
         }
     }
     f_eat(v_p, f_TK_RBRACE());
-    return mk_EnumDef(v_name, v_vnames, v_vftypes);
+    return mk_EnumDef(v_name, v_vnames, v_vftypes, v_tparams);
 }
 
 int64_t f_is_boxed_ft(const char* v_ft) {
@@ -3631,7 +3654,7 @@ arr_EnumDef f_box_cross_enums(arr_EnumDef v_enums) {
             }
             v_vi = (v_vi + 1);
         }
-        v_out = arr_EnumDef_push(v_out, mk_EnumDef((v_ed).name, (v_ed).vnames, v_newvft));
+        v_out = arr_EnumDef_push(v_out, mk_EnumDef((v_ed).name, (v_ed).vnames, v_newvft, (v_ed).tparams));
         v_i = (v_i + 1);
     }
     return v_out;
@@ -4240,8 +4263,15 @@ arr_Expr f_mkargs2(s_Expr v_a, s_Expr v_b) {
 }
 
 const char* f_ty_of(s_Syms* v_sy, const char* v_name) {
+    const char* v_gm;
     if (map_str_str_has((v_sy)->vty, v_name)) {
         return map_str_str_get((v_sy)->vty, v_name);
+    }
+    if (f_is_gvariant(v_sy, v_name)) {
+        v_gm = f_gvariant_mangle(v_sy, v_name, f_no_exprs());
+        if (((((int64_t)strlen(v_gm)) > 0) && map_str_str_has((v_sy)->evar, v_gm))) {
+            return map_str_str_get((v_sy)->evar, v_gm);
+        }
     }
     if (f_is_variant(v_sy, v_name)) {
         return map_str_str_get((v_sy)->evar, v_name);
@@ -4473,7 +4503,58 @@ const char* f_gstruct_mono(s_Syms* v_sy, const char* v_name, arr_Expr v_args) {
     return f_mono_of(v_name, v_targs);
 }
 
+int64_t f_is_gvariant(s_Syms* v_sy, const char* v_name) {
+    return map_str_str_has((v_sy)->evar, scat("@gvariant.", v_name));
+}
+
+const char* f_gvariant_mangle(s_Syms* v_sy, const char* v_bareV, arr_Expr v_args) {
+    const char* v_tmpl;
+    arr_str v_tps;
+    arr_str v_vfs;
+    arr_str v_targs;
+    int64_t v_allfound;
+    int64_t v_ti;
+    const char* v_found;
+    int64_t v_fi;
+    const char* v_cr;
+    v_tmpl = map_str_str_get((v_sy)->evar, scat("@gvariant.", v_bareV));
+    v_tps = f_split_semi(map_str_str_get((v_sy)->evar, scat("@genum.", v_tmpl)));
+    v_vfs = f_split_semi(map_str_str_get((v_sy)->evar, scat(scat(scat("@gvar.fields.", v_tmpl), "."), v_bareV)));
+    v_targs = ({ arr_str __a = arr_str_new(); __a; });
+    v_allfound = (1 == 1);
+    v_ti = 0;
+    while ((v_ti < arr_str_len(v_tps))) {
+        v_found = "";
+        v_fi = 0;
+        while ((v_fi < arr_str_len(v_vfs))) {
+            if ((v_fi < arr_Expr_len(v_args))) {
+                if ((strcmp(arr_str_get(v_vfs, v_fi), arr_str_get(v_tps, v_ti)) == 0)) {
+                    v_found = f_type_of_expr(v_sy, arr_Expr_get(v_args, v_fi));
+                }
+                if ((strcmp(arr_str_get(v_vfs, v_fi), scat(scat("[", arr_str_get(v_tps, v_ti)), "]")) == 0)) {
+                    v_found = f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, v_fi)));
+                }
+            }
+            v_fi = (v_fi + 1);
+        }
+        if ((((int64_t)strlen(v_found)) == 0)) {
+            v_allfound = (1 != 1);
+        }
+        v_targs = arr_str_push(v_targs, v_found);
+        v_ti = (v_ti + 1);
+    }
+    if (v_allfound) {
+        return f_mono_variant(f_mono_of(v_tmpl, v_targs), v_bareV);
+    }
+    v_cr = f_ty_of(v_sy, "@curret");
+    if (((((int64_t)strlen(v_cr)) > 0) && map_str_str_has((v_sy)->evar, scat("@order.", v_cr)))) {
+        return f_mono_variant(v_cr, v_bareV);
+    }
+    return "";
+}
+
 const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
+    const char* v_gm;
     s_Func v_f;
     const char* v_gt;
     const char* v_pdef;
@@ -4483,6 +4564,12 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     arr_str v_ps;
     if (f_is_gstruct(v_sy, v_fname)) {
         return f_gstruct_mono(v_sy, v_fname, v_args);
+    }
+    if (f_is_gvariant(v_sy, v_fname)) {
+        v_gm = f_gvariant_mangle(v_sy, v_fname, v_args);
+        if (((((int64_t)strlen(v_gm)) > 0) && map_str_str_has((v_sy)->evar, v_gm))) {
+            return map_str_str_get((v_sy)->evar, v_gm);
+        }
     }
     if (f_is_generic(v_sy, v_fname)) {
         v_f = f_find_gfn(v_sy, v_fname);
@@ -4699,8 +4786,15 @@ int64_t f_is_num(const char* v_t) {
 }
 
 const char* f_tcon_var(s_Syms* v_sy, const char* v_name) {
+    const char* v_gm;
     if (map_str_str_has((v_sy)->vty, v_name)) {
         return map_str_str_get((v_sy)->vty, v_name);
+    }
+    if (f_is_gvariant(v_sy, v_name)) {
+        v_gm = f_gvariant_mangle(v_sy, v_name, f_no_exprs());
+        if (((((int64_t)strlen(v_gm)) > 0) && map_str_str_has((v_sy)->evar, v_gm))) {
+            return map_str_str_get((v_sy)->evar, v_gm);
+        }
     }
     if (f_is_variant(v_sy, v_name)) {
         return map_str_str_get((v_sy)->evar, v_name);
@@ -4731,9 +4825,17 @@ const char* f_builtin_fixed_ret(const char* v_fname) {
 }
 
 const char* f_tcon_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
+    const char* v_gm;
     const char* v_bf;
     if (f_is_gstruct(v_sy, v_fname)) {
         return f_gstruct_mono(v_sy, v_fname, v_args);
+    }
+    if (f_is_gvariant(v_sy, v_fname)) {
+        v_gm = f_gvariant_mangle(v_sy, v_fname, v_args);
+        if (((((int64_t)strlen(v_gm)) > 0) && map_str_str_has((v_sy)->evar, v_gm))) {
+            return map_str_str_get((v_sy)->evar, v_gm);
+        }
+        return "?";
     }
     if (f_is_ctor(v_sy, v_fname)) {
         return v_fname;
@@ -4953,6 +5055,13 @@ const char* f_gen_str(const char* v_s) {
 }
 
 const char* f_gen_var(s_Syms* v_sy, const char* v_name) {
+    const char* v_gm;
+    if (f_is_gvariant(v_sy, v_name)) {
+        v_gm = f_gvariant_mangle(v_sy, v_name, f_no_exprs());
+        if ((((int64_t)strlen(v_gm)) > 0)) {
+            return scat(scat("mkv_", v_gm), "()");
+        }
+    }
     if (f_is_variant(v_sy, v_name)) {
         return scat(scat("mkv_", v_name), "()");
     }
@@ -4977,6 +5086,13 @@ const char* f_gen_try(s_Syms* v_sy, s_Expr v_e) {
     return scat(scat(scat(scat(scat(scat("({ ", v_rcty), " __t = "), f_gen_expr(v_sy, v_e)), "; if(__t.tag) return mk_err_"), f_arr_suffix(v_fret)), "(__t.err); __t.ok; })");
 }
 
+const char* f_eff_variant(s_Syms* v_sy, const char* v_sty, const char* v_vname) {
+    if (f_is_gvariant(v_sy, v_vname)) {
+        return f_mono_variant(v_sty, v_vname);
+    }
+    return v_vname;
+}
+
 const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards) {
     const char* v_sty;
     const char* v_rty;
@@ -4990,7 +5106,7 @@ const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_v
     const char* v_kw;
     v_sty = f_type_of_expr(v_sy, v_sc);
     if ((arr_str_len(v_vnames) > 0)) {
-        f_bind_arm_types(v_sy, arr_str_get(v_vnames, 0), f_split_semi(arr_str_get(v_vbinds, 0)));
+        f_bind_arm_types(v_sy, f_eff_variant(v_sy, v_sty, arr_str_get(v_vnames, 0)), f_split_semi(arr_str_get(v_vbinds, 0)));
     }
     v_rty = f_match_type(v_sy, v_bodies);
     v_special = (1 != 1);
@@ -5007,7 +5123,7 @@ const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_v
     v_out = scat(scat(scat(scat(scat(scat("({ ", f_cty(v_rty)), " __m; "), f_cty(v_sty)), " __s = "), f_gen_expr(v_sy, v_sc)), "; ");
     v_i = 0;
     while ((v_i < arr_str_len(v_vnames))) {
-        v_vname = arr_str_get(v_vnames, v_i);
+        v_vname = f_eff_variant(v_sy, v_sty, arr_str_get(v_vnames, v_i));
         v_binds = f_split_semi(arr_str_get(v_vbinds, v_i));
         v_tag = f_variant_tag(v_sy, v_sty, v_vname);
         v_kw = ({ const char* __r; if ((v_i == 0)) { __r = "if"; } else { __r = "else if"; } __r; });
@@ -5029,7 +5145,7 @@ const char* f_gen_match_g(s_Syms* v_sy, s_Expr v_sc, const char* v_sty, arr_str 
     v_out = scat(scat(scat(scat(scat(scat("({ ", f_cty(v_rty)), " __m; int __done=0; "), f_cty(v_sty)), " __s = "), f_gen_expr(v_sy, v_sc)), "; ");
     v_i = 0;
     while ((v_i < arr_str_len(v_vnames))) {
-        v_vname = arr_str_get(v_vnames, v_i);
+        v_vname = f_eff_variant(v_sy, v_sty, arr_str_get(v_vnames, v_i));
         v_binds = f_split_semi(arr_str_get(v_vbinds, v_i));
         if ((strcmp(v_vname, "_") == 0)) {
             v_out = scat(v_out, "if(!__done){ ");
@@ -5633,6 +5749,7 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_rcv;
     const char* v_t;
     const char* v_suf;
+    const char* v_gm;
     if (f_is_generic(v_sy, v_fname)) {
         return f_gen_generic_call(v_sy, v_fname, v_args);
     }
@@ -6018,6 +6135,12 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (f_is_ctor(v_sy, v_fname)) {
         return scat(scat(scat(scat("mk_", v_fname), "("), f_gen_args(v_sy, v_args)), ")");
+    }
+    if (f_is_gvariant(v_sy, v_fname)) {
+        v_gm = f_gvariant_mangle(v_sy, v_fname, v_args);
+        if ((((int64_t)strlen(v_gm)) > 0)) {
+            return scat(scat(scat(scat("mkv_", v_gm), "("), f_gen_args(v_sy, v_args)), ")");
+        }
     }
     if (f_is_variant(v_sy, v_fname)) {
         return scat(scat(scat(scat("mkv_", v_fname), "("), f_gen_args(v_sy, v_args)), ")");
@@ -6885,6 +7008,7 @@ s_Syms f_seed_fn(s_Syms* v_base, s_Func v_f) {
     if (f_is_result_ann((v_f).ret)) {
         f_set_ty((&v_sy), "@ret", f_result_inner((v_f).ret));
     }
+    f_set_ty((&v_sy), "@curret", (v_f).ret);
     return v_sy;
 }
 
@@ -7286,6 +7410,94 @@ arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gst
         return v_structs;
     }
     return arr_StructDef_push(v_structs, f_gen_instance(v_gt, f_inst_args(v_ty)));
+}
+
+const char* f_mono_variant(const char* v_inst, const char* v_bareV) {
+    return scat(scat(v_inst, "_"), v_bareV);
+}
+
+int64_t f_has_enum(arr_EnumDef v_xs, const char* v_nm) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_EnumDef_len(v_xs))) {
+        if ((strcmp((arr_EnumDef_get(v_xs, v_i)).name, v_nm) == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+s_EnumDef f_find_genum(arr_EnumDef v_genums, const char* v_nm) {
+    int64_t v_i;
+    arr_str v_e;
+    v_i = 0;
+    while ((v_i < arr_EnumDef_len(v_genums))) {
+        if ((strcmp((arr_EnumDef_get(v_genums, v_i)).name, v_nm) == 0)) {
+            return arr_EnumDef_get(v_genums, v_i);
+        }
+        v_i = (v_i + 1);
+    }
+    v_e = ({ arr_str __a = arr_str_new(); __a; });
+    return mk_EnumDef("", v_e, v_e, v_e);
+}
+
+s_EnumDef f_gen_enum_instance(s_EnumDef v_gt, arr_str v_args) {
+    const char* v_inst;
+    arr_str v_vns;
+    arr_str v_vfts;
+    int64_t v_i;
+    const char* v_raw;
+    arr_str v_parts;
+    const char* v_nf;
+    int64_t v_fj;
+    const char* v_sft;
+    arr_str v_notp;
+    v_inst = f_mono_of((v_gt).name, v_args);
+    v_vns = ({ arr_str __a = arr_str_new(); __a; });
+    v_vfts = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len((v_gt).vnames))) {
+        v_vns = arr_str_push(v_vns, f_mono_variant(v_inst, arr_str_get((v_gt).vnames, v_i)));
+        v_raw = arr_str_get((v_gt).vftypes, v_i);
+        if ((((int64_t)strlen(v_raw)) == 0)) {
+            v_vfts = arr_str_push(v_vfts, "");
+        } else {
+            v_parts = f_split_semi(v_raw);
+            v_nf = "";
+            v_fj = 0;
+            while ((v_fj < arr_str_len(v_parts))) {
+                v_sft = f_subst_struct_ty((v_gt).tparams, v_args, arr_str_get(v_parts, v_fj));
+                if ((v_fj == 0)) {
+                    v_nf = v_sft;
+                } else {
+                    v_nf = scat(scat(v_nf, ";"), v_sft);
+                }
+                v_fj = (v_fj + 1);
+            }
+            v_vfts = arr_str_push(v_vfts, v_nf);
+        }
+        v_i = (v_i + 1);
+    }
+    v_notp = ({ arr_str __a = arr_str_new(); __a; });
+    return mk_EnumDef(v_inst, v_vns, v_vfts, v_notp);
+}
+
+arr_EnumDef f_collect_enum_inst(arr_EnumDef v_enums, arr_EnumDef v_genums, const char* v_ty) {
+    s_EnumDef v_gt;
+    const char* v_nm;
+    if ((f_has_sub(v_ty, "<") == (1 != 1))) {
+        return v_enums;
+    }
+    v_gt = f_find_genum(v_genums, f_inst_head(v_ty));
+    if ((((int64_t)strlen((v_gt).name)) == 0)) {
+        return v_enums;
+    }
+    v_nm = f_mono_name(v_ty);
+    if (f_has_enum(v_enums, v_nm)) {
+        return v_enums;
+    }
+    return arr_EnumDef_push(v_enums, f_gen_enum_instance(v_gt, f_inst_args(v_ty)));
 }
 
 const char* f_var_name(s_Expr v_e) {
@@ -7815,12 +8027,16 @@ int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v) {
 
 int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src) {
     const char* v_ty;
+    arr_str v_mv;
+    int64_t v_mk;
     int64_t v_i;
     const char* v_nm;
+    const char* v_emn;
     int64_t v_nb;
     int64_t v_nf;
     arr_str v_all;
     int64_t v_j;
+    const char* v_miss;
     if ((v_pos < 0)) {
         return 0;
     }
@@ -7832,16 +8048,23 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
         f_report_chk(v_sy, v_src, v_pos, scat("type error: match on non-enum value of type ", v_ty));
         return 0;
     }
+    v_mv = ({ arr_str __a = arr_str_new(); __a; });
+    v_mk = 0;
+    while ((v_mk < arr_str_len(v_vnames))) {
+        v_mv = arr_str_push(v_mv, f_eff_variant(v_sy, v_ty, arr_str_get(v_vnames, v_mk)));
+        v_mk = (v_mk + 1);
+    }
     v_i = 0;
     while ((v_i < arr_str_len(v_vnames))) {
         v_nm = arr_str_get(v_vnames, v_i);
+        v_emn = arr_str_get(v_mv, v_i);
         if ((strcmp(v_nm, "_") != 0)) {
-            if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
+            if (((f_is_variant(v_sy, v_emn) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_emn), v_ty) != 0))) {
                 f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty), f_suggest(v_nm, f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty))))));
             }
             v_nb = arr_str_len(f_split_semi(arr_str_get(v_vbinds, v_i)));
-            if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_nm))) {
-                v_nf = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_nm)));
+            if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_emn))) {
+                v_nf = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_emn)));
                 if ((v_nb > v_nf)) {
                     f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat("variant '", v_nm), "' binds "), i2s(v_nb)), " but has "), i2s(v_nf)), " field(s)"));
                 }
@@ -7849,14 +8072,18 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
         }
         v_i = (v_i + 1);
     }
-    if (f_vn_has_ug(v_vnames, v_guards, "_")) {
+    if (f_vn_has_ug(v_mv, v_guards, "_")) {
         return 0;
     }
     v_all = f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty)));
     v_j = 0;
     while ((v_j < arr_str_len(v_all))) {
-        if ((f_vn_has_ug(v_vnames, v_guards, arr_str_get(v_all, v_j)) == (1 != 1))) {
-            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), arr_str_get(v_all, v_j)), "'"));
+        if ((f_vn_has_ug(v_mv, v_guards, arr_str_get(v_all, v_j)) == (1 != 1))) {
+            v_miss = arr_str_get(v_all, v_j);
+            if (f_has_sub(v_miss, scat(v_ty, "_"))) {
+                v_miss = substr(v_miss, (((int64_t)strlen(v_ty)) + 1), ((int64_t)strlen(v_miss)));
+            }
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), v_miss), "'"));
         }
         v_j = (v_j + 1);
     }
@@ -8403,6 +8630,17 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_afi;
     int64_t v_asi;
     int64_t v_fj;
+    arr_EnumDef v_genums;
+    arr_EnumDef v_cenums;
+    int64_t v_gnei;
+    int64_t v_evk;
+    int64_t v_gnti;
+    int64_t v_esk;
+    s_EnumDef v_einst;
+    int64_t v_aei;
+    int64_t v_epj;
+    int64_t v_aesi;
+    int64_t v_efj;
     int64_t v_nfi;
     int64_t v_nsi;
     int64_t v_si;
@@ -8705,6 +8943,58 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
             v_fj = (v_fj + 1);
         }
         v_asi = (v_asi + 1);
+    }
+    v_genums = ({ arr_EnumDef __a = arr_EnumDef_new(); __a; });
+    v_cenums = ({ arr_EnumDef __a = arr_EnumDef_new(); __a; });
+    v_gnei = 0;
+    while ((v_gnei < arr_EnumDef_len(v_enums))) {
+        if ((arr_str_len((arr_EnumDef_get(v_enums, v_gnei)).tparams) > 0)) {
+            v_genums = arr_EnumDef_push(v_genums, arr_EnumDef_get(v_enums, v_gnei));
+            map_str_str_set((v_base).evar, scat("@genum.", (arr_EnumDef_get(v_enums, v_gnei)).name), f_join_semi((arr_EnumDef_get(v_enums, v_gnei)).tparams));
+            v_evk = 0;
+            while ((v_evk < arr_str_len((arr_EnumDef_get(v_enums, v_gnei)).vnames))) {
+                map_str_str_set((v_base).evar, scat("@gvariant.", arr_str_get((arr_EnumDef_get(v_enums, v_gnei)).vnames, v_evk)), (arr_EnumDef_get(v_enums, v_gnei)).name);
+                map_str_str_set((v_base).evar, scat(scat(scat("@gvar.fields.", (arr_EnumDef_get(v_enums, v_gnei)).name), "."), arr_str_get((arr_EnumDef_get(v_enums, v_gnei)).vnames, v_evk)), arr_str_get((arr_EnumDef_get(v_enums, v_gnei)).vftypes, v_evk));
+                v_evk = (v_evk + 1);
+            }
+        } else {
+            v_cenums = arr_EnumDef_push(v_cenums, arr_EnumDef_get(v_enums, v_gnei));
+        }
+        v_gnei = (v_gnei + 1);
+    }
+    v_enums = v_cenums;
+    v_gnti = 0;
+    while ((v_gnti < arr_EnumDef_len(v_genums))) {
+        if ((arr_str_len((arr_EnumDef_get(v_genums, v_gnti)).tparams) == 1)) {
+            v_esk = 0;
+            while ((v_esk < arr_str_len(v_gscal))) {
+                v_einst = f_gen_enum_instance(arr_EnumDef_get(v_genums, v_gnti), f_mk1(arr_str_get(v_gscal, v_esk)));
+                if ((f_has_enum(v_enums, (v_einst).name) == (1 != 1))) {
+                    v_enums = arr_EnumDef_push(v_enums, v_einst);
+                }
+                v_esk = (v_esk + 1);
+            }
+        }
+        v_gnti = (v_gnti + 1);
+    }
+    v_aei = 0;
+    while ((v_aei < arr_Func_len(v_funcs))) {
+        v_epj = 0;
+        while ((v_epj < arr_str_len((arr_Func_get(v_funcs, v_aei)).ptypes))) {
+            v_enums = f_collect_enum_inst(v_enums, v_genums, arr_str_get((arr_Func_get(v_funcs, v_aei)).ptypes, v_epj));
+            v_epj = (v_epj + 1);
+        }
+        v_enums = f_collect_enum_inst(v_enums, v_genums, (arr_Func_get(v_funcs, v_aei)).ret);
+        v_aei = (v_aei + 1);
+    }
+    v_aesi = 0;
+    while ((v_aesi < arr_StructDef_len(v_structs))) {
+        v_efj = 0;
+        while ((v_efj < arr_str_len((arr_StructDef_get(v_structs, v_aesi)).ftypes))) {
+            v_enums = f_collect_enum_inst(v_enums, v_genums, arr_str_get((arr_StructDef_get(v_structs, v_aesi)).ftypes, v_efj));
+            v_efj = (v_efj + 1);
+        }
+        v_aesi = (v_aesi + 1);
     }
     v_nfi = 0;
     while ((v_nfi < arr_Func_len(v_funcs))) {

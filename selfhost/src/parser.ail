@@ -1124,6 +1124,15 @@ fn parse_trait(p:*P) -> TraitDef {
 fn parse_enum(p:*P) -> EnumDef {
   adv(p)                            // `en`
   name := ctext(p); adv(p)          // Name
+  mu tparams:[str] := []            // optional `<T, …>` → a generic enum template
+  if ckind(p) == TK_LT() {
+    adv(p)
+    lp ckind(p) != TK_GT() && ckind(p) != TK_EOF() {
+      if ckind(p) == TK_IDENT() { tparams = push(tparams, ctext(p)); adv(p) }
+      if ckind(p) == TK_COMMA() { adv(p) }
+    }
+    eat(p, TK_GT())
+  }
   eat(p, TK_LBRACE())
   mu vnames:[str] := []
   mu vftypes:[str] := []
@@ -1154,7 +1163,7 @@ fn parse_enum(p:*P) -> EnumDef {
     }
   }
   eat(p, TK_RBRACE())
-  EnumDef(name, vnames, vftypes)
+  EnumDef(name, vnames, vftypes, tparams)
 }
 
 // ----- boxed enum fields (recursion-cycle breaking) -------------------------
@@ -1239,7 +1248,7 @@ fn box_cross_enums(enums:[EnumDef]) -> [EnumDef] {
       }
       vi += 1
     }
-    out = push(out, EnumDef(ed.name, ed.vnames, newvft))
+    out = push(out, EnumDef(ed.name, ed.vnames, newvft, ed.tparams))
     i += 1
   }
   out

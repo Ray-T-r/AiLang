@@ -114,6 +114,58 @@ fn collect_struct_inst(structs:[StructDef], gstructs:[StructDef], ty:str) -> [St
   push(structs, gen_instance(gt, inst_args(ty)))
 }
 
+// ----- generic enums: monomorphize instantiations (variants mangled per-instance) -
+// `mono_variant("Option_i64", "Some")` → "Option_i64_Some" — a per-instance variant
+// name so the existing enum machinery (evar/@order/@vfld/mkv_/union) handles each
+// instance with NO collision; bare `Some`/`None` map to it at ctor + match sites.
+fn mono_variant(inst:str, bareV:str) -> str { inst + "_" + bareV }
+fn has_enum(xs:[EnumDef], nm:str) -> bool {
+  mu i := 0
+  lp i < len(xs) { if xs[i].name == nm rt true   i += 1 }
+  false
+}
+fn find_genum(genums:[EnumDef], nm:str) -> EnumDef {
+  mu i := 0
+  lp i < len(genums) { if genums[i].name == nm rt genums[i]   i += 1 }
+  mu e:[str] := []
+  EnumDef("", e, e, e)
+}
+// One concrete EnumDef from a generic template + concrete args: name mangled
+// (Option_i64), variants mangled (Option_i64_Some), T substituted in each field.
+fn gen_enum_instance(gt:EnumDef, args:[str]) -> EnumDef {
+  inst := mono_of(gt.name, args)
+  mu vns:[str] := []
+  mu vfts:[str] := []
+  mu i := 0
+  lp i < len(gt.vnames) {
+    vns = push(vns, mono_variant(inst, gt.vnames[i]))
+    raw := gt.vftypes[i]
+    if len(raw) == 0 { vfts = push(vfts, "") } el {
+      parts := split_semi(raw)
+      mu nf := ""
+      mu fj := 0
+      lp fj < len(parts) {
+        sft := subst_struct_ty(gt.tparams, args, parts[fj])
+        if fj == 0 { nf = sft } el { nf = nf + ";" + sft }
+        fj += 1
+      }
+      vfts = push(vfts, nf)
+    }
+    i += 1
+  }
+  mu notp:[str] := []
+  EnumDef(inst, vns, vfts, notp)
+}
+// If `ty` is a generic-enum instantiation not yet generated, append it.
+fn collect_enum_inst(enums:[EnumDef], genums:[EnumDef], ty:str) -> [EnumDef] {
+  if has_sub(ty, "<") == false rt enums
+  gt := find_genum(genums, inst_head(ty))
+  if len(gt.name) == 0 rt enums
+  nm := mono_name(ty)
+  if has_enum(enums, nm) rt enums
+  push(enums, gen_enum_instance(gt, inst_args(ty)))
+}
+
 // ----- empty `{}` usage inference -------------------------------------------
 // An un-annotated `m := {}` has no (K,V) until used. Before hoist/codegen we
 // scan the function body for the first `m[k]=v` and stamp the MapLit with
@@ -649,16 +701,23 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   // Binding fewer ignores trailing fields (legal); binding more would read a
   // nonexistent union member. @vfldn is registered only for tuple/fn-free
   // variants, so subtler variants degrade to no-op (has → false).
+  // Map bare generic-enum patterns (`Some`) to the scrutinee instance's mangled
+  // variant (`Option_i64_Some`) so the registered variant tables resolve; normal
+  // enums + `_` are unchanged.
+  mu mv:[str] := []
+  mu mk := 0
+  lp mk < len(vnames) { mv = push(mv, eff_variant(sy, ty, vnames[mk])); mk += 1 }
   mu i := 0
   lp i < len(vnames) {
     nm := vnames[i]
+    emn := mv[i]
     if nm != "_" {
-      if is_variant(sy, nm) == false || sy.evar[nm] != ty {
+      if is_variant(sy, emn) == false || sy.evar[emn] != ty {
         report_chk(sy, src, pos, "unknown variant '" + nm + "' in match on " + ty + suggest(nm, split_semi(sy.evar["@order." + ty])))
       }
       nb := len(split_semi(vbinds[i]))
-      if has(sy.evar, "@vfldn." + nm) {
-        nf := str_to_int(sy.evar["@vfldn." + nm])
+      if has(sy.evar, "@vfldn." + emn) {
+        nf := str_to_int(sy.evar["@vfldn." + emn])
         if nb > nf {
           report_chk(sy, src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
         }
@@ -669,12 +728,14 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   // (2) exhaustiveness — every variant of enum `ty` must have an UNGUARDED arm
   // (a guarded arm may not fire at runtime). An unguarded `_` catch-all covers
   // everything, so it satisfies exhaustiveness outright.
-  if vn_has_ug(vnames, guards, "_") rt 0
+  if vn_has_ug(mv, guards, "_") rt 0
   all := split_semi(sy.evar["@order." + ty])
   mu j := 0
   lp j < len(all) {
-    if vn_has_ug(vnames, guards, all[j]) == false {
-      report_chk(sy, src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
+    if vn_has_ug(mv, guards, all[j]) == false {
+      mu miss := all[j]
+      if has_sub(miss, ty + "_") { miss = substring(miss, len(ty) + 1, len(miss)) }   // de-mangle Option_i64_Some → Some for the message
+      report_chk(sy, src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + miss + "'")
     }
     j += 1
   }
@@ -1332,7 +1393,55 @@ fn compile_to_c(src:str, dir:str) -> str {
     lp fj < len(structs[asi].ftypes) { structs = collect_struct_inst(structs, gstructs, structs[asi].ftypes[fj]); fj += 1 }
     asi += 1
   }
-  // normalize: mangle every `G<…>` annotation in fn sigs + struct fields
+  // Lower generic enums (`en Option<T>{…}`) → concrete monomorphic EnumDefs with
+  // per-instance-mangled variants (Option_i64_Some), the same way generic structs
+  // lower. Bare `Some`/`None` route to the mangled variant at the ctor + match sites
+  // (via @gvariant). Instances: the 3 scalars (covers ctor-inferred `Some(5)`) + any
+  // `Option<X>` in a fn sig / struct field. Templates are split out (not emitted).
+  // Must run BEFORE the normalize below so annotations still carry `<…>` to collect.
+  mu genums:[EnumDef] := []
+  mu cenums:[EnumDef] := []
+  mu gnei := 0
+  lp gnei < len(enums) {
+    if len(enums[gnei].tparams) > 0 {
+      genums = push(genums, enums[gnei])
+      base.evar["@genum." + enums[gnei].name] = join_semi(enums[gnei].tparams)
+      mu evk := 0
+      lp evk < len(enums[gnei].vnames) {
+        base.evar["@gvariant." + enums[gnei].vnames[evk]] = enums[gnei].name                                  // bare variant → template enum
+        base.evar["@gvar.fields." + enums[gnei].name + "." + enums[gnei].vnames[evk]] = enums[gnei].vftypes[evk]  // its template field types → T inference
+        evk += 1
+      }
+    } el { cenums = push(cenums, enums[gnei]) }
+    gnei += 1
+  }
+  enums = cenums
+  mu gnti := 0
+  lp gnti < len(genums) {
+    if len(genums[gnti].tparams) == 1 {
+      mu esk := 0
+      lp esk < len(gscal) {
+        einst := gen_enum_instance(genums[gnti], mk1(gscal[esk]))
+        if has_enum(enums, einst.name) == false { enums = push(enums, einst) }
+        esk += 1
+      }
+    }
+    gnti += 1
+  }
+  mu aei := 0
+  lp aei < len(funcs) {
+    mu epj := 0
+    lp epj < len(funcs[aei].ptypes) { enums = collect_enum_inst(enums, genums, funcs[aei].ptypes[epj]); epj += 1 }
+    enums = collect_enum_inst(enums, genums, funcs[aei].ret)
+    aei += 1
+  }
+  mu aesi := 0
+  lp aesi < len(structs) {
+    mu efj := 0
+    lp efj < len(structs[aesi].ftypes) { enums = collect_enum_inst(enums, genums, structs[aesi].ftypes[efj]); efj += 1 }
+    aesi += 1
+  }
+  // normalize: mangle every `G<…>` annotation (struct OR enum) in fn sigs + struct fields
   mu nfi := 0
   lp nfi < len(funcs) { funcs[nfi] = norm_func(funcs[nfi]); nfi += 1 }
   mu nsi := 0

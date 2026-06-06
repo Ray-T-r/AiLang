@@ -1,0 +1,18 @@
+// Generic enums: `en Option<T>` / `en Result<T>` monomorphize per use, with
+// per-instance variants. `Some(x)` / `Ok(x)` infer T from the payload; the
+// payload-less / non-T variants (`None` / `Err`) resolve via the enclosing
+// function's declared return type.
+en Option<T> { Some(v:T), None }
+en Result<T> { Ok(v:T), Err(e:str) }
+fn lookup(k:i64) -> Option<i64> { if k > 0 { Some(k * 100) } el { None } }
+fn label(k:i64) -> Option<str> { if k > 0 { Some("found") } el { None } }
+fn safe_div(a:i64, b:i64) -> Result<i64> { if b == 0 { Err("divide by zero") } el { Ok(a / b) } }
+fn or_else(o:Option<i64>, d:i64) -> i64 { mt o { Some(v) => v; None => d } }
+fn or_msg(o:Option<str>) -> str { mt o { Some(v) => v; None => "(none)" } }
+fn unwrap_res(r:Result<i64>) -> str { mt r { Ok(v) => int_to_str(v); Err(e) => "error: " + e } }
+println(or_else(lookup(3), 0))
+println(or_else(lookup(0), 0))
+println(or_msg(label(1)))
+println(or_msg(label(0)))
+println(unwrap_res(safe_div(20, 4)))
+println(unwrap_res(safe_div(20, 0)))
