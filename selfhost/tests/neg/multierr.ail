@@ -1,0 +1,18 @@
+// EXPECT: function 'g' expects 0 arguments, got 1
+// Multi-error reporting: the checker must report EVERY confident error in one run,
+// not stop at the first. `f` already has two errors (unknown variant 'Zzz' +
+// non-exhaustive missing 'B'); the EXPECT targets an error in `caller`, which is
+// checked AFTER `f` — so it only prints if the pass kept going past f's errors.
+// A single-error-then-exit checker would never reach it.
+en E { A, B }
+fn f(e:E) -> i64 {
+  mt e {
+    A => 1;
+    Zzz => 2;
+  }
+}
+fn g() -> i64 { 7 }
+fn caller() -> i64 {
+  g(99)
+}
+println(f(A))

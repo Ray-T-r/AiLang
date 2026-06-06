@@ -274,13 +274,92 @@ fn slot_has(slots:str, m:str) -> bool {
 // ===== conservative type checker =============================================
 // A read-only pass (mutates nothing observable by codegen) that walks every
 // function body + the implicit main, and reports CONFIDENT type mismatches at
-// the originating .ail line via report_at (which prints `error L:C:` + caret and
-// exits 1). It runs AFTER the symbol tables are fully populated and BEFORE
-// emission, so it can't change the generated C. Every check fires only when the
-// types involved are confidently known and clearly incompatible (see
-// type_confident / incompatible) — never on an unknown — so it cannot reject any
-// program that compiles today. Walkers mirror the collect_lams family: each
-// returns a dummy i64 (AiLang `mt` is expression-valued), effects via report_at.
+// the originating .ail line via report_chk (which prints `error L:C:` + caret but
+// does NOT exit — it records the error in sy.errc so the walk continues and
+// EVERY confident error surfaces in one run; the driver bails after the pass).
+// It runs AFTER the symbol tables are fully populated and BEFORE emission, so it
+// can't change the generated C. Every check fires only when the types involved
+// are confidently known and clearly incompatible (see type_confident /
+// incompatible) — never on an unknown — so it cannot reject any program that
+// compiles today. Walkers mirror the collect_lams family: each returns a dummy
+// i64 (AiLang `mt` is expression-valued), effects via report_chk.
+
+// Accumulating diagnostic: print the error, but instead of exiting, flag+count it
+// in the SHARED sy.errc map (same object across every per-fn `sy` and `base`, see
+// seed_fn / st Syms). The driver inspects base.errc after the pass and exits if any
+// error fired — so the whole program is checked before we give up.
+fn report_chk(sy:*Syms, src:str, pos:i64, msg:str) -> i64 {
+  print_diag(src, pos, msg)
+  sy.errc["bad"] = "1"
+  mu n := 0
+  if has(sy.errc, "n") { n = str_to_int(sy.errc["n"]) }
+  sy.errc["n"] = int_to_str(n + 1)
+  0
+}
+
+// ----- "did you mean?" spelling suggestions -------------------------------------
+// Levenshtein edit distance (two-row DP) over byte values, used to suggest the
+// nearest known name when an unknown variant/field is referenced.
+fn min2(a:i64, b:i64) -> i64 { if a < b { a } el { b } }
+fn min3(a:i64, b:i64, c:i64) -> i64 { min2(min2(a, b), c) }
+fn edit_dist(a:str, b:str) -> i64 {
+  la := len(a)
+  lb := len(b)
+  if la == 0 rt lb
+  if lb == 0 rt la
+  mu prev:[i64] := []
+  mu j := 0
+  lp j <= lb { prev = push(prev, j); j += 1 }
+  mu i := 0
+  lp i < la {
+    mu cur:[i64] := []
+    cur = push(cur, i + 1)
+    mu k := 0
+    lp k < lb {
+      cost := if a[i] == b[k] { 0 } el { 1 }
+      cur = push(cur, min3(prev[k + 1] + 1, cur[k] + 1, prev[k] + cost))
+      k += 1
+    }
+    prev = cur
+    i += 1
+  }
+  prev[lb]
+}
+// The closest candidate to `target`, or "" if none is close enough. Threshold
+// scales gently with name length (1 + len/4) so a typo suggests but an unrelated
+// name does not.
+fn nearest(target:str, cands:[str]) -> str {
+  mu best := ""
+  mu bestd := 1000000
+  mu i := 0
+  lp i < len(cands) {
+    if len(cands[i]) > 0 {
+      d := edit_dist(target, cands[i])
+      if d < bestd { bestd = d; best = cands[i] }
+    }
+    i += 1
+  }
+  thresh := 1 + len(target) / 4
+  if best != "" && bestd <= thresh { rt best }
+  ""
+}
+// `" — did you mean 'X'?"` for the nearest of `cands`, or "" if nothing is close.
+fn suggest(target:str, cands:[str]) -> str {
+  s := nearest(target, cands)
+  if s == "" rt ""
+  " — did you mean '" + s + "'?"
+}
+// Field names declared on struct `sty` (keys "sty.field" in sy.fld), for suggest().
+fn struct_fields(sy:*Syms, sty:str) -> [str] {
+  mu out:[str] := []
+  pfx := sty + "."
+  lp (k, v) in sy.fld {
+    if len(k) >= len(pfx) && substring(k, 0, len(pfx)) == pfx {
+      out = push(out, substring(k, len(pfx), len(k)))
+    }
+  }
+  out
+}
 
 // A user function's index by name, or -1. Built-ins / externs / ctors / generics
 // are NOT in `funcs`, so a hit here means "a non-generic user function".
@@ -308,19 +387,19 @@ fn binop_check(sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
   rr := type_confident(sy, r)
   if confident(lt) == false || confident(rr) == false rt 0
   if is_cmp_op(op) {
-    if incompatible(sy, lt, rr) { report_at(src, pos, "type mismatch: comparing " + lt + " and " + rr) }
+    if incompatible(sy, lt, rr) { report_chk(sy, src, pos, "type mismatch: comparing " + lt + " and " + rr) }
     rt 0
   }
   if op == OP_ADD() {
     bothstr := lt == "str" && rr == "str"           // str + str is concat — fine
     if bothstr == false && (bad_in_arith(lt) || bad_in_arith(rr)) {
-      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+      report_chk(sy, src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
     }
     rt 0
   }
   if arith_or_bit_nonadd(op) {
     if bad_in_arith(lt) || bad_in_arith(rr) {
-      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+      report_chk(sy, src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
     }
   }
   0
@@ -332,7 +411,7 @@ fn callarg_check(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:st
   if len(funcs[fi].tparams) > 0 rt 0                 // belt-and-braces: never a generic
   np := len(funcs[fi].params)                        // params is authoritative (untyped params still counted)
   if len(args) != np {
-    report_at(src, pos, "function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+    report_chk(sy, src, pos, "function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
     rt 0
   }
   pts := funcs[fi].ptypes
@@ -341,7 +420,7 @@ fn callarg_check(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:st
     if i < len(pts) {
       at := type_confident(sy, args[i])
       if confident(at) && incompatible(sy, pts[i], at) {
-        report_at(src, pos, "type mismatch: argument " + int_to_str(i + 1) + " to '" + fname + "' expects " + pts[i] + ", got " + at)
+        report_chk(sy, src, pos, "type mismatch: argument " + int_to_str(i + 1) + " to '" + fname + "' expects " + pts[i] + ", got " + at)
       }
     }
     i += 1
@@ -355,11 +434,13 @@ fn field_check(sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
   sty := under_ptr(ot)
   if is_ctor(sy, sty) {                              // a known struct/class (incl. flattened inherited fields)
     if has(sy.fld, fkey(sty, fname)) == false {
-      report_at(src, pos, "unknown field '." + fname + "' on " + sty)
+      fsug := nearest(fname, struct_fields(sy, sty))
+      fhint := if fsug == "" { "" } el { " — did you mean '." + fsug + "'?" }   // dotted, matching field syntax
+      report_chk(sy, src, pos, "unknown field '." + fname + "' on " + sty + fhint)
     }
     rt 0
   }
-  report_at(src, pos, "type error: field '." + fname + "' on non-struct value of type " + ot)
+  report_chk(sy, src, pos, "type error: field '." + fname + "' on non-struct value of type " + ot)
   0
 }
 fn index_check(sy:*Syms, obj:Expr, pos:i64, src:str) -> i64 {
@@ -370,7 +451,7 @@ fn index_check(sy:*Syms, obj:Expr, pos:i64, src:str) -> i64 {
   if is_map_ann(t) rt 0
   if t == "str" rt 0
   if t == "bytes" rt 0
-  report_at(src, pos, "type error: cannot index value of type " + t)
+  report_chk(sy, src, pos, "type error: cannot index value of type " + t)
   0
 }
 
@@ -393,7 +474,7 @@ fn chk_kv(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64
 // fns or the implicit main). Valid `?` code always has @ret, so no false positive.
 fn chk_try(funcs:[Func], sy:*Syms, x:Expr, pos:i64, src:str) -> i64 {
   if pos >= 0 && has(sy.vty, "@ret") == false {
-    report_at(src, pos, "'?' used outside a function returning !T")
+    report_chk(sy, src, pos, "'?' used outside a function returning !T")
   }
   check_expr(funcs, sy, x, pos, src)
   0
@@ -408,7 +489,7 @@ fn homog_check(sy:*Syms, elems:[Expr], msg:str, pos:i64, src:str) -> i64 {
   lp i < len(elems) {
     t := type_confident(sy, elems[i])
     if confident(t) {
-      if base == "?" { base = t } el if cat_incompatible(base, t) { report_at(src, pos, msg + " " + base + " and " + t) }
+      if base == "?" { base = t } el if cat_incompatible(base, t) { report_chk(sy, src, pos, msg + " " + base + " and " + t) }
     }
     i += 1
   }
@@ -454,7 +535,7 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   ty := type_confident(sy, scrut)
   if confident(ty) == false rt 0                       // unknown scrutinee → skip
   if has(sy.evar, "@order." + ty) == false {           // confident, but not an enum
-    report_at(src, pos, "type error: match on non-enum value of type " + ty)
+    report_chk(sy, src, pos, "type error: match on non-enum value of type " + ty)
     rt 0
   }
   // (1) per arm: a `_` catch-all is always valid; otherwise the arm must be a
@@ -467,13 +548,13 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
     nm := vnames[i]
     if nm != "_" {
       if is_variant(sy, nm) == false || sy.evar[nm] != ty {
-        report_at(src, pos, "unknown variant '" + nm + "' in match on " + ty)
+        report_chk(sy, src, pos, "unknown variant '" + nm + "' in match on " + ty + suggest(nm, split_semi(sy.evar["@order." + ty])))
       }
       nb := len(split_semi(vbinds[i]))
       if has(sy.evar, "@vfldn." + nm) {
         nf := str_to_int(sy.evar["@vfldn." + nm])
         if nb > nf {
-          report_at(src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
+          report_chk(sy, src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
         }
       }
     }
@@ -487,7 +568,7 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
   mu j := 0
   lp j < len(all) {
     if vn_has_ug(vnames, guards, all[j]) == false {
-      report_at(src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
+      report_chk(sy, src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
     }
     j += 1
   }
@@ -516,7 +597,7 @@ fn type_nest_temps(sy:*Syms, vnames:[str], vbinds:[str], pos:i64, src:str) -> i6
           if has(sy.evar, "@order." + ty) {
             set_ty(sy, bs[j], ty)                    // known enum → type the temp so the inner match checks
           } el {
-            report_at(src, pos, "cannot destructure non-enum field of type " + ty + " with a nested pattern")
+            report_chk(sy, src, pos, "cannot destructure non-enum field of type " + ty + " with a nested pattern")
           }
         }
       }
@@ -564,7 +645,7 @@ fn lambda_arity(e:Expr) -> i64 {
 // `map`/`filter` take a 1-param callback, `reduce` a 2-param one. Fires only when
 // an arg is confidently a lambda literal of the wrong arity, so it never touches
 // the collection/init args or a callback passed by name (those stay "?").
-fn hof_arity_check(fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+fn hof_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
   mu want := -1
   if fname == "map" || fname == "filter" { want = 1 }
@@ -574,7 +655,7 @@ fn hof_arity_check(fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   lp i < len(args) {
     np := lambda_arity(args[i])
     if np >= 0 && np != want {
-      report_at(src, pos, "'" + fname + "' callback takes " + int_to_str(want) + " parameter(s), got " + int_to_str(np))
+      report_chk(sy, src, pos, "'" + fname + "' callback takes " + int_to_str(want) + " parameter(s), got " + int_to_str(np))
     }
     i += 1
   }
@@ -591,7 +672,7 @@ fn generic_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i6
     if sy.gfns[gi].name == fname {
       np := len(sy.gfns[gi].params)
       if len(args) != np {
-        report_at(src, pos, "generic function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+        report_chk(sy, src, pos, "generic function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
       }
       rt 0
     }
@@ -612,7 +693,7 @@ fn ok_ret_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   want := sy.vty["@ret"]
   got := type_confident(sy, args[0])
   if confident(want) && confident(got) && incompatible(sy, want, got) {
-    report_at(src, pos, "type mismatch: ok(" + got + ") but function returns !" + want)
+    report_chk(sy, src, pos, "type mismatch: ok(" + got + ") but function returns !" + want)
   }
   0
 }
@@ -620,7 +701,7 @@ fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) ->
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
-  hof_arity_check(fname, args, pos, src)
+  hof_arity_check(sy, fname, args, pos, src)
   generic_arity_check(sy, fname, args, pos, src)
   ok_ret_check(sy, fname, args, pos, src)
   chk_args(funcs, sy, args, pos, src); 0
@@ -661,7 +742,7 @@ fn chk_assign(funcs:[Func], sy:*Syms, name:str, e:Expr, pos:i64, src:str) -> i64
     lt := tcon_var(sy, name)
     rr := type_confident(sy, e)
     if confident(lt) && confident(rr) && incompatible(sy, lt, rr) {
-      report_at(src, pos, "type mismatch: cannot assign " + rr + " to '" + name + "' of type " + lt)
+      report_chk(sy, src, pos, "type mismatch: cannot assign " + rr + " to '" + name + "' of type " + lt)
     }
   }
   check_expr(funcs, sy, e, pos, src)
@@ -676,7 +757,7 @@ fn chk_return(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
       want := sy.vty["@chkret"]
       got := type_confident(sy, e)
       if confident(got) && incompatible(sy, want, got) {
-        report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+        report_chk(sy, src, pos, "type mismatch: returning " + got + " but function returns " + want)
       }
     }
   }
@@ -691,7 +772,7 @@ fn chk_field_assign(funcs:[Func], sy:*Syms, obj:Expr, fnm:str, e:Expr, pos:i64, 
     slot := tcon_field(sy, obj, fnm)
     val := type_confident(sy, e)
     if confident(slot) && confident(val) && incompatible(sy, slot, val) {
-      report_at(src, pos, "type mismatch: cannot assign " + val + " to field '." + fnm + "' of type " + slot)
+      report_chk(sy, src, pos, "type mismatch: cannot assign " + val + " to field '." + fnm + "' of type " + slot)
     }
   }
   check_expr(funcs, sy, obj, pos, src)
@@ -712,7 +793,7 @@ fn chk_idx_assign(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, e:Expr, pos:i64, s
     slot := idx_slot_type(sy, obj)
     val := type_confident(sy, e)
     if confident(slot) && confident(val) && incompatible(sy, slot, val) {
-      report_at(src, pos, "type mismatch: cannot assign " + val + " to element of type " + slot)
+      report_chk(sy, src, pos, "type mismatch: cannot assign " + val + " to element of type " + slot)
     }
   }
   check_expr(funcs, sy, obj, pos, src)
@@ -729,7 +810,7 @@ fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   if has(sy.evar, "@fldn." + fname) == false rt 0
   n := str_to_int(sy.evar["@fldn." + fname])
   if len(args) != n {
-    report_at(src, pos, "constructor '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
+    report_chk(sy, src, pos, "constructor '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
     rt 0
   }
   mu i := 0
@@ -739,7 +820,7 @@ fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
       want := sy.evar[k]
       got := type_confident(sy, args[i])
       if confident(want) && confident(got) && incompatible(sy, want, got) {
-        report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of '" + fname + "' expects " + want + ", got " + got)
+        report_chk(sy, src, pos, "type mismatch: field " + int_to_str(i + 1) + " of '" + fname + "' expects " + want + ", got " + got)
       }
     }
     i += 1
@@ -755,7 +836,7 @@ fn variant_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 
   if has(sy.evar, "@vfldn." + fname) == false rt 0
   n := str_to_int(sy.evar["@vfldn." + fname])
   if len(args) != n {
-    report_at(src, pos, "variant '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
+    report_chk(sy, src, pos, "variant '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
     rt 0
   }
   mu i := 0
@@ -765,7 +846,7 @@ fn variant_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 
       want := sy.evar[k]
       got := type_confident(sy, args[i])
       if confident(want) && confident(got) && cat_incompatible(want, got) {
-        report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of variant '" + fname + "' expects " + want + ", got " + got)
+        report_chk(sy, src, pos, "type mismatch: field " + int_to_str(i + 1) + " of variant '" + fname + "' expects " + want + ", got " + got)
       }
     }
     i += 1
@@ -779,7 +860,7 @@ fn check_tail_expr(sy:*Syms, e:Expr, pos:i64, want:str, src:str) -> i64 {
   if pos < 0 rt 0
   got := type_confident(sy, e)
   if confident(got) && incompatible(sy, want, got) {
-    report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+    report_chk(sy, src, pos, "type mismatch: returning " + got + " but function returns " + want)
   }
   0
 }
@@ -861,9 +942,9 @@ fn check_fn(funcs:[Func], base:*Syms, f:Func, src:str) -> i64 {
 fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
   mu i := 0
   lp i < len(funcs) { check_fn(funcs, base, funcs[i], src); i += 1 }
-  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   mm := stamp_empty_maps(&msy, mains)               // infer un-annotated `m := {}` (mirror codegen 1159)
-  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)   // re-seed fresh — discard inference scratch (codegen 1160)
+  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)   // re-seed fresh — discard inference scratch (codegen 1160)
   mhd := hoist_decls(&msy, mm, "    ")
   check_stmts(funcs, &msy, mm, src)
   0
@@ -923,7 +1004,7 @@ fn compile_to_c(src:str, dir:str) -> str {
 
   // Build the shared type context: struct ctors + field-type map + enum tables.
   mu nolams:[Func] := []
-  mu base := Syms({}, {}, {}, {}, {}, {}, gfuncs, nolams)
+  mu base := Syms({}, {}, {}, {}, {}, {}, gfuncs, nolams, {})
   // Lower classes (B1: data struct + statically-dispatched methods). Each class
   // → a StructDef (so the struct registration below + all the struct codegen —
   // ctor, printer, arr_/map_/res_ — handle it for free) plus one top-level Func
@@ -1096,7 +1177,7 @@ fn compile_to_c(src:str, dir:str) -> str {
     collect_lams(&base, &csy, funcs[cf].body)
     cf += 1
   }
-  mu csm := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mu csm := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   csm.vty = {}
   cmdecls := hoist_decls(&csm, mains, "    ")
   collect_lams(&base, &csm, mains)
@@ -1104,8 +1185,16 @@ fn compile_to_c(src:str, dir:str) -> str {
   // Type-check pass: report confident type mismatches at the .ail source line,
   // BEFORE any C is emitted. base is fully populated above; conservative + additive
   // (see type_confident/incompatible), so it never rejects code that compiles today
-  // and leaves the generated C byte-identical (fixpoint-safe). report_at exits(1).
+  // and leaves the generated C byte-identical (fixpoint-safe). report_chk records
+  // every error into base.errc (shared map) without exiting, so the whole program
+  // is checked in one run; we bail here if any fired (gating codegen, same as the
+  // old exit-on-first-error — just deferred so all errors print first).
   check_program(funcs, &base, mains, src)
+  if has(base.errc, "bad") {
+    n := str_to_int(base.errc["n"])
+    if n > 1 { println("found " + int_to_str(n) + " errors") }   // summary only for multi-error; single-error output stays byte-identical to before
+    exit(1)
+  }
 
   // Link-flag marker: one comment line listing the libs from `ex "lib"` decls,
   // read back by the driver to append `-l<lib>` to clang. Absent when nothing
@@ -1480,9 +1569,9 @@ fn compile_to_c(src:str, dir:str) -> str {
   }
 
   // main() — capture argv so `args()` can return argv[1..].
-  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   mmains := stamp_empty_maps(&msy, mains)        // infer un-annotated `m := {}`
-  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   mdecls := hoist_decls(&msy, mmains, "    ")
   // A user `fn main()` is a normal function (emitted `f_main`), not a top-level
   // stmt, so it'd never run. Call it after any top-level stmts. Nullary only;

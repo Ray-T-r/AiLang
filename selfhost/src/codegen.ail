@@ -1452,7 +1452,7 @@ fn gen_env_struct(base:*Syms, lf:Func) -> str {
 fn gen_lifted_body(base:*Syms, lf:Func) -> str {
   caps := split_semi(base.evar["@lamcaps." + lf.name])
   capt := split_semi(base.evar["@lamcapt." + lf.name])
-  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   sy.vty = {}
   mu pj := 0
   lp pj < len(lf.params) {
@@ -1776,7 +1776,7 @@ fn seed_params(sy:*Syms, f:Func) {
 // hoist here — a second hoist on the same Syms re-declares nothing and would
 // blank the emit loop's declaration string.
 fn seed_fn(base:*Syms, f:Func) -> Syms {
-  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mu sy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
   sy.vty = {}
   seed_params(&sy, f)
   if is_result_ann(f.ret) { set_ty(&sy, "@ret", result_inner(f.ret)) }

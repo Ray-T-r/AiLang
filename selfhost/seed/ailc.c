@@ -274,7 +274,7 @@ struct s_Func { const char* name; arr_str params; arr_str ptypes; const char* re
 struct s_ClassDef { const char* name; const char* parent; arr_str fnames; arr_str ftypes; arr_Func methods; arr_str vflags; };
 struct s_P { arr_Token toks; int64_t pos; const char* src; };
 struct s_Binds { arr_str names; arr_Expr vals; };
-struct s_Syms { map_str_str vty; map_str_str fld; map_str_str ctors; map_str_str frets; map_str_str evar; map_str_str vft; arr_Func gfns; arr_Func lams; };
+struct s_Syms { map_str_str vty; map_str_str fld; map_str_str ctors; map_str_str frets; map_str_str evar; map_str_str vft; arr_Func gfns; arr_Func lams; map_str_str errc; };
 struct s_Expr { int tag; union {
   struct { int64_t f0; } Num;
   struct { const char* f0; } Flt;
@@ -891,7 +891,7 @@ static s_Func mk_Func(const char* name, arr_str params, arr_str ptypes, const ch
 static s_ClassDef mk_ClassDef(const char* name, const char* parent, arr_str fnames, arr_str ftypes, arr_Func methods, arr_str vflags){ s_ClassDef __s; __s.name=name; __s.parent=parent; __s.fnames=fnames; __s.ftypes=ftypes; __s.methods=methods; __s.vflags=vflags; return __s; }
 static s_P mk_P(arr_Token toks, int64_t pos, const char* src){ s_P __s; __s.toks=toks; __s.pos=pos; __s.src=src; return __s; }
 static s_Binds mk_Binds(arr_str names, arr_Expr vals){ s_Binds __s; __s.names=names; __s.vals=vals; return __s; }
-static s_Syms mk_Syms(map_str_str vty, map_str_str fld, map_str_str ctors, map_str_str frets, map_str_str evar, map_str_str vft, arr_Func gfns, arr_Func lams){ s_Syms __s; __s.vty=vty; __s.fld=fld; __s.ctors=ctors; __s.frets=frets; __s.evar=evar; __s.vft=vft; __s.gfns=gfns; __s.lams=lams; return __s; }
+static s_Syms mk_Syms(map_str_str vty, map_str_str fld, map_str_str ctors, map_str_str frets, map_str_str evar, map_str_str vft, arr_Func gfns, arr_Func lams, map_str_str errc){ s_Syms __s; __s.vty=vty; __s.fld=fld; __s.ctors=ctors; __s.frets=frets; __s.evar=evar; __s.vft=vft; __s.gfns=gfns; __s.lams=lams; __s.errc=errc; return __s; }
 static void print_Token(s_Token v){ printf("Token{"); printf("kind: "); printf("%lld", (long long)(v.kind)); printf(", "); printf("text: "); printf("%s", v.text); printf(", "); printf("pos: "); printf("%lld", (long long)(v.pos)); printf("}"); }
 static void print_StructDef(s_StructDef v){ printf("StructDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf("}"); }
 static void print_EnumDef(s_EnumDef v){ printf("EnumDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("vnames: "); printf("?"); printf(", "); printf("vftypes: "); printf("?"); printf("}"); }
@@ -899,7 +899,7 @@ static void print_Func(s_Func v){ printf("Func{"); printf("name: "); printf("%s"
 static void print_ClassDef(s_ClassDef v){ printf("ClassDef{"); printf("name: "); printf("%s", v.name); printf(", "); printf("parent: "); printf("%s", v.parent); printf(", "); printf("fnames: "); printf("?"); printf(", "); printf("ftypes: "); printf("?"); printf(", "); printf("methods: "); printf("?"); printf(", "); printf("vflags: "); printf("?"); printf("}"); }
 static void print_P(s_P v){ printf("P{"); printf("toks: "); printf("?"); printf(", "); printf("pos: "); printf("%lld", (long long)(v.pos)); printf(", "); printf("src: "); printf("%s", v.src); printf("}"); }
 static void print_Binds(s_Binds v){ printf("Binds{"); printf("names: "); printf("?"); printf(", "); printf("vals: "); printf("?"); printf("}"); }
-static void print_Syms(s_Syms v){ printf("Syms{"); printf("vty: "); printf("?"); printf(", "); printf("fld: "); printf("?"); printf(", "); printf("ctors: "); printf("?"); printf(", "); printf("frets: "); printf("?"); printf(", "); printf("evar: "); printf("?"); printf(", "); printf("vft: "); printf("?"); printf(", "); printf("gfns: "); printf("?"); printf(", "); printf("lams: "); printf("?"); printf("}"); }
+static void print_Syms(s_Syms v){ printf("Syms{"); printf("vty: "); printf("?"); printf(", "); printf("fld: "); printf("?"); printf(", "); printf("ctors: "); printf("?"); printf(", "); printf("frets: "); printf("?"); printf(", "); printf("evar: "); printf("?"); printf(", "); printf("vft: "); printf("?"); printf(", "); printf("gfns: "); printf("?"); printf(", "); printf("lams: "); printf("?"); printf(", "); printf("errc: "); printf("?"); printf("}"); }
 static s_Expr mkv_Num(int64_t f0){ s_Expr v; v.tag=0; v.u.Num.f0=f0; return v; }
 static s_Expr mkv_Flt(const char* f0){ s_Expr v; v.tag=1; v.u.Flt.f0=f0; return v; }
 static s_Expr mkv_Str(const char* f0){ s_Expr v; v.tag=2; v.u.Str.f0=f0; return v; }
@@ -1013,6 +1013,7 @@ int64_t f_ckind(s_P* v_p);
 const char* f_ctext(s_P* v_p);
 void f_adv(s_P* v_p);
 const char* f_tok_name(int64_t v_k);
+void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_eat(s_P* v_p, int64_t v_k);
 int64_t f_cmp_op(int64_t v_k);
@@ -1289,6 +1290,13 @@ int64_t f_seed_one(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 int64_t f_seed_decl_s(s_Syms* v_sy, s_Stmt v_s);
 arr_Stmt f_stamp_empty_maps(s_Syms* v_sy, arr_Stmt v_body);
 int64_t f_slot_has(const char* v_slots, const char* v_m);
+int64_t f_report_chk(s_Syms* v_sy, const char* v_src, int64_t v_pos, const char* v_msg);
+int64_t f_min2(int64_t v_a, int64_t v_b);
+int64_t f_min3(int64_t v_a, int64_t v_b, int64_t v_c);
+int64_t f_edit_dist(const char* v_a, const char* v_b);
+const char* f_nearest(const char* v_target, arr_str v_cands);
+const char* f_suggest(const char* v_target, arr_str v_cands);
+arr_str f_struct_fields(s_Syms* v_sy, const char* v_sty);
 int64_t f_find_func_i(arr_Func v_funcs, const char* v_name);
 int64_t f_bad_in_arith(const char* v_t);
 int64_t f_arith_or_bit_nonadd(int64_t v_op);
@@ -1312,7 +1320,7 @@ int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int6
 int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, arr_Expr v_guards, int64_t v_pos, const char* v_src);
 int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_lambda_arity(s_Expr v_e);
-int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_hof_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
@@ -1941,7 +1949,7 @@ const char* f_tok_name(int64_t v_k) {
     return "the expected token";
 }
 
-void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg) {
+void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg) {
     int64_t v_line;
     int64_t v_lstart;
     int64_t v_i;
@@ -1974,6 +1982,10 @@ void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg) {
         v_k = (v_k + 1);
     }
     printf("%s\n", scat(v_caret, "^"));
+}
+
+void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg) {
+    f_print_diag(v_src, v_pos, v_msg);
     exit((int)(1));
 }
 
@@ -6234,7 +6246,7 @@ const char* f_gen_lifted_body(s_Syms* v_base, s_Func v_lf) {
     int64_t v_uk;
     v_caps = f_split_semi(map_str_str_get((v_base)->evar, scat("@lamcaps.", (v_lf).name)));
     v_capt = f_split_semi(map_str_str_get((v_base)->evar, scat("@lamcapt.", (v_lf).name)));
-    v_sy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_sy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams, (v_base)->errc);
     (v_sy).vty = map_str_str_new();
     v_pj = 0;
     while ((v_pj < arr_str_len((v_lf).params))) {
@@ -6610,7 +6622,7 @@ void f_seed_params(s_Syms* v_sy, s_Func v_f) {
 
 s_Syms f_seed_fn(s_Syms* v_base, s_Func v_f) {
     s_Syms v_sy;
-    v_sy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_sy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams, (v_base)->errc);
     (v_sy).vty = map_str_str_new();
     f_seed_params((&v_sy), v_f);
     if (f_is_result_ann((v_f).ret)) {
@@ -6995,6 +7007,121 @@ int64_t f_slot_has(const char* v_slots, const char* v_m) {
     return (1 != 1);
 }
 
+int64_t f_report_chk(s_Syms* v_sy, const char* v_src, int64_t v_pos, const char* v_msg) {
+    int64_t v_n;
+    f_print_diag(v_src, v_pos, v_msg);
+    map_str_str_set((v_sy)->errc, "bad", "1");
+    v_n = 0;
+    if (map_str_str_has((v_sy)->errc, "n")) {
+        v_n = s2i(map_str_str_get((v_sy)->errc, "n"));
+    }
+    map_str_str_set((v_sy)->errc, "n", i2s((v_n + 1)));
+    return 0;
+}
+
+int64_t f_min2(int64_t v_a, int64_t v_b) {
+    if ((v_a < v_b)) {
+        return v_a;
+    } else {
+        return v_b;
+    }
+}
+
+int64_t f_min3(int64_t v_a, int64_t v_b, int64_t v_c) {
+    return f_min2(f_min2(v_a, v_b), v_c);
+}
+
+int64_t f_edit_dist(const char* v_a, const char* v_b) {
+    int64_t v_la;
+    int64_t v_lb;
+    arr_i64 v_prev;
+    int64_t v_j;
+    int64_t v_i;
+    arr_i64 v_cur;
+    int64_t v_k;
+    int64_t v_cost;
+    v_la = ((int64_t)strlen(v_a));
+    v_lb = ((int64_t)strlen(v_b));
+    if ((v_la == 0)) {
+        return v_lb;
+    }
+    if ((v_lb == 0)) {
+        return v_la;
+    }
+    v_prev = ({ arr_i64 __a = arr_i64_new(); __a; });
+    v_j = 0;
+    while ((v_j <= v_lb)) {
+        v_prev = arr_i64_push(v_prev, v_j);
+        v_j = (v_j + 1);
+    }
+    v_i = 0;
+    while ((v_i < v_la)) {
+        v_cur = ({ arr_i64 __a = arr_i64_new(); __a; });
+        v_cur = arr_i64_push(v_cur, (v_i + 1));
+        v_k = 0;
+        while ((v_k < v_lb)) {
+            v_cost = ({ int64_t __r; if ((((int64_t)(unsigned char)(v_a)[v_i]) == ((int64_t)(unsigned char)(v_b)[v_k]))) { __r = 0; } else { __r = 1; } __r; });
+            v_cur = arr_i64_push(v_cur, f_min3((arr_i64_get(v_prev, (v_k + 1)) + 1), (arr_i64_get(v_cur, v_k) + 1), (arr_i64_get(v_prev, v_k) + v_cost)));
+            v_k = (v_k + 1);
+        }
+        v_prev = v_cur;
+        v_i = (v_i + 1);
+    }
+    return arr_i64_get(v_prev, v_lb);
+}
+
+const char* f_nearest(const char* v_target, arr_str v_cands) {
+    const char* v_best;
+    int64_t v_bestd;
+    int64_t v_i;
+    int64_t v_d;
+    int64_t v_thresh;
+    v_best = "";
+    v_bestd = 1000000;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_cands))) {
+        if ((((int64_t)strlen(arr_str_get(v_cands, v_i))) > 0)) {
+            v_d = f_edit_dist(v_target, arr_str_get(v_cands, v_i));
+            if ((v_d < v_bestd)) {
+                v_bestd = v_d;
+                v_best = arr_str_get(v_cands, v_i);
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    v_thresh = (1 + (((int64_t)strlen(v_target)) / 4));
+    if (((strcmp(v_best, "") != 0) && (v_bestd <= v_thresh))) {
+        return v_best;
+    }
+    return "";
+}
+
+const char* f_suggest(const char* v_target, arr_str v_cands) {
+    const char* v_s;
+    v_s = f_nearest(v_target, v_cands);
+    if ((strcmp(v_s, "") == 0)) {
+        return "";
+    }
+    return scat(scat(" — did you mean '", v_s), "'?");
+}
+
+arr_str f_struct_fields(s_Syms* v_sy, const char* v_sty) {
+    arr_str v_out;
+    const char* v_pfx;
+    v_out = ({ arr_str __a = arr_str_new(); __a; });
+    v_pfx = scat(v_sty, ".");
+    { map_str_str __m_k = (v_sy)->fld;
+    for (int64_t __n_k = 0; __n_k < __m_k->cap; __n_k += 1) {
+        if (!__m_k->occupied[__n_k]) continue;
+        const char* v_k = __m_k->keys[__n_k];
+        const char* v_v = __m_k->values[__n_k];
+        if (((((int64_t)strlen(v_k)) >= ((int64_t)strlen(v_pfx))) && (strcmp(substr(v_k, 0, ((int64_t)strlen(v_pfx))), v_pfx) == 0))) {
+            v_out = arr_str_push(v_out, substr(v_k, ((int64_t)strlen(v_pfx)), ((int64_t)strlen(v_k))));
+        }
+    } }
+    return v_out;
+}
+
 int64_t f_find_func_i(arr_Func v_funcs, const char* v_name) {
     int64_t v_i;
     v_i = 0;
@@ -7035,20 +7162,20 @@ int64_t f_binop_check(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_
     }
     if (f_is_cmp_op(v_op)) {
         if (f_incompatible(v_sy, v_lt, v_rr)) {
-            f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: comparing ", v_lt), " and "), v_rr));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type mismatch: comparing ", v_lt), " and "), v_rr));
         }
         return 0;
     }
     if ((v_op == f_OP_ADD())) {
         v_bothstr = ((strcmp(v_lt, "str") == 0) && (strcmp(v_rr, "str") == 0));
         if (((v_bothstr == (1 != 1)) && (f_bad_in_arith(v_lt) || f_bad_in_arith(v_rr)))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: operator", f_op_c(v_op)), "on "), v_lt), " and "), v_rr));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: operator", f_op_c(v_op)), "on "), v_lt), " and "), v_rr));
         }
         return 0;
     }
     if (f_arith_or_bit_nonadd(v_op)) {
         if ((f_bad_in_arith(v_lt) || f_bad_in_arith(v_rr))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: operator", f_op_c(v_op)), "on "), v_lt), " and "), v_rr));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: operator", f_op_c(v_op)), "on "), v_lt), " and "), v_rr));
         }
     }
     return 0;
@@ -7072,7 +7199,7 @@ int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr
     }
     v_np = arr_str_len((arr_Func_get(v_funcs, v_fi)).params);
     if ((arr_Expr_len(v_args) != v_np)) {
-        f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
+        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
         return 0;
     }
     v_pts = (arr_Func_get(v_funcs, v_fi)).ptypes;
@@ -7081,7 +7208,7 @@ int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr
         if ((v_i < arr_str_len(v_pts))) {
             v_at = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
             if ((f_confident(v_at) && f_incompatible(v_sy, arr_str_get(v_pts, v_i), v_at))) {
-                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: argument ", i2s((v_i + 1))), " to '"), v_fname), "' expects "), arr_str_get(v_pts, v_i)), ", got "), v_at));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: argument ", i2s((v_i + 1))), " to '"), v_fname), "' expects "), arr_str_get(v_pts, v_i)), ", got "), v_at));
             }
         }
         v_i = (v_i + 1);
@@ -7092,6 +7219,8 @@ int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr
 int64_t f_field_check(s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src) {
     const char* v_ot;
     const char* v_sty;
+    const char* v_fsug;
+    const char* v_fhint;
     if ((v_pos < 0)) {
         return 0;
     }
@@ -7102,11 +7231,13 @@ int64_t f_field_check(s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v
     v_sty = f_under_ptr(v_ot);
     if (f_is_ctor(v_sy, v_sty)) {
         if ((map_str_str_has((v_sy)->fld, f_fkey(v_sty, v_fname)) == (1 != 1))) {
-            f_report_at(v_src, v_pos, scat(scat(scat("unknown field '.", v_fname), "' on "), v_sty));
+            v_fsug = f_nearest(v_fname, f_struct_fields(v_sy, v_sty));
+            v_fhint = ({ const char* __r; if ((strcmp(v_fsug, "") == 0)) { __r = ""; } else { __r = scat(scat(" — did you mean '.", v_fsug), "'?"); } __r; });
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("unknown field '.", v_fname), "' on "), v_sty), v_fhint));
         }
         return 0;
     }
-    f_report_at(v_src, v_pos, scat(scat(scat("type error: field '.", v_fname), "' on non-struct value of type "), v_ot));
+    f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type error: field '.", v_fname), "' on non-struct value of type "), v_ot));
     return 0;
 }
 
@@ -7131,7 +7262,7 @@ int64_t f_index_check(s_Syms* v_sy, s_Expr v_obj, int64_t v_pos, const char* v_s
     if ((strcmp(v_t, "bytes") == 0)) {
         return 0;
     }
-    f_report_at(v_src, v_pos, scat("type error: cannot index value of type ", v_t));
+    f_report_chk(v_sy, v_src, v_pos, scat("type error: cannot index value of type ", v_t));
     return 0;
 }
 
@@ -7166,7 +7297,7 @@ int64_t f_chk_kv(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, i
 
 int64_t f_chk_try(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_x, int64_t v_pos, const char* v_src) {
     if (((v_pos >= 0) && (map_str_str_has((v_sy)->vty, "@ret") == (1 != 1)))) {
-        f_report_at(v_src, v_pos, "'?' used outside a function returning !T");
+        f_report_chk(v_sy, v_src, v_pos, "'?' used outside a function returning !T");
     }
     f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src);
     return 0;
@@ -7188,7 +7319,7 @@ int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t
                 v_base = v_t;
             } else {
                 if (f_cat_incompatible(v_base, v_t)) {
-                    f_report_at(v_src, v_pos, scat(scat(scat(scat(v_msg, " "), v_base), " and "), v_t));
+                    f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(v_msg, " "), v_base), " and "), v_t));
                 }
             }
         }
@@ -7251,7 +7382,7 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
         return 0;
     }
     if ((map_str_str_has((v_sy)->evar, scat("@order.", v_ty)) == (1 != 1))) {
-        f_report_at(v_src, v_pos, scat("type error: match on non-enum value of type ", v_ty));
+        f_report_chk(v_sy, v_src, v_pos, scat("type error: match on non-enum value of type ", v_ty));
         return 0;
     }
     v_i = 0;
@@ -7259,13 +7390,13 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
         v_nm = arr_str_get(v_vnames, v_i);
         if ((strcmp(v_nm, "_") != 0)) {
             if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
-                f_report_at(v_src, v_pos, scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty), f_suggest(v_nm, f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty))))));
             }
             v_nb = arr_str_len(f_split_semi(arr_str_get(v_vbinds, v_i)));
             if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_nm))) {
                 v_nf = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_nm)));
                 if ((v_nb > v_nf)) {
-                    f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat("variant '", v_nm), "' binds "), i2s(v_nb)), " but has "), i2s(v_nf)), " field(s)"));
+                    f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat("variant '", v_nm), "' binds "), i2s(v_nb)), " but has "), i2s(v_nf)), " field(s)"));
                 }
             }
         }
@@ -7278,7 +7409,7 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
     v_j = 0;
     while ((v_j < arr_str_len(v_all))) {
         if ((f_vn_has_ug(v_vnames, v_guards, arr_str_get(v_all, v_j)) == (1 != 1))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), arr_str_get(v_all, v_j)), "'"));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), arr_str_get(v_all, v_j)), "'"));
         }
         v_j = (v_j + 1);
     }
@@ -7310,7 +7441,7 @@ int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int6
                     if (map_str_str_has((v_sy)->evar, scat("@order.", v_ty))) {
                         f_set_ty(v_sy, arr_str_get(v_bs, v_j), v_ty);
                     } else {
-                        f_report_at(v_src, v_pos, scat(scat("cannot destructure non-enum field of type ", v_ty), " with a nested pattern"));
+                        f_report_chk(v_sy, v_src, v_pos, scat(scat("cannot destructure non-enum field of type ", v_ty), " with a nested pattern"));
                     }
                 }
             }
@@ -7341,7 +7472,7 @@ int64_t f_lambda_arity(s_Expr v_e) {
     return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = arr_str_len(v_ps); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = (0 - 1); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = (0 - 1); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = (0 - 1); } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = (0 - 1); } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b2 = *(__s.u.Bin.f2); __m = (0 - 1); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = (0 - 1); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = (0 - 1); } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = (0 - 1); } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = (0 - 1); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = (0 - 1); } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = (0 - 1); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = (0 - 1); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = (0 - 1); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = (0 - 1); } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = (0 - 1); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = (0 - 1); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = (0 - 1); } else if(__s.tag==18){ __m = (0 - 1); } __m; });
 }
 
-int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+int64_t f_hof_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     int64_t v_want;
     int64_t v_i;
     int64_t v_np;
@@ -7362,7 +7493,7 @@ int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, c
     while ((v_i < arr_Expr_len(v_args))) {
         v_np = f_lambda_arity(arr_Expr_get(v_args, v_i));
         if (((v_np >= 0) && (v_np != v_want))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("'", v_fname), "' callback takes "), i2s(v_want)), " parameter(s), got "), i2s(v_np)));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("'", v_fname), "' callback takes "), i2s(v_want)), " parameter(s), got "), i2s(v_np)));
         }
         v_i = (v_i + 1);
     }
@@ -7380,7 +7511,7 @@ int64_t f_generic_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args
         if ((strcmp((arr_Func_get((v_sy)->gfns, v_gi)).name, v_fname) == 0)) {
             v_np = arr_str_len((arr_Func_get((v_sy)->gfns, v_gi)).params);
             if ((arr_Expr_len(v_args) != v_np)) {
-                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("generic function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("generic function '", v_fname), "' expects "), i2s(v_np)), " arguments, got "), i2s(arr_Expr_len(v_args))));
             }
             return 0;
         }
@@ -7407,7 +7538,7 @@ int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64
     v_want = map_str_str_get((v_sy)->vty, "@ret");
     v_got = f_type_confident(v_sy, arr_Expr_get(v_args, 0));
     if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_sy, v_want, v_got))) {
-        f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: ok(", v_got), ") but function returns !"), v_want));
+        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type mismatch: ok(", v_got), ") but function returns !"), v_want));
     }
     return 0;
 }
@@ -7416,7 +7547,7 @@ int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
-    f_hof_arity_check(v_fname, v_args, v_pos, v_src);
+    f_hof_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_generic_arity_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_ok_ret_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_args, v_pos, v_src);
@@ -7447,7 +7578,7 @@ int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr 
         v_lt = f_tcon_var(v_sy, v_name);
         v_rr = f_type_confident(v_sy, v_e);
         if (((f_confident(v_lt) && f_confident(v_rr)) && f_incompatible(v_sy, v_lt, v_rr))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_rr), " to '"), v_name), "' of type "), v_lt));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_rr), " to '"), v_name), "' of type "), v_lt));
         }
     }
     f_check_expr(v_funcs, v_sy, v_e, v_pos, v_src);
@@ -7462,7 +7593,7 @@ int64_t f_chk_return(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, 
             v_want = map_str_str_get((v_sy)->vty, "@chkret");
             v_got = f_type_confident(v_sy, v_e);
             if ((f_confident(v_got) && f_incompatible(v_sy, v_want, v_got))) {
-                f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
             }
         }
     }
@@ -7478,7 +7609,7 @@ int64_t f_chk_field_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const c
         v_slot = f_tcon_field(v_sy, v_obj, v_fnm);
         v_val = f_type_confident(v_sy, v_e);
         if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_sy, v_slot, v_val))) {
-            f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_val), " to field '."), v_fnm), "' of type "), v_slot));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("type mismatch: cannot assign ", v_val), " to field '."), v_fnm), "' of type "), v_slot));
         }
     }
     f_check_expr(v_funcs, v_sy, v_obj, v_pos, v_src);
@@ -7506,7 +7637,7 @@ int64_t f_chk_idx_assign(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_
         v_slot = f_idx_slot_type(v_sy, v_obj);
         v_val = f_type_confident(v_sy, v_e);
         if (((f_confident(v_slot) && f_confident(v_val)) && f_incompatible(v_sy, v_slot, v_val))) {
-            f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: cannot assign ", v_val), " to element of type "), v_slot));
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type mismatch: cannot assign ", v_val), " to element of type "), v_slot));
         }
     }
     f_check_expr(v_funcs, v_sy, v_obj, v_pos, v_src);
@@ -7529,7 +7660,7 @@ int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int
     }
     v_n = s2i(map_str_str_get((v_sy)->evar, scat("@fldn.", v_fname)));
     if ((arr_Expr_len(v_args) != v_n)) {
-        f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("constructor '", v_fname), "' expects "), i2s(v_n)), " fields, got "), i2s(arr_Expr_len(v_args))));
+        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("constructor '", v_fname), "' expects "), i2s(v_n)), " fields, got "), i2s(arr_Expr_len(v_args))));
         return 0;
     }
     v_i = 0;
@@ -7539,7 +7670,7 @@ int64_t f_ctor_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int
             v_want = map_str_str_get((v_sy)->evar, v_k);
             v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
             if (((f_confident(v_want) && f_confident(v_got)) && f_incompatible(v_sy, v_want, v_got))) {
-                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of '"), v_fname), "' expects "), v_want), ", got "), v_got));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of '"), v_fname), "' expects "), v_want), ", got "), v_got));
             }
         }
         v_i = (v_i + 1);
@@ -7561,7 +7692,7 @@ int64_t f_variant_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, 
     }
     v_n = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_fname)));
     if ((arr_Expr_len(v_args) != v_n)) {
-        f_report_at(v_src, v_pos, scat(scat(scat(scat(scat("variant '", v_fname), "' expects "), i2s(v_n)), " fields, got "), i2s(arr_Expr_len(v_args))));
+        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat("variant '", v_fname), "' expects "), i2s(v_n)), " fields, got "), i2s(arr_Expr_len(v_args))));
         return 0;
     }
     v_i = 0;
@@ -7571,7 +7702,7 @@ int64_t f_variant_arg_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, 
             v_want = map_str_str_get((v_sy)->evar, v_k);
             v_got = f_type_confident(v_sy, arr_Expr_get(v_args, v_i));
             if (((f_confident(v_want) && f_confident(v_got)) && f_cat_incompatible(v_want, v_got))) {
-                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of variant '"), v_fname), "' expects "), v_want), ", got "), v_got));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat(scat(scat(scat("type mismatch: field ", i2s((v_i + 1))), " of variant '"), v_fname), "' expects "), v_want), ", got "), v_got));
             }
         }
         v_i = (v_i + 1);
@@ -7586,7 +7717,7 @@ int64_t f_check_tail_expr(s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v
     }
     v_got = f_type_confident(v_sy, v_e);
     if ((f_confident(v_got) && f_incompatible(v_sy, v_want, v_got))) {
-        f_report_at(v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
+        f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("type mismatch: returning ", v_got), " but function returns "), v_want));
     }
     return 0;
 }
@@ -7677,9 +7808,9 @@ int64_t f_check_program(arr_Func v_funcs, s_Syms* v_base, arr_Stmt v_mains, cons
         f_check_fn(v_funcs, v_base, arr_Func_get(v_funcs, v_i), v_src);
         v_i = (v_i + 1);
     }
-    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams, (v_base)->errc);
     v_mm = f_stamp_empty_maps((&v_msy), v_mains);
-    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams);
+    v_msy = mk_Syms(map_str_str_new(), (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams, (v_base)->errc);
     v_mhd = f_hoist_decls((&v_msy), v_mm, "    ");
     f_check_stmts(v_funcs, (&v_msy), v_mm, v_src);
     return 0;
@@ -7743,6 +7874,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_cdecls;
     s_Syms v_csm;
     const char* v_cmdecls;
+    int64_t v_n;
     const char* v_out;
     int64_t v_lk;
     const char* v_libline;
@@ -7849,7 +7981,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     v_funcs = v_rfuncs;
     v_nolams = ({ arr_Func __a = arr_Func_new(); __a; });
-    v_base = mk_Syms(map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), v_gfuncs, v_nolams);
+    v_base = mk_Syms(map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), map_str_str_new(), v_gfuncs, v_nolams, map_str_str_new());
     v_lci = 0;
     while ((v_lci < arr_ClassDef_len(v_classes))) {
         v_cd = arr_ClassDef_get(v_classes, v_lci);
@@ -8023,11 +8155,18 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         f_collect_lams((&v_base), (&v_csy), (arr_Func_get(v_funcs, v_cf)).body);
         v_cf = (v_cf + 1);
     }
-    v_csm = mk_Syms((v_base).vty, (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams);
+    v_csm = mk_Syms((v_base).vty, (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams, (v_base).errc);
     (v_csm).vty = map_str_str_new();
     v_cmdecls = f_hoist_decls((&v_csm), v_mains, "    ");
     f_collect_lams((&v_base), (&v_csm), v_mains);
     f_check_program(v_funcs, (&v_base), v_mains, v_src);
+    if (map_str_str_has((v_base).errc, "bad")) {
+        v_n = s2i(map_str_str_get((v_base).errc, "n"));
+        if ((v_n > 1)) {
+            printf("%s\n", scat(scat("found ", i2s(v_n)), " errors"));
+        }
+        exit((int)(1));
+    }
     v_out = "";
     v_lk = 0;
     v_libline = "";
@@ -8399,9 +8538,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(scat(scat(scat(scat(v_out, f_gen_sig(v_f, map_str_str_get((v_base).frets, (v_f).name))), " {\n"), v_decls), f_gen_fn_body((&v_sy), v_fb, map_str_str_get((v_base).frets, (v_f).name), "    ")), "}\n\n");
         v_i = (v_i + 1);
     }
-    v_msy = mk_Syms(map_str_str_new(), (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams);
+    v_msy = mk_Syms(map_str_str_new(), (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams, (v_base).errc);
     v_mmains = f_stamp_empty_maps((&v_msy), v_mains);
-    v_msy = mk_Syms(map_str_str_new(), (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams);
+    v_msy = mk_Syms(map_str_str_new(), (v_base).fld, (v_base).ctors, (v_base).frets, (v_base).evar, (v_base).vft, (v_base).gfns, (v_base).lams, (v_base).errc);
     v_mdecls = f_hoist_decls((&v_msy), v_mmains, "    ");
     v_maincall = "";
     v_mk = 0;

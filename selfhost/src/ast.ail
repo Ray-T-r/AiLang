@@ -111,7 +111,9 @@ fn tok_name(k:i64) -> str {
   if k == TK_GT() rt "'>'"
   "the expected token"
 }
-fn report_at(src:str, pos:i64, msg:str) {
+// Print one source-located error (line, source line, caret) — NO exit. Shared by
+// the fatal `report_at` (parser) and the accumulating `report_chk` (checker).
+fn print_diag(src:str, pos:i64, msg:str) {
   mu line := 1
   mu lstart := 0
   mu i := 0
@@ -127,6 +129,11 @@ fn report_at(src:str, pos:i64, msg:str) {
   mu k := lstart
   lp k < pos { caret = caret + " "; k += 1 }
   println(caret + "^")
+}
+// Fatal diagnostic — print then bail. Used by the parser (a broken parse state
+// can't recover) and any other unrecoverable spot.
+fn report_at(src:str, pos:i64, msg:str) {
+  print_diag(src, pos, msg)
   exit(1)
 }
 fn eat(p:*P, k:i64) {
