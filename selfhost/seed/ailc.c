@@ -1291,6 +1291,12 @@ int64_t f_seed_decl_s(s_Syms* v_sy, s_Stmt v_s);
 arr_Stmt f_stamp_empty_maps(s_Syms* v_sy, arr_Stmt v_body);
 int64_t f_slot_has(const char* v_slots, const char* v_m);
 int64_t f_report_chk(s_Syms* v_sy, const char* v_src, int64_t v_pos, const char* v_msg);
+int64_t f_min2(int64_t v_a, int64_t v_b);
+int64_t f_min3(int64_t v_a, int64_t v_b, int64_t v_c);
+int64_t f_edit_dist(const char* v_a, const char* v_b);
+const char* f_nearest(const char* v_target, arr_str v_cands);
+const char* f_suggest(const char* v_target, arr_str v_cands);
+arr_str f_struct_fields(s_Syms* v_sy, const char* v_sty);
 int64_t f_find_func_i(arr_Func v_funcs, const char* v_name);
 int64_t f_bad_in_arith(const char* v_t);
 int64_t f_arith_or_bit_nonadd(int64_t v_op);
@@ -7013,6 +7019,109 @@ int64_t f_report_chk(s_Syms* v_sy, const char* v_src, int64_t v_pos, const char*
     return 0;
 }
 
+int64_t f_min2(int64_t v_a, int64_t v_b) {
+    if ((v_a < v_b)) {
+        return v_a;
+    } else {
+        return v_b;
+    }
+}
+
+int64_t f_min3(int64_t v_a, int64_t v_b, int64_t v_c) {
+    return f_min2(f_min2(v_a, v_b), v_c);
+}
+
+int64_t f_edit_dist(const char* v_a, const char* v_b) {
+    int64_t v_la;
+    int64_t v_lb;
+    arr_i64 v_prev;
+    int64_t v_j;
+    int64_t v_i;
+    arr_i64 v_cur;
+    int64_t v_k;
+    int64_t v_cost;
+    v_la = ((int64_t)strlen(v_a));
+    v_lb = ((int64_t)strlen(v_b));
+    if ((v_la == 0)) {
+        return v_lb;
+    }
+    if ((v_lb == 0)) {
+        return v_la;
+    }
+    v_prev = ({ arr_i64 __a = arr_i64_new(); __a; });
+    v_j = 0;
+    while ((v_j <= v_lb)) {
+        v_prev = arr_i64_push(v_prev, v_j);
+        v_j = (v_j + 1);
+    }
+    v_i = 0;
+    while ((v_i < v_la)) {
+        v_cur = ({ arr_i64 __a = arr_i64_new(); __a; });
+        v_cur = arr_i64_push(v_cur, (v_i + 1));
+        v_k = 0;
+        while ((v_k < v_lb)) {
+            v_cost = ({ int64_t __r; if ((((int64_t)(unsigned char)(v_a)[v_i]) == ((int64_t)(unsigned char)(v_b)[v_k]))) { __r = 0; } else { __r = 1; } __r; });
+            v_cur = arr_i64_push(v_cur, f_min3((arr_i64_get(v_prev, (v_k + 1)) + 1), (arr_i64_get(v_cur, v_k) + 1), (arr_i64_get(v_prev, v_k) + v_cost)));
+            v_k = (v_k + 1);
+        }
+        v_prev = v_cur;
+        v_i = (v_i + 1);
+    }
+    return arr_i64_get(v_prev, v_lb);
+}
+
+const char* f_nearest(const char* v_target, arr_str v_cands) {
+    const char* v_best;
+    int64_t v_bestd;
+    int64_t v_i;
+    int64_t v_d;
+    int64_t v_thresh;
+    v_best = "";
+    v_bestd = 1000000;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_cands))) {
+        if ((((int64_t)strlen(arr_str_get(v_cands, v_i))) > 0)) {
+            v_d = f_edit_dist(v_target, arr_str_get(v_cands, v_i));
+            if ((v_d < v_bestd)) {
+                v_bestd = v_d;
+                v_best = arr_str_get(v_cands, v_i);
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    v_thresh = (1 + (((int64_t)strlen(v_target)) / 4));
+    if (((strcmp(v_best, "") != 0) && (v_bestd <= v_thresh))) {
+        return v_best;
+    }
+    return "";
+}
+
+const char* f_suggest(const char* v_target, arr_str v_cands) {
+    const char* v_s;
+    v_s = f_nearest(v_target, v_cands);
+    if ((strcmp(v_s, "") == 0)) {
+        return "";
+    }
+    return scat(scat(" — did you mean '", v_s), "'?");
+}
+
+arr_str f_struct_fields(s_Syms* v_sy, const char* v_sty) {
+    arr_str v_out;
+    const char* v_pfx;
+    v_out = ({ arr_str __a = arr_str_new(); __a; });
+    v_pfx = scat(v_sty, ".");
+    { map_str_str __m_k = (v_sy)->fld;
+    for (int64_t __n_k = 0; __n_k < __m_k->cap; __n_k += 1) {
+        if (!__m_k->occupied[__n_k]) continue;
+        const char* v_k = __m_k->keys[__n_k];
+        const char* v_v = __m_k->values[__n_k];
+        if (((((int64_t)strlen(v_k)) >= ((int64_t)strlen(v_pfx))) && (strcmp(substr(v_k, 0, ((int64_t)strlen(v_pfx))), v_pfx) == 0))) {
+            v_out = arr_str_push(v_out, substr(v_k, ((int64_t)strlen(v_pfx)), ((int64_t)strlen(v_k))));
+        }
+    } }
+    return v_out;
+}
+
 int64_t f_find_func_i(arr_Func v_funcs, const char* v_name) {
     int64_t v_i;
     v_i = 0;
@@ -7110,6 +7219,8 @@ int64_t f_callarg_check(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr
 int64_t f_field_check(s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src) {
     const char* v_ot;
     const char* v_sty;
+    const char* v_fsug;
+    const char* v_fhint;
     if ((v_pos < 0)) {
         return 0;
     }
@@ -7120,7 +7231,9 @@ int64_t f_field_check(s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v
     v_sty = f_under_ptr(v_ot);
     if (f_is_ctor(v_sy, v_sty)) {
         if ((map_str_str_has((v_sy)->fld, f_fkey(v_sty, v_fname)) == (1 != 1))) {
-            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("unknown field '.", v_fname), "' on "), v_sty));
+            v_fsug = f_nearest(v_fname, f_struct_fields(v_sy, v_sty));
+            v_fhint = ({ const char* __r; if ((strcmp(v_fsug, "") == 0)) { __r = ""; } else { __r = scat(scat(" — did you mean '.", v_fsug), "'?"); } __r; });
+            f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("unknown field '.", v_fname), "' on "), v_sty), v_fhint));
         }
         return 0;
     }
@@ -7277,7 +7390,7 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
         v_nm = arr_str_get(v_vnames, v_i);
         if ((strcmp(v_nm, "_") != 0)) {
             if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
-                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty));
+                f_report_chk(v_sy, v_src, v_pos, scat(scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty), f_suggest(v_nm, f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty))))));
             }
             v_nb = arr_str_len(f_split_semi(arr_str_get(v_vbinds, v_i)));
             if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_nm))) {

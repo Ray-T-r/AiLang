@@ -1,0 +1,14 @@
+// EXPECT: did you mean 'Green'
+// "Did you mean?" spelling suggestion: an unknown variant close to a real one
+// (Levenshtein within threshold) suggests the nearest name. All real variants are
+// present here, so the ONLY error is the typo'd `Gren` — with its suggestion.
+en Color { Red, Green, Blue }
+fn pick(c:Color) -> i64 {
+  mt c {
+    Red => 1;
+    Gren => 2;
+    Green => 3;
+    Blue => 4;
+  }
+}
+println(pick(Red))

@@ -297,6 +297,70 @@ fn report_chk(sy:*Syms, src:str, pos:i64, msg:str) -> i64 {
   0
 }
 
+// ----- "did you mean?" spelling suggestions -------------------------------------
+// Levenshtein edit distance (two-row DP) over byte values, used to suggest the
+// nearest known name when an unknown variant/field is referenced.
+fn min2(a:i64, b:i64) -> i64 { if a < b { a } el { b } }
+fn min3(a:i64, b:i64, c:i64) -> i64 { min2(min2(a, b), c) }
+fn edit_dist(a:str, b:str) -> i64 {
+  la := len(a)
+  lb := len(b)
+  if la == 0 rt lb
+  if lb == 0 rt la
+  mu prev:[i64] := []
+  mu j := 0
+  lp j <= lb { prev = push(prev, j); j += 1 }
+  mu i := 0
+  lp i < la {
+    mu cur:[i64] := []
+    cur = push(cur, i + 1)
+    mu k := 0
+    lp k < lb {
+      cost := if a[i] == b[k] { 0 } el { 1 }
+      cur = push(cur, min3(prev[k + 1] + 1, cur[k] + 1, prev[k] + cost))
+      k += 1
+    }
+    prev = cur
+    i += 1
+  }
+  prev[lb]
+}
+// The closest candidate to `target`, or "" if none is close enough. Threshold
+// scales gently with name length (1 + len/4) so a typo suggests but an unrelated
+// name does not.
+fn nearest(target:str, cands:[str]) -> str {
+  mu best := ""
+  mu bestd := 1000000
+  mu i := 0
+  lp i < len(cands) {
+    if len(cands[i]) > 0 {
+      d := edit_dist(target, cands[i])
+      if d < bestd { bestd = d; best = cands[i] }
+    }
+    i += 1
+  }
+  thresh := 1 + len(target) / 4
+  if best != "" && bestd <= thresh { rt best }
+  ""
+}
+// `" — did you mean 'X'?"` for the nearest of `cands`, or "" if nothing is close.
+fn suggest(target:str, cands:[str]) -> str {
+  s := nearest(target, cands)
+  if s == "" rt ""
+  " — did you mean '" + s + "'?"
+}
+// Field names declared on struct `sty` (keys "sty.field" in sy.fld), for suggest().
+fn struct_fields(sy:*Syms, sty:str) -> [str] {
+  mu out:[str] := []
+  pfx := sty + "."
+  lp (k, v) in sy.fld {
+    if len(k) >= len(pfx) && substring(k, 0, len(pfx)) == pfx {
+      out = push(out, substring(k, len(pfx), len(k)))
+    }
+  }
+  out
+}
+
 // A user function's index by name, or -1. Built-ins / externs / ctors / generics
 // are NOT in `funcs`, so a hit here means "a non-generic user function".
 fn find_func_i(funcs:[Func], name:str) -> i64 {
@@ -370,7 +434,9 @@ fn field_check(sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
   sty := under_ptr(ot)
   if is_ctor(sy, sty) {                              // a known struct/class (incl. flattened inherited fields)
     if has(sy.fld, fkey(sty, fname)) == false {
-      report_chk(sy, src, pos, "unknown field '." + fname + "' on " + sty)
+      fsug := nearest(fname, struct_fields(sy, sty))
+      fhint := if fsug == "" { "" } el { " — did you mean '." + fsug + "'?" }   // dotted, matching field syntax
+      report_chk(sy, src, pos, "unknown field '." + fname + "' on " + sty + fhint)
     }
     rt 0
   }
@@ -482,7 +548,7 @@ fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], guards:[Expr], 
     nm := vnames[i]
     if nm != "_" {
       if is_variant(sy, nm) == false || sy.evar[nm] != ty {
-        report_chk(sy, src, pos, "unknown variant '" + nm + "' in match on " + ty)
+        report_chk(sy, src, pos, "unknown variant '" + nm + "' in match on " + ty + suggest(nm, split_semi(sy.evar["@order." + ty])))
       }
       nb := len(split_semi(vbinds[i]))
       if has(sy.evar, "@vfldn." + nm) {
