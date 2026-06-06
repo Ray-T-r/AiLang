@@ -1,0 +1,3 @@
+// EXPECT: argument 1 to 'g' expects i64, got str
+fn g(n:i64) -> i64 { n }
+g(to_str(5))

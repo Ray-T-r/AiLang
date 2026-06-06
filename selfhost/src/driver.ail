@@ -17,6 +17,8 @@ fn has_sub(s:str, sub:str) -> bool {
 fn var_name(e:Expr) -> str {
   mt e {
     Var(n)             => n;
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
     Num(v)             => "";
     Flt(fs)            => "";
     Str(s)             => "";
@@ -197,20 +199,20 @@ fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
   }
   ""
 }
-fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr) -> Stmt {
+fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr, pos:i64) -> Stmt {
   if is_empty_maplit(e) {
     t := map_assign_type(sy, body, name)
-    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()))   // typing handled by pass-1 + hoist
+    if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), pos)   // preserve source pos (codegen ignores it; the checker walks stamped bodies and needs it)
   }
   if is_empty_array(e) {
     et := array_elem_from_push(sy, body, name)
-    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et))              // pin elem type from first push
+    if len(et) > 0 rt SDecl(name, Array(no_exprs(), et), pos)             // pin elem type from first push
   }
-  SDecl(name, e)
+  SDecl(name, e, pos)
 }
 fn stamp_decl(sy:*Syms, body:[Stmt], s:Stmt) -> Stmt {
   mt s {
-    SDecl(name,e)         => stamp_decl_e(sy, body, name, e);
+    SDecl(name,e,pos)     => stamp_decl_e(sy, body, name, e, pos);
     SDestructure(names,e) => s;
     SAssign(name,e)       => s;
     SIdxAssign(o,ix,e)    => s;
@@ -267,6 +269,556 @@ fn slot_has(slots:str, m:str) -> bool {
   mu i := 0
   lp i < len(parts) { if parts[i] == m rt true; i += 1 }
   false
+}
+
+// ===== conservative type checker =============================================
+// A read-only pass (mutates nothing observable by codegen) that walks every
+// function body + the implicit main, and reports CONFIDENT type mismatches at
+// the originating .ail line via report_at (which prints `error L:C:` + caret and
+// exits 1). It runs AFTER the symbol tables are fully populated and BEFORE
+// emission, so it can't change the generated C. Every check fires only when the
+// types involved are confidently known and clearly incompatible (see
+// type_confident / incompatible) — never on an unknown — so it cannot reject any
+// program that compiles today. Walkers mirror the collect_lams family: each
+// returns a dummy i64 (AiLang `mt` is expression-valued), effects via report_at.
+
+// A user function's index by name, or -1. Built-ins / externs / ctors / generics
+// are NOT in `funcs`, so a hit here means "a non-generic user function".
+fn find_func_i(funcs:[Func], name:str) -> i64 {
+  mu i := 0
+  lp i < len(funcs) { if funcs[i].name == name { rt i } i += 1 }
+  -1
+}
+// A str / array / map / struct / enum operand makes arithmetic & bitwise ops bogus.
+fn bad_in_arith(t:str) -> bool {
+  c := ty_cat(t)
+  c == "str" || c == "arr" || c == "map" || c == "agg" || c == "bytes"
+}
+fn arith_or_bit_nonadd(op:i64) -> bool {
+  op == OP_SUB() || op == OP_MUL() || op == OP_DIV() || op == OP_MOD() || op == OP_SHL() || op == OP_SHR() || op == OP_BAND() || op == OP_BXOR() || op == OP_BOR()
+}
+// Relational operators compare two operands that must be the same kind. `&&`/`||`
+// are excluded — they combine truthy values, not compare them.
+fn is_cmp_op(op:i64) -> bool {
+  op == OP_EQ() || op == OP_NE() || op == OP_LT() || op == OP_GT() || op == OP_LE() || op == OP_GE()
+}
+fn binop_check(sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  lt := type_confident(sy, l)
+  rr := type_confident(sy, r)
+  if confident(lt) == false || confident(rr) == false rt 0
+  if is_cmp_op(op) {
+    if incompatible(sy, lt, rr) { report_at(src, pos, "type mismatch: comparing " + lt + " and " + rr) }
+    rt 0
+  }
+  if op == OP_ADD() {
+    bothstr := lt == "str" && rr == "str"           // str + str is concat — fine
+    if bothstr == false && (bad_in_arith(lt) || bad_in_arith(rr)) {
+      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+    }
+    rt 0
+  }
+  if arith_or_bit_nonadd(op) {
+    if bad_in_arith(lt) || bad_in_arith(rr) {
+      report_at(src, pos, "type mismatch: operator" + op_c(op) + "on " + lt + " and " + rr)
+    }
+  }
+  0
+}
+fn callarg_check(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  fi := find_func_i(funcs, fname)
+  if fi < 0 rt 0                                     // not a non-generic user fn → skip
+  if len(funcs[fi].tparams) > 0 rt 0                 // belt-and-braces: never a generic
+  np := len(funcs[fi].params)                        // params is authoritative (untyped params still counted)
+  if len(args) != np {
+    report_at(src, pos, "function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+    rt 0
+  }
+  pts := funcs[fi].ptypes
+  mu i := 0
+  lp i < len(args) {
+    if i < len(pts) {
+      at := type_confident(sy, args[i])
+      if confident(at) && incompatible(sy, pts[i], at) {
+        report_at(src, pos, "type mismatch: argument " + int_to_str(i + 1) + " to '" + fname + "' expects " + pts[i] + ", got " + at)
+      }
+    }
+    i += 1
+  }
+  0
+}
+fn field_check(sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  ot := type_confident(sy, obj)
+  if ot == "?" rt 0
+  sty := under_ptr(ot)
+  if is_ctor(sy, sty) {                              // a known struct/class (incl. flattened inherited fields)
+    if has(sy.fld, fkey(sty, fname)) == false {
+      report_at(src, pos, "unknown field '." + fname + "' on " + sty)
+    }
+    rt 0
+  }
+  report_at(src, pos, "type error: field '." + fname + "' on non-struct value of type " + ot)
+  0
+}
+fn index_check(sy:*Syms, obj:Expr, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  t := type_confident(sy, obj)
+  if t == "?" rt 0
+  if is_array_ann(t) rt 0
+  if is_map_ann(t) rt 0
+  if t == "str" rt 0
+  if t == "bytes" rt 0
+  report_at(src, pos, "type error: cannot index value of type " + t)
+  0
+}
+
+fn chk2(funcs:[Func], sy:*Syms, a:Expr, b:Expr, pos:i64, src:str) -> i64 {
+  check_expr(funcs, sy, a, pos, src); check_expr(funcs, sy, b, pos, src); 0
+}
+fn chk3(funcs:[Func], sy:*Syms, a:Expr, b:Expr, c:Expr, pos:i64, src:str) -> i64 {
+  check_expr(funcs, sy, a, pos, src); check_expr(funcs, sy, b, pos, src); check_expr(funcs, sy, c, pos, src); 0
+}
+fn chk_args(funcs:[Func], sy:*Syms, args:[Expr], pos:i64, src:str) -> i64 {
+  mu i := 0
+  lp i < len(args) { check_expr(funcs, sy, args[i], pos, src); i += 1 }
+  0
+}
+fn chk_kv(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+  chk_args(funcs, sy, ks, pos, src); chk_args(funcs, sy, vs, pos, src); 0
+}
+// `e?` is only valid inside a function whose return type is `!T` — seed_fn sets
+// @ret exactly for those, so its absence means `?` is misplaced (e.g. in plain
+// fns or the implicit main). Valid `?` code always has @ret, so no false positive.
+fn chk_try(funcs:[Func], sy:*Syms, x:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 && has(sy.vty, "@ret") == false {
+    report_at(src, pos, "'?' used outside a function returning !T")
+  }
+  check_expr(funcs, sy, x, pos, src)
+  0
+}
+// A literal's confidently-known elements must all share one category — AiLang
+// arrays/maps are monomorphic. Numerics (i64/f64/bool) count as one category
+// (matches codegen tolerance), and any "?" element is ignored.
+fn homog_check(sy:*Syms, elems:[Expr], msg:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu base := "?"
+  mu i := 0
+  lp i < len(elems) {
+    t := type_confident(sy, elems[i])
+    if confident(t) {
+      if base == "?" { base = t } el if cat_incompatible(base, t) { report_at(src, pos, msg + " " + base + " and " + t) }
+    }
+    i += 1
+  }
+  0
+}
+fn chk_array(funcs:[Func], sy:*Syms, elems:[Expr], pos:i64, src:str) -> i64 {
+  homog_check(sy, elems, "array literal mixes", pos, src)
+  chk_args(funcs, sy, elems, pos, src)
+  0
+}
+fn chk_maplit(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+  homog_check(sy, ks, "map literal mixes key types", pos, src)
+  homog_check(sy, vs, "map literal mixes value types", pos, src)
+  chk_args(funcs, sy, ks, pos, src)
+  chk_args(funcs, sy, vs, pos, src)
+  0
+}
+// Is `v` one of the match's arm names?
+fn vn_has(vnames:[str], v:str) -> bool {
+  mu i := 0
+  lp i < len(vnames) { if vnames[i] == v rt true; i += 1 }
+  false
+}
+// `mt scrut { V(b…) => … }` — match type-safety. The parser only emits a `Match`
+// AST node for capitalized-Variant arms (literal/`_`/tuple matches desugar to an
+// if-chain upstream), and the corpus has NO catch-all arms — so a Match is a
+// COMPLETE variant enumeration. gen_match lowers it to a bare if/else-if on the
+// tag with no default branch, so a stray arm silently aliases tag 0 and a missing
+// variant leaves the result uninitialized — both real bugs. Two confident checks,
+// each a no-op when the scrutinee type is "?" (so today's programs all still pass):
+//   (1) every arm names a real variant OF the scrutinee's enum;
+//   (2) exhaustiveness — every variant of that enum appears as an arm.
+fn match_check(sy:*Syms, scrut:Expr, vnames:[str], vbinds:[str], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  ty := type_confident(sy, scrut)
+  if confident(ty) == false rt 0                       // unknown scrutinee → skip
+  if has(sy.evar, "@order." + ty) == false {           // confident, but not an enum
+    report_at(src, pos, "type error: match on non-enum value of type " + ty)
+    rt 0
+  }
+  // (1) per arm: must be a variant of enum `ty`, and bind no more vars than the
+  // variant has fields. Binding fewer ignores trailing fields (legal); binding
+  // more would read a nonexistent union member. @vfldn is registered only for
+  // tuple/fn-free variants, so subtler variants degrade to no-op (has → false).
+  mu i := 0
+  lp i < len(vnames) {
+    nm := vnames[i]
+    if is_variant(sy, nm) == false || sy.evar[nm] != ty {
+      report_at(src, pos, "unknown variant '" + nm + "' in match on " + ty)
+    }
+    nb := len(split_semi(vbinds[i]))
+    if has(sy.evar, "@vfldn." + nm) {
+      nf := str_to_int(sy.evar["@vfldn." + nm])
+      if nb > nf {
+        report_at(src, pos, "variant '" + nm + "' binds " + int_to_str(nb) + " but has " + int_to_str(nf) + " field(s)")
+      }
+    }
+    i += 1
+  }
+  // (2) exhaustiveness — every variant of enum `ty` must be an arm
+  all := split_semi(sy.evar["@order." + ty])
+  mu j := 0
+  lp j < len(all) {
+    if vn_has(vnames, all[j]) == false {
+      report_at(src, pos, "non-exhaustive match: enum " + ty + " missing variant '" + all[j] + "'")
+    }
+    j += 1
+  }
+  0
+}
+fn chk_match(funcs:[Func], sy:*Syms, sc:Expr, vnames:[str], vbinds:[str], bd:[Expr], pos:i64, src:str) -> i64 {
+  match_check(sy, sc, vnames, vbinds, pos, src)
+  check_expr(funcs, sy, sc, pos, src); chk_args(funcs, sy, bd, pos, src); 0
+}
+fn chk_bin(funcs:[Func], sy:*Syms, op:i64, l:Expr, r:Expr, pos:i64, src:str) -> i64 {
+  binop_check(sy, op, l, r, pos, src)
+  check_expr(funcs, sy, l, pos, src); check_expr(funcs, sy, r, pos, src); 0
+}
+// The parameter count of a lambda-literal arg, or -1 if it isn't a lambda.
+// (lam_params can't tell a 0-param lambda from a non-lambda; this can, so the
+// collection/init args of a HOF are never mistaken for a 0-param callback.)
+fn lambda_arity(e:Expr) -> i64 {
+  mt e {
+    Lambda(ps,pts,b,id) => len(ps);
+    Num(v)             => -1;
+    Flt(fs)            => -1;
+    Str(s)             => -1;
+    Var(n)             => -1;
+    Bin(o,a,b2)        => -1;
+    Unary(o,x)         => -1;
+    Call(f,a)          => -1;
+    Field(o,f)         => -1;
+    Index(o,ix)        => -1;
+    Array(es,et)       => -1;
+    MapLit(ml,mks,mvs) => -1;
+    Addr(x)            => -1;
+    Match(sc,vn,vb,bd) => -1;
+    IfE(c,t,el2)       => -1;
+    Try(e2)            => -1;
+    Tuple(tes)         => -1;
+    BlockE(bb)         => -1;
+    Bad                => -1;
+  }
+}
+// `map`/`filter` take a 1-param callback, `reduce` a 2-param one. Fires only when
+// an arg is confidently a lambda literal of the wrong arity, so it never touches
+// the collection/init args or a callback passed by name (those stay "?").
+fn hof_arity_check(fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu want := -1
+  if fname == "map" || fname == "filter" { want = 1 }
+  if fname == "reduce" { want = 2 }
+  if want < 0 rt 0
+  mu i := 0
+  lp i < len(args) {
+    np := lambda_arity(args[i])
+    if np >= 0 && np != want {
+      report_at(src, pos, "'" + fname + "' callback takes " + int_to_str(want) + " parameter(s), got " + int_to_str(np))
+    }
+    i += 1
+  }
+  0
+}
+// A call to a user generic fn (`fn id<T>(…)`) — inlined at its call sites, so it
+// is NOT in `funcs` and escapes callarg_check. Its T-polymorphic params can't be
+// type-checked, but arity is exact: count the registered generic's params (sy.gfns
+// is the [Func] of generics, carried through every seed_fn).
+fn generic_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  mu gi := 0
+  lp gi < len(sy.gfns) {
+    if sy.gfns[gi].name == fname {
+      np := len(sy.gfns[gi].params)
+      if len(args) != np {
+        report_at(src, pos, "generic function '" + fname + "' expects " + int_to_str(np) + " arguments, got " + int_to_str(len(args)))
+      }
+      rt 0
+    }
+    gi += 1
+  }
+  0
+}
+// `ok(x)` is monomorphic on the ENCLOSING fn's result type — it builds a
+// `res_<T>` where T is that fn's ok type, stashed as @ret by seed_fn for every
+// `-> !T` fn. So x must be compatible with T. (incompatible() treats `!T` itself
+// as "skip", so a result fn's returns are otherwise unchecked — this closes that.)
+// Conservative: no @ret (not a result fn) or unknown x → skip.
+fn ok_ret_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if fname != "ok" rt 0
+  if len(args) != 1 rt 0
+  if has(sy.vty, "@ret") == false rt 0
+  want := sy.vty["@ret"]
+  got := type_confident(sy, args[0])
+  if confident(want) && confident(got) && incompatible(sy, want, got) {
+    report_at(src, pos, "type mismatch: ok(" + got + ") but function returns !" + want)
+  }
+  0
+}
+fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  callarg_check(funcs, sy, fname, args, pos, src)
+  ctor_arg_check(sy, fname, args, pos, src)
+  variant_arg_check(sy, fname, args, pos, src)
+  hof_arity_check(fname, args, pos, src)
+  generic_arity_check(sy, fname, args, pos, src)
+  ok_ret_check(sy, fname, args, pos, src)
+  chk_args(funcs, sy, args, pos, src); 0
+}
+fn chk_field(funcs:[Func], sy:*Syms, obj:Expr, fname:str, pos:i64, src:str) -> i64 {
+  field_check(sy, obj, fname, pos, src)
+  check_expr(funcs, sy, obj, pos, src); 0
+}
+fn chk_index(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, pos:i64, src:str) -> i64 {
+  index_check(sy, obj, pos, src)
+  check_expr(funcs, sy, obj, pos, src); check_expr(funcs, sy, idx, pos, src); 0
+}
+fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
+  mt e {
+    Bin(op,l,r)         => chk_bin(funcs, sy, op, l, r, pos, src);
+    Call(fname,args)    => chk_call(funcs, sy, fname, args, pos, src);
+    Field(obj,fnm)      => chk_field(funcs, sy, obj, fnm, pos, src);
+    Index(obj,idx)      => chk_index(funcs, sy, obj, idx, pos, src);
+    Unary(op,x)         => check_expr(funcs, sy, x, pos, src);
+    Addr(x)             => check_expr(funcs, sy, x, pos, src);
+    Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
+    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
+    Match(sc,vn,vb,bd)  => chk_match(funcs, sy, sc, vn, vb, bd, pos, src);
+    IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
+    Try(x)              => chk_try(funcs, sy, x, pos, src);
+    Tuple(elems)        => chk_args(funcs, sy, elems, pos, src);
+    BlockE(bb)          => check_stmts(funcs, sy, bb, src);
+    Lambda(ps,pts,b,id) => check_expr(funcs, sy, b, pos, src);
+    Num(v)              => 0;
+    Flt(s)              => 0;
+    Str(s)              => 0;
+    Var(n)              => 0;
+    Bad                 => 0;
+  }
+}
+fn chk_assign(funcs:[Func], sy:*Syms, name:str, e:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 {
+    lt := tcon_var(sy, name)
+    rr := type_confident(sy, e)
+    if confident(lt) && confident(rr) && incompatible(sy, lt, rr) {
+      report_at(src, pos, "type mismatch: cannot assign " + rr + " to '" + name + "' of type " + lt)
+    }
+  }
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `rt expr` — when the enclosing fn has an EXPLICIT `-> T` (stashed as @chkret by
+// check_fn), flag a confidently-incompatible returned value. Implicit-return fns
+// (no annotation) have no @chkret, so they're skipped (their type IS the return).
+fn chk_return(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
+  if pos >= 0 {
+    if has(sy.vty, "@chkret") {
+      want := sy.vty["@chkret"]
+      got := type_confident(sy, e)
+      if confident(got) && incompatible(sy, want, got) {
+        report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+      }
+    }
+  }
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `obj.fnm = e` — the field must exist on a struct (field_check, fail-fast) and the
+// value's confident type must be compatible with the field's slot type.
+fn chk_field_assign(funcs:[Func], sy:*Syms, obj:Expr, fnm:str, e:Expr, pos:i64, src:str) -> i64 {
+  field_check(sy, obj, fnm, pos, src)
+  if pos >= 0 {
+    slot := tcon_field(sy, obj, fnm)
+    val := type_confident(sy, e)
+    if confident(slot) && confident(val) && incompatible(sy, slot, val) {
+      report_at(src, pos, "type mismatch: cannot assign " + val + " to field '." + fnm + "' of type " + slot)
+    }
+  }
+  check_expr(funcs, sy, obj, pos, src)
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `obj[idx] = e` — obj must be indexable (index_check, fail-fast) and the value's
+// confident type must be compatible with the array elem / map value type.
+fn idx_slot_type(sy:*Syms, obj:Expr) -> str {
+  t := type_confident(sy, obj)
+  if is_array_ann(t) rt elem_of_ann(t)
+  if is_map_ann(t) rt map_vtype(t)
+  "?"
+}
+fn chk_idx_assign(funcs:[Func], sy:*Syms, obj:Expr, idx:Expr, e:Expr, pos:i64, src:str) -> i64 {
+  index_check(sy, obj, pos, src)
+  if pos >= 0 {
+    slot := idx_slot_type(sy, obj)
+    val := type_confident(sy, e)
+    if confident(slot) && confident(val) && incompatible(sy, slot, val) {
+      report_at(src, pos, "type mismatch: cannot assign " + val + " to element of type " + slot)
+    }
+  }
+  check_expr(funcs, sy, obj, pos, src)
+  check_expr(funcs, sy, idx, pos, src)
+  check_expr(funcs, sy, e, pos, src)
+  0
+}
+// `Name(a, b, …)` for a struct/class ctor — positional field types are registered
+// as @fld.<Name>.<i> (user fields only, __vt skipped) with arity @fldn.<Name>.
+// Skips entirely unless the arg count matches the registered arity, so any
+// vtable/lowering surprise degrades to no-op rather than a wrong report.
+fn ctor_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if has(sy.evar, "@fldn." + fname) == false rt 0
+  n := str_to_int(sy.evar["@fldn." + fname])
+  if len(args) != n {
+    report_at(src, pos, "constructor '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
+    rt 0
+  }
+  mu i := 0
+  lp i < len(args) {
+    k := "@fld." + fname + "." + int_to_str(i)
+    if has(sy.evar, k) {
+      want := sy.evar[k]
+      got := type_confident(sy, args[i])
+      if confident(want) && confident(got) && incompatible(sy, want, got) {
+        report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of '" + fname + "' expects " + want + ", got " + got)
+      }
+    }
+    i += 1
+  }
+  0
+}
+// `Variant(a, b, …)` for an enum variant — like ctor_arg_check but registered
+// only for tuple/fn-free variants (@vfldn/@vfld). Uses cat_incompatible (NOT the
+// nominal one) so boxed recursive fields (@box:/@self) and any struct/enum field
+// are tolerated; only scalar/str/container category mismatches are flagged.
+fn variant_arg_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if has(sy.evar, "@vfldn." + fname) == false rt 0
+  n := str_to_int(sy.evar["@vfldn." + fname])
+  if len(args) != n {
+    report_at(src, pos, "variant '" + fname + "' expects " + int_to_str(n) + " fields, got " + int_to_str(len(args)))
+    rt 0
+  }
+  mu i := 0
+  lp i < len(args) {
+    k := "@vfld." + fname + "." + int_to_str(i)
+    if has(sy.evar, k) {
+      want := sy.evar[k]
+      got := type_confident(sy, args[i])
+      if confident(want) && confident(got) && cat_incompatible(want, got) {
+        report_at(src, pos, "type mismatch: field " + int_to_str(i + 1) + " of variant '" + fname + "' expects " + want + ", got " + got)
+      }
+    }
+    i += 1
+  }
+  0
+}
+// Tail-expression return check: the last statement of a body is the implicit
+// return when there's no `rt`. Mirrors last_expr_type/either_return — an SExpr
+// tail is the return value; a tail SIf returns through BOTH branches.
+fn check_tail_expr(sy:*Syms, e:Expr, pos:i64, want:str, src:str) -> i64 {
+  if pos < 0 rt 0
+  got := type_confident(sy, e)
+  if confident(got) && incompatible(sy, want, got) {
+    report_at(src, pos, "type mismatch: returning " + got + " but function returns " + want)
+  }
+  0
+}
+fn check_tail_if(sy:*Syms, b:[Stmt], eb:[Stmt], want:str, src:str) -> i64 {
+  check_tail_return(sy, b, want, src)
+  check_tail_return(sy, eb, want, src)
+  0
+}
+fn check_tail_stmt(sy:*Syms, s:Stmt, want:str, src:str) -> i64 {
+  mt s {
+    SExpr(e,pos)             => check_tail_expr(sy, e, pos, want, src);
+    SIf(c,b,eb)              => check_tail_if(sy, b, eb, want, src);
+    SDecl(name,e,pos)        => 0;
+    SDestructure(names,e)    => 0;
+    SAssign(name,e,pos)      => 0;
+    SIdxAssign(o,i,e,pos)    => 0;
+    SFieldAssign(o,f,e,pos)  => 0;
+    SReturn(e,pos)           => 0;
+    SPrint(e,pos)            => 0;
+    SLoop(c,b)               => 0;
+    SLoopIn(vnm,coll,b)      => 0;
+    SLoopKV(kn,vn,coll,b)    => 0;
+    SLoopRange(v,lo,hi,b)    => 0;
+    SBreak                   => 0;
+    SContinue                => 0;
+  }
+}
+fn check_tail_return(sy:*Syms, body:[Stmt], want:str, src:str) -> i64 {
+  if len(body) == 0 rt 0
+  check_tail_stmt(sy, body[len(body) - 1], want, src)
+  0
+}
+fn chk_if(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); check_stmts(funcs, sy, eb, src); 0
+}
+fn chk_body(funcs:[Func], sy:*Syms, c:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, c, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn chk_coll(funcs:[Func], sy:*Syms, coll:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, coll, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn chk_range(funcs:[Func], sy:*Syms, lo:Expr, hi:Expr, b:[Stmt], src:str) -> i64 {
+  check_expr(funcs, sy, lo, -1, src); check_expr(funcs, sy, hi, -1, src); check_stmts(funcs, sy, b, src); 0
+}
+fn check_stmt(funcs:[Func], sy:*Syms, s:Stmt, src:str) -> i64 {
+  mt s {
+    SDecl(name,e,pos)        => check_expr(funcs, sy, e, pos, src);
+    SDestructure(names,e)    => check_expr(funcs, sy, e, -1, src);
+    SAssign(name,e,pos)      => chk_assign(funcs, sy, name, e, pos, src);
+    SIdxAssign(obj,idx,e,pos)    => chk_idx_assign(funcs, sy, obj, idx, e, pos, src);
+    SFieldAssign(obj,fnm,e,pos)  => chk_field_assign(funcs, sy, obj, fnm, e, pos, src);
+    SReturn(e,pos)           => chk_return(funcs, sy, e, pos, src);
+    SPrint(e,pos)            => check_expr(funcs, sy, e, pos, src);
+    SIf(c,b,eb)              => chk_if(funcs, sy, c, b, eb, src);
+    SLoop(c,b)               => chk_body(funcs, sy, c, b, src);
+    SLoopIn(vnm,coll,b)      => chk_coll(funcs, sy, coll, b, src);
+    SLoopKV(kn,vn,coll,b)    => chk_coll(funcs, sy, coll, b, src);
+    SLoopRange(v,lo,hi,b)    => chk_range(funcs, sy, lo, hi, b, src);
+    SBreak                   => 0;
+    SContinue                => 0;
+    SExpr(e,pos)             => check_expr(funcs, sy, e, pos, src);
+  }
+}
+fn check_stmts(funcs:[Func], sy:*Syms, body:[Stmt], src:str) -> i64 {
+  mu i := 0
+  lp i < len(body) { check_stmt(funcs, sy, body[i], src); i += 1 }
+  0
+}
+fn check_fn(funcs:[Func], base:*Syms, f:Func, src:str) -> i64 {
+  mu sy := seed_fn(base, f)
+  fb := stamp_empty_maps(&sy, f.body)               // infer un-annotated `m := {}` / `xs := []` (mirror codegen 1144)
+  sy = seed_fn(base, f)                              // discard inference's scratch typing (mirror codegen 1145)
+  hd := hoist_decls(&sy, fb, "    ")                 // populate sy.vty for locals from the STAMPED body
+  if len(f.ret) > 0 { set_ty(&sy, "@chkret", f.ret) }   // explicit `-> T` → enable the return-type check
+  check_stmts(funcs, &sy, fb, src)
+  if len(f.ret) > 0 { check_tail_return(&sy, fb, f.ret, src) }   // implicit tail-expr return vs declared
+  0
+}
+fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
+  mu i := 0
+  lp i < len(funcs) { check_fn(funcs, base, funcs[i], src); i += 1 }
+  mu msy := Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)
+  mm := stamp_empty_maps(&msy, mains)               // infer un-annotated `m := {}` (mirror codegen 1159)
+  msy = Syms({}, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams)   // re-seed fresh — discard inference scratch (codegen 1160)
+  mhd := hoist_decls(&msy, mm, "    ")
+  check_stmts(funcs, &msy, mm, src)
+  0
 }
 
 fn compile_to_c(src:str, dir:str) -> str {
@@ -412,7 +964,16 @@ fn compile_to_c(src:str, dir:str) -> str {
     sd := structs[si]
     base.ctors[sd.name] = "1"
     mu fi := 0
-    lp fi < len(sd.fnames) { base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]; fi += 1 }
+    mu uidx := 0
+    lp fi < len(sd.fnames) {
+      base.fld[fkey(sd.name, sd.fnames[fi])] = sd.ftypes[fi]
+      if sd.fnames[fi] != "__vt" {                                   // skip the hidden vtable ptr — ctors don't take it
+        base.evar["@fld." + sd.name + "." + int_to_str(uidx)] = sd.ftypes[fi]   // positional user-field type (ctor-arg checks)
+        uidx = uidx + 1
+      }
+      fi += 1
+    }
+    base.evar["@fldn." + sd.name] = int_to_str(uidx)                 // ctor arity (user fields only)
     si += 1
   }
   // Box bare cross-enum fields now that ALL enums are known (mutual recursion),
@@ -432,6 +993,20 @@ fn compile_to_c(src:str, dir:str) -> str {
       vn := ed.vnames[vi]
       base.evar[vn] = ed.name
       base.vft[vn] = ed.vftypes[vi]
+      // variant-arg checks: register positional field types + arity — but ONLY
+      // when no field is a tuple/fn type (a '(' means an inner ';'/',' that would
+      // corrupt the ;-split); such variants are simply left un-arg-checked.
+      vfs := ed.vftypes[vi]
+      if contains(vfs, "(") == false {
+        if len(vfs) == 0 {
+          base.evar["@vfldn." + vn] = "0"
+        } el {
+          vparts := split_semi(vfs)
+          mu vpj := 0
+          lp vpj < len(vparts) { base.evar["@vfld." + vn + "." + int_to_str(vpj)] = vparts[vpj]; vpj += 1 }
+          base.evar["@vfldn." + vn] = int_to_str(len(vparts))
+        }
+      }
       if vi == 0 { order = vn } el { order = order + ";" + vn }
       vi += 1
     }
@@ -477,6 +1052,12 @@ fn compile_to_c(src:str, dir:str) -> str {
   csm.vty = {}
   cmdecls := hoist_decls(&csm, mains, "    ")
   collect_lams(&base, &csm, mains)
+
+  // Type-check pass: report confident type mismatches at the .ail source line,
+  // BEFORE any C is emitted. base is fully populated above; conservative + additive
+  // (see type_confident/incompatible), so it never rejects code that compiles today
+  // and leaves the generated C byte-identical (fixpoint-safe). report_at exits(1).
+  check_program(funcs, &base, mains, src)
 
   // Link-flag marker: one comment line listing the libs from `ex "lib"` decls,
   // read back by the driver to append `-l<lib>` to clang. Absent when nothing

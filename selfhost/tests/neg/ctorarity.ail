@@ -1,0 +1,4 @@
+// EXPECT: constructor 'P' expects 1 fields, got 2
+st P { x:i64 }
+p := P(1, 2)
+println(p.x)

@@ -1,0 +1,3 @@
+// EXPECT: cannot index value of type i64
+n := 5
+n[0]

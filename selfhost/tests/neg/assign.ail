@@ -1,0 +1,4 @@
+// EXPECT: type mismatch: cannot assign i64 to 'x' of type str
+mu x := "hi"
+x = 5
+println(x)

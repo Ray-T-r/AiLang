@@ -1,0 +1,5 @@
+// EXPECT: ok(str) but function returns !i64
+fn f() -> !i64 {
+  rt ok("nope")
+}
+println(0)

@@ -1,0 +1,9 @@
+// EXPECT: match on non-enum value of type i64
+en E { A(x:i64), B }
+fn f(n:i64) -> i64 {
+  mt n {
+    A(x) => x;
+    B    => 0;
+  }
+}
+println(f(3))

@@ -1,0 +1,4 @@
+// EXPECT: comparing str and i64
+x := "a"
+b := x == 5
+println(b)

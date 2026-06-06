@@ -684,10 +684,11 @@ fn parse_destructure(p:*P) -> Stmt {
 fn parse_stmt(p:*P) -> Stmt {
   k := ckind(p)
   t := ctext(p)
+  spos := cur(p).pos          // byte offset of this statement's first token (for type-checker diagnostics)
 
   if k == TK_IDENT() && t == "rt" {
     adv(p)
-    rt SReturn(parse_expr(p))
+    rt SReturn(parse_expr(p), spos)
   }
   if k == TK_IDENT() && t == "br" { adv(p); rt SBreak }
   if k == TK_IDENT() && t == "ct" { adv(p); rt SContinue }
@@ -747,7 +748,7 @@ fn parse_stmt(p:*P) -> Stmt {
     eat(p, TK_LPAREN())
     e := parse_expr(p)
     eat(p, TK_RPAREN())
-    rt SPrint(e)
+    rt SPrint(e, spos)
   }
   // `mu name [:Type] := expr` — mutable declaration. The annotation pins an
   // empty array literal's element type (`mu xs:[Token] := []`).
@@ -759,7 +760,7 @@ fn parse_stmt(p:*P) -> Stmt {
     mu ann := ""
     if ckind(p) == TK_COLON() { adv(p); ann = parse_type(p) }
     eat(p, TK_WALRUS())             // :=
-    rt SDecl(name, parse_decl_rhs(p, ann))
+    rt SDecl(name, parse_decl_rhs(p, ann), spos)
   }
   // `a, b := expr` — tuple destructure (must precede the single-name `name :=`).
   if is_destructure_ahead(p) { rt parse_destructure(p) }
@@ -773,19 +774,19 @@ fn parse_stmt(p:*P) -> Stmt {
     adv(p)                          // :
     ann := parse_type(p)
     if ckind(p) == TK_WALRUS() { adv(p) } el { eat(p, TK_ASSIGN()) }   // := or =
-    rt SDecl(name, parse_decl_rhs(p, ann))
+    rt SDecl(name, parse_decl_rhs(p, ann), spos)
   }
   // `name := expr` — new binding
   if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_WALRUS() {
     name := t
     adv(p); adv(p)                  // name :=
-    rt SDecl(name, parse_expr(p))
+    rt SDecl(name, parse_expr(p), spos)
   }
   // `name = expr` — reassignment
   if k == TK_IDENT() && p.toks[p.pos + 1].kind == TK_ASSIGN() {
     name := t
     adv(p); adv(p)                  // name =
-    rt SAssign(name, parse_expr(p))
+    rt SAssign(name, parse_expr(p), spos)
   }
   // `name <op>= expr` — compound assign (`+= -= *= /= %=`, lexed as `<op>` then
   // `=`); desugar to `name = name <op> expr`.
@@ -793,7 +794,7 @@ fn parse_stmt(p:*P) -> Stmt {
     name := t
     cop := compound_op(p.toks[p.pos + 1].kind)
     adv(p); adv(p); adv(p)          // name <op> =
-    rt SAssign(name, Bin(cop, Var(name), parse_expr(p)))
+    rt SAssign(name, Bin(cop, Var(name), parse_expr(p)), spos)
   }
   // `obj[idx] = expr` or `obj.field = expr` — l-value assignment. A statement
   // starting `IDENT [` or `IDENT .` parses a factor first; if `=` follows, it's
@@ -807,15 +808,15 @@ fn parse_stmt(p:*P) -> Stmt {
       lhs := parse_factor(p)          // the l-value chain (stops before `=`/`+`)
       if ckind(p) == TK_ASSIGN() {
         adv(p)
-        rt mk_lvalue_assign(lhs, parse_expr(p))
+        rt mk_lvalue_assign(lhs, parse_expr(p), spos)
       }
       cop := compound_op(ckind(p))    // `<op>` `=` — compound assign `lhs <op>= expr`
       adv(p); adv(p)
-      rt mk_lvalue_assign(lhs, Bin(cop, lhs, parse_expr(p)))
+      rt mk_lvalue_assign(lhs, Bin(cop, lhs, parse_expr(p)), spos)
     }
   }
   // bare expression statement
-  SExpr(parse_expr(p))
+  SExpr(parse_expr(p), spos)
 }
 
 // The OP code for a compound-assign operator token (`+= -= *= /= %=`), or 0
@@ -860,27 +861,27 @@ fn is_lvalue_assign(p:*P) -> bool {
 // Build the right assignment statement from an l-value: `obj[idx]` → SIdxAssign,
 // `obj.field` → SFieldAssign; anything else degrades to a bare expr statement
 // (match arms can't hold `rt`, so this dispatch lives in a helper).
-fn mk_lvalue_assign(lhs:Expr, rhs:Expr) -> Stmt {
+fn mk_lvalue_assign(lhs:Expr, rhs:Expr, spos:i64) -> Stmt {
   mt lhs {
-    Index(obj, idx)  => SIdxAssign(obj, idx, rhs);
-    Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs);
-    Tuple(tes)       => SExpr(lhs);
-    BlockE(bb)       => SExpr(lhs);
-    Num(v)           => SExpr(lhs);
-    Flt(fs)          => SExpr(lhs);
-    Str(s)           => SExpr(lhs);
-    Var(n)           => SExpr(lhs);
-    Bin(o,a,b)       => SExpr(lhs);
-    Unary(o,x)       => SExpr(lhs);
-    Call(f,a)        => SExpr(lhs);
-    Array(es,et)     => SExpr(lhs);
-    MapLit(mlt,mks,mvs) => SExpr(lhs);
-    Addr(x)          => SExpr(lhs);
-    Match(sc,vn,vb,bd) => SExpr(lhs);
-    IfE(c,t,el2)     => SExpr(lhs);
-    Try(e2)          => SExpr(lhs);
-    Lambda(ps,pts,b,id)  => SExpr(lhs);
-    Bad              => SExpr(lhs);
+    Index(obj, idx)  => SIdxAssign(obj, idx, rhs, spos);
+    Field(obj, fnm)  => SFieldAssign(obj, fnm, rhs, spos);
+    Tuple(tes)       => SExpr(lhs, spos);
+    BlockE(bb)       => SExpr(lhs, spos);
+    Num(v)           => SExpr(lhs, spos);
+    Flt(fs)          => SExpr(lhs, spos);
+    Str(s)           => SExpr(lhs, spos);
+    Var(n)           => SExpr(lhs, spos);
+    Bin(o,a,b)       => SExpr(lhs, spos);
+    Unary(o,x)       => SExpr(lhs, spos);
+    Call(f,a)        => SExpr(lhs, spos);
+    Array(es,et)     => SExpr(lhs, spos);
+    MapLit(mlt,mks,mvs) => SExpr(lhs, spos);
+    Addr(x)          => SExpr(lhs, spos);
+    Match(sc,vn,vb,bd) => SExpr(lhs, spos);
+    IfE(c,t,el2)     => SExpr(lhs, spos);
+    Try(e2)          => SExpr(lhs, spos);
+    Lambda(ps,pts,b,id)  => SExpr(lhs, spos);
+    Bad              => SExpr(lhs, spos);
   }
 }
 

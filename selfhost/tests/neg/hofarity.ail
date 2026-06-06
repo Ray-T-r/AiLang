@@ -1,0 +1,4 @@
+// EXPECT: 'map' callback takes 1 parameter(s), got 2
+xs := [1, 2, 3]
+ys := map(xs, fn(a, b) a + b)
+println(len(ys))

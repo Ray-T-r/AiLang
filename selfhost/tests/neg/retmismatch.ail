@@ -1,0 +1,3 @@
+// EXPECT: returning str but function returns i64
+fn f() -> i64 { rt "hi" }
+println(f())

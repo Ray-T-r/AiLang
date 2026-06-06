@@ -1,0 +1,4 @@
+// EXPECT: operator * on str and i64
+x := "a"
+y := x * 2
+println(y)
