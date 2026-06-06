@@ -1,0 +1,11 @@
+// EXPECT: missing method 'area'
+// A class satisfies a trait bound only if it provides EVERY method. Box implements
+// `draw` but not `area`, so it does not satisfy `Drawable` — reported per missing
+// method.
+tr Drawable { fn draw(self) -> str; fn area(self) -> i64; }
+cl Box {
+  w: i64
+  fn draw(self) -> str { "box" }
+}
+fn render<T: Drawable>(x:T) -> str { x.draw() }
+println(render(Box(3)))

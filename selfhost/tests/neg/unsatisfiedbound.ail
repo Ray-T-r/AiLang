@@ -1,0 +1,11 @@
+// EXPECT: does not satisfy bound 'Show'
+// Constrained generics: calling a `<T: Show>` generic with a type that doesn't
+// provide the trait's methods is a compile error at the .ail call site (instead of
+// the cryptic post-inline clang error it used to be). i64 has no `desc`.
+tr Show { fn desc(self) -> str; }
+cl Dog {
+  nm: str
+  fn desc(self) -> str { self.nm }
+}
+fn show<T: Show>(x:T) -> str { x.desc() }
+println(show(5))

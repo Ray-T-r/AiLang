@@ -1085,6 +1085,30 @@ fn parse_class(p:*P) -> ClassDef {
   ClassDef(name, parent, fnames, ftypes, methods, vflags)
 }
 
+// `tr Name { fn m(self,…) -> R; … }` — a trait: the required method NAMES that a
+// generic bound `<T: Name>` demands. Signatures-only (no bodies/fields); each `fn`
+// line is terminated by `;` so the signature (params, ret — which may themselves
+// mention `fn`) is skipped robustly by scanning to the next `;`. Pure checker
+// metadata: collected like a class, registered as a bound, never lowered to C.
+fn parse_trait(p:*P) -> TraitDef {
+  adv(p)                            // `tr`
+  name := ctext(p); adv(p)          // Name
+  eat(p, TK_LBRACE())
+  mu methods:[str] := []
+  lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
+    if ckind(p) == TK_IDENT() && ctext(p) == "fn" {
+      adv(p)                                          // `fn`
+      methods = push(methods, ctext(p)); adv(p)       // method name
+      lp ckind(p) != TK_SEMI() && ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() { adv(p) }   // skip the rest of the signature
+      if ckind(p) == TK_SEMI() { adv(p) }
+    } el {
+      adv(p)                                          // stray `;` / token
+    }
+  }
+  eat(p, TK_RBRACE())
+  TraitDef(name, methods)
+}
+
 // `en Name { V0, V1(f:T, …), … }` — collect variant names + ";"-joined field
 // type lists (parallel arrays). A field whose type is the enclosing enum itself
 // is recorded as "@self" so codegen boxes it (heap pointer) to break the cycle.
@@ -1385,7 +1409,11 @@ fn parse_func(p:*P) -> Func {
   if ckind(p) == TK_LT() {
     adv(p)
     lp ckind(p) != TK_GT() && ckind(p) != TK_EOF() {
-      if ckind(p) == TK_IDENT() { tparams = push(tparams, ctext(p)); adv(p) }
+      if ckind(p) == TK_IDENT() {
+        mu tp := ctext(p); adv(p)
+        if ckind(p) == TK_COLON() { adv(p); tp = tp + ":" + ctext(p); adv(p) }   // `<T: Bound>` → encode as "T:Bound" (driver splits it: bound → @bound side map, tparam normalized to "T")
+        tparams = push(tparams, tp)
+      }
       if ckind(p) == TK_COMMA() { adv(p) }
     }
     eat(p, TK_GT())
