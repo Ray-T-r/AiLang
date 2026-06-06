@@ -1,0 +1,13 @@
+// EXPECT: guard cannot be combined with a nested pattern
+// A guard can't see bindings introduced by a nested pattern (they live in the
+// inner desugared match), so the combination is rejected.
+en Pair { P(a:i64, b:i64) }
+en Opt { Some(p:Pair), None }
+fn f(o:Opt) -> i64 {
+  mt o {
+    Some(P(a, b)) if a > b => 1;
+    Some(P(a, b)) => 2;
+    None => 0;
+  }
+}
+println(f(Some(P(3, 4))))

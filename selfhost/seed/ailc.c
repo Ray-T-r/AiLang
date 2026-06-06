@@ -288,7 +288,7 @@ struct s_Expr { int tag; union {
   struct { arr_Expr f0; const char* f1; } Array;
   struct { const char* f0; arr_Expr f1; arr_Expr f2; } MapLit;
   struct { s_Expr* f0; } Addr;
-  struct { s_Expr* f0; arr_str f1; arr_str f2; arr_Expr f3; } Match;
+  struct { s_Expr* f0; arr_str f1; arr_str f2; arr_Expr f3; arr_Expr f4; } Match;
   struct { s_Expr* f0; s_Expr* f1; s_Expr* f2; } IfE;
   struct { s_Expr* f0; } Try;
   struct { arr_str f0; arr_str f1; s_Expr* f2; int64_t f3; } Lambda;
@@ -912,7 +912,7 @@ static s_Expr mkv_Index(s_Expr f0, s_Expr f1){ s_Expr v; v.tag=8; v.u.Index.f0=(
 static s_Expr mkv_Array(arr_Expr f0, const char* f1){ s_Expr v; v.tag=9; v.u.Array.f0=f0; v.u.Array.f1=f1; return v; }
 static s_Expr mkv_MapLit(const char* f0, arr_Expr f1, arr_Expr f2){ s_Expr v; v.tag=10; v.u.MapLit.f0=f0; v.u.MapLit.f1=f1; v.u.MapLit.f2=f2; return v; }
 static s_Expr mkv_Addr(s_Expr f0){ s_Expr v; v.tag=11; v.u.Addr.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.Addr.f0=f0; return v; }
-static s_Expr mkv_Match(s_Expr f0, arr_str f1, arr_str f2, arr_Expr f3){ s_Expr v; v.tag=12; v.u.Match.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.Match.f0=f0; v.u.Match.f1=f1; v.u.Match.f2=f2; v.u.Match.f3=f3; return v; }
+static s_Expr mkv_Match(s_Expr f0, arr_str f1, arr_str f2, arr_Expr f3, arr_Expr f4){ s_Expr v; v.tag=12; v.u.Match.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.Match.f0=f0; v.u.Match.f1=f1; v.u.Match.f2=f2; v.u.Match.f3=f3; v.u.Match.f4=f4; return v; }
 static s_Expr mkv_IfE(s_Expr f0, s_Expr f1, s_Expr f2){ s_Expr v; v.tag=13; v.u.IfE.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.IfE.f0=f0; v.u.IfE.f1=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.IfE.f1=f1; v.u.IfE.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.IfE.f2=f2; return v; }
 static s_Expr mkv_Try(s_Expr f0){ s_Expr v; v.tag=14; v.u.Try.f0=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.Try.f0=f0; return v; }
 static s_Expr mkv_Lambda(arr_str f0, arr_str f1, s_Expr f2, int64_t f3){ s_Expr v; v.tag=15; v.u.Lambda.f0=f0; v.u.Lambda.f1=f1; v.u.Lambda.f2=(s_Expr*)GC_MALLOC(sizeof(s_Expr)); *v.u.Lambda.f2=f2; v.u.Lambda.f3=f3; return v; }
@@ -1136,7 +1136,8 @@ const char* f_gen_var(s_Syms* v_sy, const char* v_name);
 const char* f_gen_expr(s_Syms* v_sy, s_Expr v_e);
 const char* f_gen_ife(s_Syms* v_sy, s_Expr v_c, s_Expr v_t, s_Expr v_el2);
 const char* f_gen_try(s_Syms* v_sy, s_Expr v_e);
-const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies);
+const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards);
+const char* f_gen_match_g(s_Syms* v_sy, s_Expr v_sc, const char* v_sty, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards, const char* v_rty);
 const char* f_gen_arm_binds(s_Syms* v_sy, const char* v_vname, arr_str v_binds);
 void f_bind_arm_types(s_Syms* v_sy, const char* v_vname, arr_str v_binds);
 int64_t f_variant_tag(s_Syms* v_sy, const char* v_sty, const char* v_vname);
@@ -1248,7 +1249,7 @@ int64_t f_collect2(s_Syms* v_base, s_Syms* v_sy, s_Expr v_a, s_Expr v_b);
 int64_t f_collect3(s_Syms* v_base, s_Syms* v_sy, s_Expr v_a, s_Expr v_b, s_Expr v_c);
 int64_t f_collect_args(s_Syms* v_base, s_Syms* v_sy, arr_Expr v_args);
 int64_t f_collect_kv(s_Syms* v_base, s_Syms* v_sy, arr_Expr v_keys, arr_Expr v_vals);
-int64_t f_collect_match_e(s_Syms* v_base, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bodies);
+int64_t f_collect_match_e(s_Syms* v_base, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bodies, arr_Expr v_guards);
 int64_t f_collect_if_s(s_Syms* v_base, s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb);
 int64_t f_collect_body_s(s_Syms* v_base, s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b);
 int64_t f_collect_coll_s(s_Syms* v_base, s_Syms* v_sy, s_Expr v_coll, arr_Stmt v_b);
@@ -1305,8 +1306,10 @@ int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t
 int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_pos, const char* v_src);
 int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
 int64_t f_vn_has(arr_str v_vnames, const char* v_v);
-int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src);
-int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, int64_t v_pos, const char* v_src);
+int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v);
+int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src);
+int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src);
+int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, arr_Expr v_guards, int64_t v_pos, const char* v_src);
 int64_t f_chk_bin(arr_Func v_funcs, s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r, int64_t v_pos, const char* v_src);
 int64_t f_lambda_arity(s_Expr v_e);
 int64_t f_hof_arity_check(const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
@@ -2391,7 +2394,7 @@ arr_Expr f_subst_args(arr_Expr v_es, const char* v_nm, s_Expr v_repl) {
 }
 
 s_Expr f_subst_var(s_Expr v_e, const char* v_nm, s_Expr v_repl) {
-    return ({ s_Expr __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = f_subst_var_hit(v_n, v_nm, v_repl, v_e); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = mkv_Tuple(f_subst_args(v_tes, v_nm, v_repl)); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = v_e; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = mkv_Bin(v_o, f_subst_var(v_a, v_nm, v_repl), f_subst_var(v_b, v_nm, v_repl)); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = mkv_Unary(v_o, f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_ar = __s.u.Call.f1; __m = mkv_Call(v_f, f_subst_args(v_ar, v_nm, v_repl)); } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = mkv_Field(f_subst_var(v_o, v_nm, v_repl), v_f); } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = mkv_Index(f_subst_var(v_o, v_nm, v_repl), f_subst_var(v_ix, v_nm, v_repl)); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = mkv_Array(f_subst_args(v_es, v_nm, v_repl), v_et); } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_ks = __s.u.MapLit.f1; arr_Expr v_vs = __s.u.MapLit.f2; __m = mkv_MapLit(v_ml, f_subst_args(v_ks, v_nm, v_repl), f_subst_args(v_vs, v_nm, v_repl)); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = mkv_Addr(f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = mkv_Match(f_subst_var(v_sc, v_nm, v_repl), v_vn, v_vb, f_subst_args(v_bd, v_nm, v_repl)); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = mkv_IfE(f_subst_var(v_c, v_nm, v_repl), f_subst_var(v_t, v_nm, v_repl), f_subst_var(v_el2, v_nm, v_repl)); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = mkv_Try(f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = mkv_Lambda(v_ps, v_pts, f_subst_var(v_b, v_nm, v_repl), v_id); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = v_e; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = v_e; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = v_e; } else if(__s.tag==18){ __m = v_e; } __m; });
+    return ({ s_Expr __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = f_subst_var_hit(v_n, v_nm, v_repl, v_e); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = mkv_Tuple(f_subst_args(v_tes, v_nm, v_repl)); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = v_e; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = mkv_Bin(v_o, f_subst_var(v_a, v_nm, v_repl), f_subst_var(v_b, v_nm, v_repl)); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = mkv_Unary(v_o, f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_ar = __s.u.Call.f1; __m = mkv_Call(v_f, f_subst_args(v_ar, v_nm, v_repl)); } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = mkv_Field(f_subst_var(v_o, v_nm, v_repl), v_f); } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = mkv_Index(f_subst_var(v_o, v_nm, v_repl), f_subst_var(v_ix, v_nm, v_repl)); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = mkv_Array(f_subst_args(v_es, v_nm, v_repl), v_et); } else if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_ks = __s.u.MapLit.f1; arr_Expr v_vs = __s.u.MapLit.f2; __m = mkv_MapLit(v_ml, f_subst_args(v_ks, v_nm, v_repl), f_subst_args(v_vs, v_nm, v_repl)); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = mkv_Addr(f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = mkv_Match(f_subst_var(v_sc, v_nm, v_repl), v_vn, v_vb, f_subst_args(v_bd, v_nm, v_repl), f_subst_args(v_gd, v_nm, v_repl)); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = mkv_IfE(f_subst_var(v_c, v_nm, v_repl), f_subst_var(v_t, v_nm, v_repl), f_subst_var(v_el2, v_nm, v_repl)); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = mkv_Try(f_subst_var(v_x, v_nm, v_repl)); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = mkv_Lambda(v_ps, v_pts, f_subst_var(v_b, v_nm, v_repl), v_id); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = v_e; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = v_e; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = v_e; } else if(__s.tag==18){ __m = v_e; } __m; });
 }
 
 s_Expr f_parse_arm_cond(s_P* v_p, arr_Expr v_scruts, int64_t v_is_tuple, s_Binds* v_bnd) {
@@ -2585,9 +2588,19 @@ s_Expr f_parse_primary(s_P* v_p) {
     arr_str v_vnames;
     arr_str v_vbinds;
     arr_Expr v_bodies;
+    arr_Expr v_guards;
     const char* v_vname;
     const char* v_binds;
+    arr_str v_nest_tmps;
+    arr_str v_nest_vars;
+    arr_str v_nest_binds;
+    const char* v_fld;
+    int64_t v_fpos;
+    const char* v_tmp;
+    const char* v_ib;
+    s_Expr v_guard;
     s_Expr v_body;
+    int64_t v_ni;
     s_Expr v_cond;
     s_Expr v_then_e;
     s_Expr v_els;
@@ -2679,23 +2692,58 @@ s_Expr f_parse_primary(s_P* v_p) {
         v_vnames = ({ arr_str __a = arr_str_new(); __a; });
         v_vbinds = ({ arr_str __a = arr_str_new(); __a; });
         v_bodies = ({ arr_Expr __a = arr_Expr_new(); __a; });
+        v_guards = ({ arr_Expr __a = arr_Expr_new(); __a; });
         while (((f_ckind(v_p) != f_TK_RBRACE()) && (f_ckind(v_p) != f_TK_EOF()))) {
             v_vname = f_ctext(v_p);
             f_adv(v_p);
             v_binds = "";
+            v_nest_tmps = ({ arr_str __a = arr_str_new(); __a; });
+            v_nest_vars = ({ arr_str __a = arr_str_new(); __a; });
+            v_nest_binds = ({ arr_str __a = arr_str_new(); __a; });
             if ((f_ckind(v_p) == f_TK_LPAREN())) {
                 f_adv(v_p);
                 while (((f_ckind(v_p) != f_TK_RPAREN()) && (f_ckind(v_p) != f_TK_EOF()))) {
+                    v_fld = f_ctext(v_p);
+                    v_fpos = (v_p)->pos;
+                    f_adv(v_p);
                     if ((((int64_t)strlen(v_binds)) > 0)) {
                         v_binds = scat(v_binds, ";");
                     }
-                    v_binds = scat(v_binds, f_ctext(v_p));
-                    f_adv(v_p);
+                    if (((f_is_lower_ident(v_fld) == (1 != 1)) && (f_ckind(v_p) == f_TK_LPAREN()))) {
+                        v_tmp = scat("__nest", i2s(v_fpos));
+                        v_binds = scat(v_binds, v_tmp);
+                        f_adv(v_p);
+                        v_ib = "";
+                        while (((f_ckind(v_p) != f_TK_RPAREN()) && (f_ckind(v_p) != f_TK_EOF()))) {
+                            if ((((int64_t)strlen(v_ib)) > 0)) {
+                                v_ib = scat(v_ib, ";");
+                            }
+                            v_ib = scat(v_ib, f_ctext(v_p));
+                            f_adv(v_p);
+                            if ((f_ckind(v_p) == f_TK_COMMA())) {
+                                f_adv(v_p);
+                            }
+                        }
+                        f_eat(v_p, f_TK_RPAREN());
+                        v_nest_tmps = arr_str_push(v_nest_tmps, v_tmp);
+                        v_nest_vars = arr_str_push(v_nest_vars, v_fld);
+                        v_nest_binds = arr_str_push(v_nest_binds, v_ib);
+                    } else {
+                        v_binds = scat(v_binds, v_fld);
+                    }
                     if ((f_ckind(v_p) == f_TK_COMMA())) {
                         f_adv(v_p);
                     }
                 }
                 f_eat(v_p, f_TK_RPAREN());
+            }
+            v_guard = mkv_Bad();
+            if (((f_ckind(v_p) == f_TK_IDENT()) && (strcmp(f_ctext(v_p), "if") == 0))) {
+                f_adv(v_p);
+                v_guard = f_parse_expr(v_p);
+            }
+            if (((arr_str_len(v_nest_tmps) > 0) && (f_is_bad(v_guard) == (1 != 1)))) {
+                f_report_at((v_p)->src, (arr_Token_get((v_p)->toks, (v_p)->pos)).pos, "guard cannot be combined with a nested pattern in the same arm; destructure the inner value in a separate mt");
             }
             if ((f_ckind(v_p) == f_TK_ASSIGN())) {
                 f_adv(v_p);
@@ -2704,15 +2752,21 @@ s_Expr f_parse_primary(s_P* v_p) {
                 f_adv(v_p);
             }
             v_body = f_parse_expr(v_p);
+            v_ni = 0;
+            while ((v_ni < arr_str_len(v_nest_tmps))) {
+                v_body = mkv_Match(mkv_Var(arr_str_get(v_nest_tmps, v_ni)), ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, arr_str_get(v_nest_vars, v_ni)); __a; }), ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, arr_str_get(v_nest_binds, v_ni)); __a; }), ({ arr_Expr __a = arr_Expr_new(); __a = arr_Expr_push(__a, v_body); __a; }), ({ arr_Expr __a = arr_Expr_new(); __a = arr_Expr_push(__a, mkv_Bad()); __a; }));
+                v_ni = (v_ni + 1);
+            }
             v_vnames = arr_str_push(v_vnames, v_vname);
             v_vbinds = arr_str_push(v_vbinds, v_binds);
             v_bodies = arr_Expr_push(v_bodies, v_body);
+            v_guards = arr_Expr_push(v_guards, v_guard);
             if ((f_ckind(v_p) == f_TK_SEMI())) {
                 f_adv(v_p);
             }
         }
         f_eat(v_p, f_TK_RBRACE());
-        return mkv_Match(v_scrut, v_vnames, v_vbinds, v_bodies);
+        return mkv_Match(v_scrut, v_vnames, v_vbinds, v_bodies, v_guards);
     }
     if (((v_k == f_TK_IDENT()) && (strcmp(f_ctext(v_p), "if") == 0))) {
         f_adv(v_p);
@@ -4645,7 +4699,7 @@ const char* f_gen_var(s_Syms* v_sy, const char* v_name) {
 }
 
 const char* f_gen_expr(s_Syms* v_sy, s_Expr v_e) {
-    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = i2s(v_v); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = v_fs; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = f_gen_str(v_s); } else if(__s.tag==3){ const char* v_name = __s.u.Var.f0; __m = f_gen_var(v_sy, v_name); } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_gen_bin(v_sy, v_op, v_l, v_r); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = scat(scat("(!", f_gen_expr(v_sy, v_x)), ")"); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_gen_call(v_sy, v_fname, v_args); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_gen_field(v_sy, v_obj, v_fnm); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_gen_index(v_sy, v_obj, v_idx); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_gen_array(v_sy, v_elems, v_ety); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_gen_maplit(v_sy, v_mty, v_mks, v_mvs); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = scat(scat("(&", f_gen_expr(v_sy, v_x)), ")"); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_gen_match(v_sy, v_sc, v_vn, v_vb, v_bd); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_gen_ife(v_sy, v_c, v_t, v_el2); } else if(__s.tag==14){ s_Expr v_e = *(__s.u.Try.f0); __m = f_gen_try(v_sy, v_e); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_gen_lambda(v_sy, v_id); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_gen_tuple_lit(v_sy, v_elems); } else if(__s.tag==17){ arr_Stmt v_body = __s.u.BlockE.f0; __m = f_gen_block_e(v_sy, v_body); } else if(__s.tag==18){ __m = "0"; } __m; });
+    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = i2s(v_v); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = v_fs; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = f_gen_str(v_s); } else if(__s.tag==3){ const char* v_name = __s.u.Var.f0; __m = f_gen_var(v_sy, v_name); } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_gen_bin(v_sy, v_op, v_l, v_r); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = scat(scat("(!", f_gen_expr(v_sy, v_x)), ")"); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_gen_call(v_sy, v_fname, v_args); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_gen_field(v_sy, v_obj, v_fnm); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_gen_index(v_sy, v_obj, v_idx); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_gen_array(v_sy, v_elems, v_ety); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_gen_maplit(v_sy, v_mty, v_mks, v_mvs); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = scat(scat("(&", f_gen_expr(v_sy, v_x)), ")"); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_gen_match(v_sy, v_sc, v_vn, v_vb, v_bd, v_gd); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_gen_ife(v_sy, v_c, v_t, v_el2); } else if(__s.tag==14){ s_Expr v_e = *(__s.u.Try.f0); __m = f_gen_try(v_sy, v_e); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_gen_lambda(v_sy, v_id); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_gen_tuple_lit(v_sy, v_elems); } else if(__s.tag==17){ arr_Stmt v_body = __s.u.BlockE.f0; __m = f_gen_block_e(v_sy, v_body); } else if(__s.tag==18){ __m = "0"; } __m; });
 }
 
 const char* f_gen_ife(s_Syms* v_sy, s_Expr v_c, s_Expr v_t, s_Expr v_el2) {
@@ -4662,9 +4716,11 @@ const char* f_gen_try(s_Syms* v_sy, s_Expr v_e) {
     return scat(scat(scat(scat(scat(scat("({ ", v_rcty), " __t = "), f_gen_expr(v_sy, v_e)), "; if(__t.tag) return mk_err_"), f_arr_suffix(v_fret)), "(__t.err); __t.ok; })");
 }
 
-const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies) {
+const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards) {
     const char* v_sty;
     const char* v_rty;
+    int64_t v_special;
+    int64_t v_g;
     const char* v_out;
     int64_t v_i;
     const char* v_vname;
@@ -4676,6 +4732,17 @@ const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_v
         f_bind_arm_types(v_sy, arr_str_get(v_vnames, 0), f_split_semi(arr_str_get(v_vbinds, 0)));
     }
     v_rty = f_match_type(v_sy, v_bodies);
+    v_special = (1 != 1);
+    v_g = 0;
+    while ((v_g < arr_str_len(v_vnames))) {
+        if (((f_is_bad(arr_Expr_get(v_guards, v_g)) == (1 != 1)) || (strcmp(arr_str_get(v_vnames, v_g), "_") == 0))) {
+            v_special = (1 == 1);
+        }
+        v_g = (v_g + 1);
+    }
+    if (v_special) {
+        return f_gen_match_g(v_sy, v_sc, v_sty, v_vnames, v_vbinds, v_bodies, v_guards, v_rty);
+    }
     v_out = scat(scat(scat(scat(scat(scat("({ ", f_cty(v_rty)), " __m; "), f_cty(v_sty)), " __s = "), f_gen_expr(v_sy, v_sc)), "; ");
     v_i = 0;
     while ((v_i < arr_str_len(v_vnames))) {
@@ -4687,6 +4754,35 @@ const char* f_gen_match(s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_v
         v_out = scat(v_out, f_gen_arm_binds(v_sy, v_vname, v_binds));
         f_bind_arm_types(v_sy, v_vname, v_binds);
         v_out = scat(scat(scat(v_out, "__m = "), f_gen_expr(v_sy, arr_Expr_get(v_bodies, v_i))), "; } ");
+        v_i = (v_i + 1);
+    }
+    return scat(v_out, "__m; })");
+}
+
+const char* f_gen_match_g(s_Syms* v_sy, s_Expr v_sc, const char* v_sty, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bodies, arr_Expr v_guards, const char* v_rty) {
+    const char* v_out;
+    int64_t v_i;
+    const char* v_vname;
+    arr_str v_binds;
+    int64_t v_tag;
+    v_out = scat(scat(scat(scat(scat(scat("({ ", f_cty(v_rty)), " __m; int __done=0; "), f_cty(v_sty)), " __s = "), f_gen_expr(v_sy, v_sc)), "; ");
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        v_vname = arr_str_get(v_vnames, v_i);
+        v_binds = f_split_semi(arr_str_get(v_vbinds, v_i));
+        if ((strcmp(v_vname, "_") == 0)) {
+            v_out = scat(v_out, "if(!__done){ ");
+        } else {
+            v_tag = f_variant_tag(v_sy, v_sty, v_vname);
+            v_out = scat(scat(scat(v_out, "if(!__done && __s.tag=="), i2s(v_tag)), "){ ");
+        }
+        v_out = scat(v_out, f_gen_arm_binds(v_sy, v_vname, v_binds));
+        f_bind_arm_types(v_sy, v_vname, v_binds);
+        if (f_is_bad(arr_Expr_get(v_guards, v_i))) {
+            v_out = scat(scat(scat(v_out, "__m = "), f_gen_expr(v_sy, arr_Expr_get(v_bodies, v_i))), "; __done=1; } ");
+        } else {
+            v_out = scat(scat(scat(scat(scat(v_out, "if("), f_gen_expr(v_sy, arr_Expr_get(v_guards, v_i))), "){ __m = "), f_gen_expr(v_sy, arr_Expr_get(v_bodies, v_i))), "; __done=1; } } ");
+        }
         v_i = (v_i + 1);
     }
     return scat(v_out, "__m; })");
@@ -4886,7 +4982,7 @@ arr_str f_fv_args(arr_Expr v_args, arr_str v_acc) {
 }
 
 arr_str f_fv_walk(s_Expr v_e, arr_str v_acc) {
-    return ({ arr_str __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_name = __s.u.Var.f0; __m = f_fv_add(v_acc, v_name); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = v_acc; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = v_acc; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = v_acc; } else if(__s.tag==10){ const char* v_m = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_fv_args(v_mvs, f_fv_args(v_mks, v_acc)); } else if(__s.tag==18){ __m = v_acc; } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_fv_walk(v_r, f_fv_walk(v_l, v_acc)); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_fv_args(v_args, v_acc); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = f_fv_args(v_tes, v_acc); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_fv_body(v_bb, v_acc); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_fv_walk(v_obj, v_acc); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_fv_walk(v_idx, f_fv_walk(v_obj, v_acc)); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_fv_args(v_elems, v_acc); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_fv_args(v_bd, f_fv_walk(v_sc, v_acc)); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_fv_walk(v_el2, f_fv_walk(v_t, f_fv_walk(v_c, v_acc))); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_fv_walk(v_b, v_acc); } __m; });
+    return ({ arr_str __m; s_Expr __s = v_e; if(__s.tag==3){ const char* v_name = __s.u.Var.f0; __m = f_fv_add(v_acc, v_name); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = v_acc; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = v_acc; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = v_acc; } else if(__s.tag==10){ const char* v_m = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_fv_args(v_mvs, f_fv_args(v_mks, v_acc)); } else if(__s.tag==18){ __m = v_acc; } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_fv_walk(v_r, f_fv_walk(v_l, v_acc)); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_fv_args(v_args, v_acc); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = f_fv_args(v_tes, v_acc); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_fv_body(v_bb, v_acc); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_fv_walk(v_obj, v_acc); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_fv_walk(v_idx, f_fv_walk(v_obj, v_acc)); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_fv_args(v_elems, v_acc); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_fv_args(v_gd, f_fv_args(v_bd, f_fv_walk(v_sc, v_acc))); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_fv_walk(v_el2, f_fv_walk(v_t, f_fv_walk(v_c, v_acc))); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_fv_walk(v_x, v_acc); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_fv_walk(v_b, v_acc); } __m; });
 }
 
 arr_str f_fv_body(arr_Stmt v_body, arr_str v_acc) {
@@ -6601,9 +6697,10 @@ int64_t f_collect_kv(s_Syms* v_base, s_Syms* v_sy, arr_Expr v_keys, arr_Expr v_v
     return 0;
 }
 
-int64_t f_collect_match_e(s_Syms* v_base, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bodies) {
+int64_t f_collect_match_e(s_Syms* v_base, s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bodies, arr_Expr v_guards) {
     f_collect_lams_expr(v_base, v_sy, v_sc);
     f_collect_args(v_base, v_sy, v_bodies);
+    f_collect_args(v_base, v_sy, v_guards);
     return 0;
 }
 
@@ -6641,7 +6738,7 @@ int64_t f_collect_call(s_Syms* v_base, s_Syms* v_sy, const char* v_fname, arr_Ex
 }
 
 int64_t f_collect_lams_expr(s_Syms* v_base, s_Syms* v_sy, s_Expr v_e) {
-    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_register_lam(v_base, v_sy, v_ps, v_pts, v_b, v_id); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_collect_call(v_base, v_sy, v_fname, v_args); } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_collect2(v_base, v_sy, v_l, v_r); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_collect_lams_expr(v_base, v_sy, v_obj); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_collect2(v_base, v_sy, v_obj, v_idx); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_collect_args(v_base, v_sy, v_elems); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_collect_match_e(v_base, v_sy, v_sc, v_bd); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_collect3(v_base, v_sy, v_c, v_t, v_el2); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==10){ const char* v_m = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_collect_kv(v_base, v_sy, v_mks, v_mvs); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_collect_args(v_base, v_sy, v_elems); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_collect_lams(v_base, v_sy, v_bb); } else if(__s.tag==18){ __m = 0; } __m; });
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_register_lam(v_base, v_sy, v_ps, v_pts, v_b, v_id); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_collect_call(v_base, v_sy, v_fname, v_args); } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_collect2(v_base, v_sy, v_l, v_r); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_collect_lams_expr(v_base, v_sy, v_obj); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_collect2(v_base, v_sy, v_obj, v_idx); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_collect_args(v_base, v_sy, v_elems); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_collect_match_e(v_base, v_sy, v_sc, v_bd, v_gd); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_collect3(v_base, v_sy, v_c, v_t, v_el2); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_collect_lams_expr(v_base, v_sy, v_x); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==10){ const char* v_m = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_collect_kv(v_base, v_sy, v_mks, v_mvs); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_collect_args(v_base, v_sy, v_elems); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_collect_lams(v_base, v_sy, v_bb); } else if(__s.tag==18){ __m = 0; } __m; });
 }
 
 int64_t f_collect_lams_stmt(s_Syms* v_base, s_Syms* v_sy, s_Stmt v_s) {
@@ -7126,7 +7223,19 @@ int64_t f_vn_has(arr_str v_vnames, const char* v_v) {
     return (1 != 1);
 }
 
-int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src) {
+int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        if (((strcmp(arr_str_get(v_vnames, v_i), v_v) == 0) && f_is_bad(arr_Expr_get(v_guards, v_i)))) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src) {
     const char* v_ty;
     int64_t v_i;
     const char* v_nm;
@@ -7148,22 +7257,27 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
     v_i = 0;
     while ((v_i < arr_str_len(v_vnames))) {
         v_nm = arr_str_get(v_vnames, v_i);
-        if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
-            f_report_at(v_src, v_pos, scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty));
-        }
-        v_nb = arr_str_len(f_split_semi(arr_str_get(v_vbinds, v_i)));
-        if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_nm))) {
-            v_nf = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_nm)));
-            if ((v_nb > v_nf)) {
-                f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat("variant '", v_nm), "' binds "), i2s(v_nb)), " but has "), i2s(v_nf)), " field(s)"));
+        if ((strcmp(v_nm, "_") != 0)) {
+            if (((f_is_variant(v_sy, v_nm) == (1 != 1)) || (strcmp(map_str_str_get((v_sy)->evar, v_nm), v_ty) != 0))) {
+                f_report_at(v_src, v_pos, scat(scat(scat("unknown variant '", v_nm), "' in match on "), v_ty));
+            }
+            v_nb = arr_str_len(f_split_semi(arr_str_get(v_vbinds, v_i)));
+            if (map_str_str_has((v_sy)->evar, scat("@vfldn.", v_nm))) {
+                v_nf = s2i(map_str_str_get((v_sy)->evar, scat("@vfldn.", v_nm)));
+                if ((v_nb > v_nf)) {
+                    f_report_at(v_src, v_pos, scat(scat(scat(scat(scat(scat("variant '", v_nm), "' binds "), i2s(v_nb)), " but has "), i2s(v_nf)), " field(s)"));
+                }
             }
         }
         v_i = (v_i + 1);
     }
+    if (f_vn_has_ug(v_vnames, v_guards, "_")) {
+        return 0;
+    }
     v_all = f_split_semi(map_str_str_get((v_sy)->evar, scat("@order.", v_ty)));
     v_j = 0;
     while ((v_j < arr_str_len(v_all))) {
-        if ((f_vn_has(v_vnames, arr_str_get(v_all, v_j)) == (1 != 1))) {
+        if ((f_vn_has_ug(v_vnames, v_guards, arr_str_get(v_all, v_j)) == (1 != 1))) {
             f_report_at(v_src, v_pos, scat(scat(scat(scat("non-exhaustive match: enum ", v_ty), " missing variant '"), arr_str_get(v_all, v_j)), "'"));
         }
         v_j = (v_j + 1);
@@ -7171,10 +7285,48 @@ int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_
     return 0;
 }
 
-int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, int64_t v_pos, const char* v_src) {
-    f_match_check(v_sy, v_sc, v_vnames, v_vbinds, v_pos, v_src);
+int64_t f_type_nest_temps(s_Syms* v_sy, arr_str v_vnames, arr_str v_vbinds, int64_t v_pos, const char* v_src) {
+    int64_t v_i;
+    const char* v_nm;
+    arr_str v_bs;
+    int64_t v_j;
+    const char* v_k;
+    const char* v_ft;
+    const char* v_ty;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    v_i = 0;
+    while ((v_i < arr_str_len(v_vnames))) {
+        v_nm = arr_str_get(v_vnames, v_i);
+        v_bs = f_split_semi(arr_str_get(v_vbinds, v_i));
+        v_j = 0;
+        while ((v_j < arr_str_len(v_bs))) {
+            if (f_has_sub(arr_str_get(v_bs, v_j), "__nest")) {
+                v_k = scat(scat(scat("@vfld.", v_nm), "."), i2s(v_j));
+                if (map_str_str_has((v_sy)->evar, v_k)) {
+                    v_ft = map_str_str_get((v_sy)->evar, v_k);
+                    v_ty = ({ const char* __r; if (f_is_boxed_ft(v_ft)) { __r = f_boxed_enum(v_ft, map_str_str_get((v_sy)->evar, v_nm)); } else { __r = v_ft; } __r; });
+                    if (map_str_str_has((v_sy)->evar, scat("@order.", v_ty))) {
+                        f_set_ty(v_sy, arr_str_get(v_bs, v_j), v_ty);
+                    } else {
+                        f_report_at(v_src, v_pos, scat(scat("cannot destructure non-enum field of type ", v_ty), " with a nested pattern"));
+                    }
+                }
+            }
+            v_j = (v_j + 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
+int64_t f_chk_match(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_sc, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_bd, arr_Expr v_guards, int64_t v_pos, const char* v_src) {
+    f_match_check(v_sy, v_sc, v_vnames, v_vbinds, v_guards, v_pos, v_src);
+    f_type_nest_temps(v_sy, v_vnames, v_vbinds, v_pos, v_src);
     f_check_expr(v_funcs, v_sy, v_sc, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_bd, v_pos, v_src);
+    f_chk_args(v_funcs, v_sy, v_guards, v_pos, v_src);
     return 0;
 }
 
@@ -7285,7 +7437,7 @@ int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, 
 }
 
 int64_t f_check_expr(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src) {
-    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_gd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
 }
 
 int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr v_e, int64_t v_pos, const char* v_src) {

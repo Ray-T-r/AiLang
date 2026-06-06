@@ -1,0 +1,12 @@
+// EXPECT: non-exhaustive match: enum Inner missing variant 'Y'
+// A nested pattern on a multi-variant (refutable) inner enum: the desugared
+// inner match must still be exhaustive.
+en Inner { X(v:i64), Y(v:i64) }
+en Outer { Wrap(i:Inner), Empty }
+fn f(o:Outer) -> i64 {
+  mt o {
+    Wrap(X(v)) => v;
+    Empty => 0;
+  }
+}
+println(f(Wrap(X(5))))

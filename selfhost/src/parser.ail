@@ -314,7 +314,7 @@ fn subst_var(e:Expr, nm:str, repl:Expr) -> Expr {
     Array(es,et)       => Array(subst_args(es,nm,repl), et);
     MapLit(ml,ks,vs)   => MapLit(ml, subst_args(ks,nm,repl), subst_args(vs,nm,repl));
     Addr(x)            => Addr(subst_var(x,nm,repl));
-    Match(sc,vn,vb,bd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl));
+    Match(sc,vn,vb,bd,gd) => Match(subst_var(sc,nm,repl), vn, vb, subst_args(bd,nm,repl), subst_args(gd,nm,repl));
     IfE(c,t,el2)       => IfE(subst_var(c,nm,repl), subst_var(t,nm,repl), subst_var(el2,nm,repl));
     Try(x)             => Try(subst_var(x,nm,repl));
     Lambda(ps,pts,b,id)    => Lambda(ps, pts, subst_var(b,nm,repl), id);
@@ -497,29 +497,75 @@ fn parse_primary(p:*P) -> Expr {
     mu vnames:[str] := []
     mu vbinds:[str] := []
     mu bodies:[Expr] := []
+    mu guards:[Expr] := []
     lp ckind(p) != TK_RBRACE() && ckind(p) != TK_EOF() {
-      vname := ctext(p); adv(p)         // Variant name
+      vname := ctext(p); adv(p)         // Variant name (or `_` catch-all)
       mu binds:str := ""                 // ";"-joined binding names
+      // A field that is itself an `Inner(a,b)` pattern desugars: it binds a fresh
+      // `__nest<pos>` temp here, and the arm body gets wrapped (below) in an inner
+      // single-arm `mt __nest<pos> { Inner(a,b) => body }` — reusing the normal
+      // Match path. (One level deep; the inner args must be plain identifiers.)
+      mu nest_tmps:[str] := []
+      mu nest_vars:[str] := []
+      mu nest_binds:[str] := []
       if ckind(p) == TK_LPAREN() {
         adv(p)
         lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+          fld := ctext(p); fpos := p.pos; adv(p)
           if len(binds) > 0 { binds = binds + ";" }
-          binds = binds + ctext(p); adv(p)
+          if is_lower_ident(fld) == false && ckind(p) == TK_LPAREN() {
+            tmp := "__nest" + int_to_str(fpos)     // capitalized + `(` → nested pattern
+            binds = binds + tmp
+            adv(p)                                  // inner `(`
+            mu ib:str := ""
+            lp ckind(p) != TK_RPAREN() && ckind(p) != TK_EOF() {
+              if len(ib) > 0 { ib = ib + ";" }
+              ib = ib + ctext(p); adv(p)
+              if ckind(p) == TK_COMMA() { adv(p) }
+            }
+            eat(p, TK_RPAREN())
+            nest_tmps = push(nest_tmps, tmp)
+            nest_vars = push(nest_vars, fld)
+            nest_binds = push(nest_binds, ib)
+          } el {
+            binds = binds + fld                     // plain identifier binding
+          }
           if ckind(p) == TK_COMMA() { adv(p) }
         }
         eat(p, TK_RPAREN())
       }
+      // optional `if <expr>` guard before `=>` (Bad = unguarded). parse_expr
+      // stops at the `=` of `=>`, so the comparison `>` in `n > 0` is consumed
+      // as part of the guard, not the arrow.
+      mu guard := Bad
+      if ckind(p) == TK_IDENT() && ctext(p) == "if" { adv(p); guard = parse_expr(p) }
+      // A guard references arm bindings, but a nested pattern's bindings live in
+      // the inner (desugared) match's scope — out of reach of an outer guard. So
+      // disallow the combination (the user can destructure inside a separate mt).
+      if len(nest_tmps) > 0 && is_bad(guard) == false {
+        report_at(p.src, p.toks[p.pos].pos, "guard cannot be combined with a nested pattern in the same arm; destructure the inner value in a separate mt")
+      }
       // `=>`  is lexed as `=` then `>` (no fat-arrow token)
       if ckind(p) == TK_ASSIGN() { adv(p) }
       if ckind(p) == TK_GT() { adv(p) }
-      body := parse_expr(p)
+      mu body := parse_expr(p)
+      // Wrap the body in one inner single-arm match per nested field. The temp is
+      // typed (by the outer arm's bind_arm_types in gen_match) to its field's enum,
+      // so the inner match lowers like any other. A single-variant inner enum is
+      // irrefutable; a multi-variant one makes the inner match non-exhaustive.
+      mu ni := 0
+      lp ni < len(nest_tmps) {
+        body = Match(Var(nest_tmps[ni]), [nest_vars[ni]], [nest_binds[ni]], [body], [Bad])
+        ni += 1
+      }
       vnames = push(vnames, vname)
       vbinds = push(vbinds, binds)
       bodies = push(bodies, body)
+      guards = push(guards, guard)
       if ckind(p) == TK_SEMI() { adv(p) }   // arm separator
     }
     eat(p, TK_RBRACE())
-    rt Match(scrut, vnames, vbinds, bodies)
+    rt Match(scrut, vnames, vbinds, bodies, guards)
   }
   // `if cond { e } el { e }` as an expression (branches are single expressions
   // in the subset). Distinct from the statement `if` handled in parse_stmt.

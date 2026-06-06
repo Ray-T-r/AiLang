@@ -1,0 +1,30 @@
+// Match guards (`Variant(b…) if <cond> => …`) and the `_` catch-all arm. A
+// guarded arm whose condition is false falls through to a later arm — so each
+// variant still needs an UNGUARDED arm (or a `_`) to stay exhaustive. Output is
+// deterministic.  Expected output:  big circle / small circle / square / rect / red / other
+en Shape { Circle(r:i64), Rect(w:i64, h:i64) }
+
+fn describe(s:Shape) -> str {
+  mt s {
+    Circle(r) if r > 10  => "big circle";
+    Circle(r)            => "small circle";   // unguarded fallback for Circle
+    Rect(w, h) if w == h => "square";
+    Rect(w, h)           => "rect";           // unguarded fallback for Rect
+  }
+}
+
+en Color { Red, Green, Blue }
+
+fn cname(c:Color) -> str {
+  mt c {
+    Red => "red";
+    _   => "other";     // catch-all covers Green and Blue
+  }
+}
+
+println(describe(Circle(20)))   // big circle  — guard r>10 holds
+println(describe(Circle(3)))    // small circle — guard fails, falls through
+println(describe(Rect(5, 5)))   // square      — guard w==h holds
+println(describe(Rect(4, 6)))   // rect        — guard fails, falls through
+println(cname(Red))             // red
+println(cname(Blue))            // other       — via the _ arm

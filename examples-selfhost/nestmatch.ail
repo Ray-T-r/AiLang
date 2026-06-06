@@ -1,0 +1,24 @@
+// Nested / destructuring patterns: a variant field that is itself an `Inner(a,b)`
+// pattern is destructured in place. Pair is single-variant, so the inner matches
+// are irrefutable. A nested field can sit alongside a plain field in the same arm.
+// Expected output:  42 / 0 / 70
+en Pair { P(a:i64, b:i64) }
+en Opt { Some(p:Pair), None }
+en Tagged { Box(p:Pair, tag:i64) }
+
+fn product(o:Opt) -> i64 {
+  mt o {
+    Some(P(a, b)) => a * b;     // destructure the inner Pair
+    None          => 0;
+  }
+}
+
+fn weighted(t:Tagged) -> i64 {
+  mt t {
+    Box(P(a, b), tag) => (a + b) * tag;   // nested field + plain field together
+  }
+}
+
+println(product(Some(P(6, 7))))      // 42
+println(product(None))               // 0
+println(weighted(Box(P(3, 4), 10)))  // 70

@@ -1,0 +1,11 @@
+// EXPECT: non-exhaustive match: enum E missing variant 'A'
+// A guarded arm may not fire at runtime, so a variant covered ONLY by a guarded
+// arm (here A, with no unguarded A or `_`) is not exhaustively matched.
+en E { A(x:i64), B }
+fn f(e:E) -> i64 {
+  mt e {
+    A(x) if x > 0 => 1;
+    B => 0;
+  }
+}
+println(f(B))
