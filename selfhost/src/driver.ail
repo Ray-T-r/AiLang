@@ -68,6 +68,7 @@ fn subst_struct_ty(tparams:[str], args:[str], ty:str) -> str {
   ty
 }
 fn mk1(s:str) -> [str] { mu xs:[str] := []   xs = push(xs, s)   xs }
+fn mk2(a:str, b:str) -> [str] { mu xs:[str] := []   xs = push(xs, a)   xs = push(xs, b)   xs }
 // True if a struct named `nm` is already in `xs` (dedup of generated instances).
 fn has_struct(xs:[StructDef], nm:str) -> bool {
   mu i := 0
@@ -1376,6 +1377,17 @@ fn compile_to_c(src:str, dir:str) -> str {
         if has_struct(structs, inst.name) == false { structs = push(structs, inst) }
         sk += 1
       }
+    } el if len(gstructs[gti].tparams) == 2 {
+      mu sa := 0                                  // 2-param: scalar Cartesian (covers ctor-inferred Pair(1,"x"))
+      lp sa < len(gscal) {
+        mu sb := 0
+        lp sb < len(gscal) {
+          inst := gen_instance(gstructs[gti], mk2(gscal[sa], gscal[sb]))
+          if has_struct(structs, inst.name) == false { structs = push(structs, inst) }
+          sb += 1
+        }
+        sa += 1
+      }
     }
     gti += 1
   }
@@ -1424,6 +1436,17 @@ fn compile_to_c(src:str, dir:str) -> str {
         einst := gen_enum_instance(genums[gnti], mk1(gscal[esk]))
         if has_enum(enums, einst.name) == false { enums = push(enums, einst) }
         esk += 1
+      }
+    } el if len(genums[gnti].tparams) == 2 {
+      mu ea := 0                                  // 2-param: scalar Cartesian
+      lp ea < len(gscal) {
+        mu eb := 0
+        lp eb < len(gscal) {
+          einst := gen_enum_instance(genums[gnti], mk2(gscal[ea], gscal[eb]))
+          if has_enum(enums, einst.name) == false { enums = push(enums, einst) }
+          eb += 1
+        }
+        ea += 1
       }
     }
     gnti += 1

@@ -288,12 +288,11 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
     gm := gvariant_mangle(sy, fname, args)
     if len(gm) > 0 && has(sy.evar, gm) rt sy.evar[gm]
   }
-  // A generic call's type: its return type with the type param substituted.
+  // A generic call's type: its return type with each type param substituted by its
+  // own inferred type (so `<A,B>` returning `A` vs `B` resolve correctly).
   if is_generic(sy, fname) {
     f := find_gfn(sy, fname)
-    gt := generic_T(sy, f, args)
-    if is_tparam(f, f.ret) rt gt
-    rt f.ret
+    rt subst_multi(sy, f, f.ret, args)
   }
   // super.m(…) inside a method → the parent impl's return type (needs @curclass).
   if len(args) >= 1 && var_name(args[0]) == "super" && has(sy.evar, "@curclass") {

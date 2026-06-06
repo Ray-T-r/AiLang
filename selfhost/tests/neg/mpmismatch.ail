@@ -1,0 +1,6 @@
+// EXPECT: expects Pair_i64_str, got Pair_str_i64
+// Multi-param generic instantiations are distinct nominal types AND parameter order
+// matters: Pair<i64,str> ≠ Pair<str,i64>, so passing the wrong one is a type error.
+st Pair<A,B> { a: A  b: B }
+fn need(p: Pair<i64,str>) -> i64 { p.a }
+println(need(Pair("x", 1)))
