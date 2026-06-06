@@ -2090,9 +2090,95 @@ fn auto_imports(src:str) -> str {
   if need_sock { out = out + "im \"std/sock.ail\"\n" }
   out
 }
+// ----- module namespacing: `im "path" as m` + qualified `m.fn()` ---------------
+// The alias in `im "path" as NAME` (else ""). Mirrors import_path's quote scan, then
+// looks for `as <ident>` after the closing quote.
+fn import_alias(line:str) -> str {
+  mu i := 0
+  lp i < len(line) { if line[i] != 32 { br } i += 1 }
+  if i + 3 > len(line) rt ""
+  if line[i] != 105 rt ""                 // 'i'
+  if line[i + 1] != 109 rt ""             // 'm'
+  mu j := i + 3
+  lp j < len(line) { if line[j] == 34 { br } j += 1 }   // opening '"'
+  mu k := j + 1
+  lp k < len(line) { if line[k] == 34 { br } k += 1 }   // closing '"'
+  if k >= len(line) rt ""
+  mu p := k + 1
+  lp p < len(line) { if line[p] != 32 { br } p += 1 }   // spaces
+  if p + 2 > len(line) rt ""
+  if line[p] != 97 rt ""                  // 'a'
+  if line[p + 1] != 115 rt ""             // 's'
+  p = p + 2
+  lp p < len(line) { if line[p] != 32 { br } p += 1 }
+  mu q := p
+  lp q < len(line) {
+    c := line[q]
+    if (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 95 { q += 1 } el { br }
+  }
+  substring(line, p, q)
+}
+fn name_in(names:[str], n:str) -> bool {
+  mu i := 0
+  lp i < len(names) { if names[i] == n rt true   i += 1 }
+  false
+}
+// The top-level (non-extern) function names defined in `body`: `fn NAME`, but not
+// `ex fn NAME` (renaming an extern would break its C symbol).
+fn module_fn_names(body:str) -> [str] {
+  toks := lex(body)
+  mu out:[str] := []
+  mu i := 0
+  lp i + 1 < len(toks) {
+    if toks[i].kind == TK_IDENT() && toks[i].text == "fn" && toks[i + 1].kind == TK_IDENT() {
+      if i == 0 || toks[i - 1].text != "ex" { out = push(out, toks[i + 1].text) }
+    }
+    i += 1
+  }
+  out
+}
+// Prefix every IDENT token in `src` whose text is in `names` with `pfx` — a
+// position-based edit (insert before the token start), so strings/comments/spacing
+// are preserved verbatim. Renames a module's own `fn` defs + their internal calls.
+fn prefix_idents(src:str, names:[str], pfx:str) -> str {
+  toks := lex(src)
+  mu out := ""
+  mu cur := 0
+  mu i := 0
+  lp i < len(toks) {
+    if toks[i].kind == TK_IDENT() && name_in(names, toks[i].text) {
+      p := toks[i].pos
+      if p >= cur { out = out + substring(src, cur, p) + pfx; cur = p }
+    }
+    i += 1
+  }
+  out + substring(src, cur, len(src))
+}
+// Rewrite qualified accesses `alias.name` → `alias_name` for each known alias.
+// Fast path: no aliases → returns `src` byte-identical (so the no-`as` self-compile
+// is unchanged → fixpoint-safe).
+fn rewrite_qualified(src:str, aliases:[str]) -> str {
+  if len(aliases) == 0 rt src
+  toks := lex(src)
+  mu out := ""
+  mu cur := 0
+  mu i := 0
+  lp i < len(toks) {
+    if i + 2 < len(toks) && toks[i].kind == TK_IDENT() && name_in(aliases, toks[i].text) && toks[i + 1].kind == TK_DOT() && toks[i + 2].kind == TK_IDENT() {
+      mp := toks[i].pos
+      nend := toks[i + 2].pos + len(toks[i + 2].text)
+      if mp >= cur { out = out + substring(src, cur, mp) + toks[i].text + "_" + toks[i + 2].text; cur = nend }
+      i += 3
+      ct
+    }
+    i += 1
+  }
+  out + substring(src, cur, len(src))
+}
 fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
   if has_import(src) == false rt src
   mu out := ""
+  mu aliases:[str] := []                  // `im "…" as m` aliases declared in THIS source
   mu i := 0
   mu lstart := 0
   lp i <= len(src) {
@@ -2100,6 +2186,8 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
       line := substring(src, lstart, i)
       imp := import_path(line)
       if len(imp) > 0 {
+        alias := import_alias(line)
+        if len(alias) > 0 { aliases = push(aliases, alias) }
         full := dir + imp
         if has(seen, full) == false {
           seen[full] = "1"
@@ -2135,7 +2223,9 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
             exit(1)
           }
-          out = out + resolve_imports(body, bdir, seen) + "\n"
+          mu rb := resolve_imports(body, bdir, seen)
+          if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
+          out = out + rb + "\n"
         }
       } el {
         out = out + line + "\n"
@@ -2144,6 +2234,6 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
     }
     i += 1
   }
-  out
+  rewrite_qualified(out, aliases)        // `m.fn` → `m_fn`; no aliases → byte-identical (fixpoint-safe)
 }
 

@@ -1440,6 +1440,11 @@ const char* f_import_path(const char* v_line);
 int64_t f_has_import(const char* v_src);
 int64_t f_is_math_export(const char* v_nm);
 const char* f_auto_imports(const char* v_src);
+const char* f_import_alias(const char* v_line);
+int64_t f_name_in(arr_str v_names, const char* v_n);
+arr_str f_module_fn_names(const char* v_body);
+const char* f_prefix_idents(const char* v_src, arr_str v_names, const char* v_pfx);
+const char* f_rewrite_qualified(const char* v_src, arr_str v_aliases);
 const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str v_seen);
 
 int64_t f_TK_EOF(void) {
@@ -9722,12 +9727,172 @@ const char* f_auto_imports(const char* v_src) {
     return v_out;
 }
 
+const char* f_import_alias(const char* v_line) {
+    int64_t v_i;
+    int64_t v_j;
+    int64_t v_k;
+    int64_t v_p;
+    int64_t v_q;
+    int64_t v_c;
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_line)))) {
+        if ((((int64_t)(unsigned char)(v_line)[v_i]) != 32)) {
+            break;
+        }
+        v_i = (v_i + 1);
+    }
+    if (((v_i + 3) > ((int64_t)strlen(v_line)))) {
+        return "";
+    }
+    if ((((int64_t)(unsigned char)(v_line)[v_i]) != 105)) {
+        return "";
+    }
+    if ((((int64_t)(unsigned char)(v_line)[(v_i + 1)]) != 109)) {
+        return "";
+    }
+    v_j = (v_i + 3);
+    while ((v_j < ((int64_t)strlen(v_line)))) {
+        if ((((int64_t)(unsigned char)(v_line)[v_j]) == 34)) {
+            break;
+        }
+        v_j = (v_j + 1);
+    }
+    v_k = (v_j + 1);
+    while ((v_k < ((int64_t)strlen(v_line)))) {
+        if ((((int64_t)(unsigned char)(v_line)[v_k]) == 34)) {
+            break;
+        }
+        v_k = (v_k + 1);
+    }
+    if ((v_k >= ((int64_t)strlen(v_line)))) {
+        return "";
+    }
+    v_p = (v_k + 1);
+    while ((v_p < ((int64_t)strlen(v_line)))) {
+        if ((((int64_t)(unsigned char)(v_line)[v_p]) != 32)) {
+            break;
+        }
+        v_p = (v_p + 1);
+    }
+    if (((v_p + 2) > ((int64_t)strlen(v_line)))) {
+        return "";
+    }
+    if ((((int64_t)(unsigned char)(v_line)[v_p]) != 97)) {
+        return "";
+    }
+    if ((((int64_t)(unsigned char)(v_line)[(v_p + 1)]) != 115)) {
+        return "";
+    }
+    v_p = (v_p + 2);
+    while ((v_p < ((int64_t)strlen(v_line)))) {
+        if ((((int64_t)(unsigned char)(v_line)[v_p]) != 32)) {
+            break;
+        }
+        v_p = (v_p + 1);
+    }
+    v_q = v_p;
+    while ((v_q < ((int64_t)strlen(v_line)))) {
+        v_c = ((int64_t)(unsigned char)(v_line)[v_q]);
+        if ((((((v_c >= 97) && (v_c <= 122)) || ((v_c >= 65) && (v_c <= 90))) || ((v_c >= 48) && (v_c <= 57))) || (v_c == 95))) {
+            v_q = (v_q + 1);
+        } else {
+            break;
+        }
+    }
+    return substr(v_line, v_p, v_q);
+}
+
+int64_t f_name_in(arr_str v_names, const char* v_n) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_names))) {
+        if ((strcmp(arr_str_get(v_names, v_i), v_n) == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+arr_str f_module_fn_names(const char* v_body) {
+    arr_Token v_toks;
+    arr_str v_out;
+    int64_t v_i;
+    v_toks = f_lex(v_body);
+    v_out = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while (((v_i + 1) < arr_Token_len(v_toks))) {
+        if (((((arr_Token_get(v_toks, v_i)).kind == f_TK_IDENT()) && (strcmp((arr_Token_get(v_toks, v_i)).text, "fn") == 0)) && ((arr_Token_get(v_toks, (v_i + 1))).kind == f_TK_IDENT()))) {
+            if (((v_i == 0) || (strcmp((arr_Token_get(v_toks, (v_i - 1))).text, "ex") != 0))) {
+                v_out = arr_str_push(v_out, (arr_Token_get(v_toks, (v_i + 1))).text);
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return v_out;
+}
+
+const char* f_prefix_idents(const char* v_src, arr_str v_names, const char* v_pfx) {
+    arr_Token v_toks;
+    const char* v_out;
+    int64_t v_cur;
+    int64_t v_i;
+    int64_t v_p;
+    v_toks = f_lex(v_src);
+    v_out = "";
+    v_cur = 0;
+    v_i = 0;
+    while ((v_i < arr_Token_len(v_toks))) {
+        if ((((arr_Token_get(v_toks, v_i)).kind == f_TK_IDENT()) && f_name_in(v_names, (arr_Token_get(v_toks, v_i)).text))) {
+            v_p = (arr_Token_get(v_toks, v_i)).pos;
+            if ((v_p >= v_cur)) {
+                v_out = scat(scat(v_out, substr(v_src, v_cur, v_p)), v_pfx);
+                v_cur = v_p;
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return scat(v_out, substr(v_src, v_cur, ((int64_t)strlen(v_src))));
+}
+
+const char* f_rewrite_qualified(const char* v_src, arr_str v_aliases) {
+    arr_Token v_toks;
+    const char* v_out;
+    int64_t v_cur;
+    int64_t v_i;
+    int64_t v_mp;
+    int64_t v_nend;
+    if ((arr_str_len(v_aliases) == 0)) {
+        return v_src;
+    }
+    v_toks = f_lex(v_src);
+    v_out = "";
+    v_cur = 0;
+    v_i = 0;
+    while ((v_i < arr_Token_len(v_toks))) {
+        if (((((((v_i + 2) < arr_Token_len(v_toks)) && ((arr_Token_get(v_toks, v_i)).kind == f_TK_IDENT())) && f_name_in(v_aliases, (arr_Token_get(v_toks, v_i)).text)) && ((arr_Token_get(v_toks, (v_i + 1))).kind == f_TK_DOT())) && ((arr_Token_get(v_toks, (v_i + 2))).kind == f_TK_IDENT()))) {
+            v_mp = (arr_Token_get(v_toks, v_i)).pos;
+            v_nend = ((arr_Token_get(v_toks, (v_i + 2))).pos + ((int64_t)strlen((arr_Token_get(v_toks, (v_i + 2))).text)));
+            if ((v_mp >= v_cur)) {
+                v_out = scat(scat(scat(scat(v_out, substr(v_src, v_cur, v_mp)), (arr_Token_get(v_toks, v_i)).text), "_"), (arr_Token_get(v_toks, (v_i + 2))).text);
+                v_cur = v_nend;
+            }
+            v_i = (v_i + 3);
+            continue;
+        }
+        v_i = (v_i + 1);
+    }
+    return scat(v_out, substr(v_src, v_cur, ((int64_t)strlen(v_src))));
+}
+
 const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str v_seen) {
     const char* v_out;
+    arr_str v_aliases;
     int64_t v_i;
     int64_t v_lstart;
     const char* v_line;
     const char* v_imp;
+    const char* v_alias;
     const char* v_full;
     const char* v_body;
     const char* v_bdir;
@@ -9737,10 +9902,12 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     const char* v_ed;
     const char* v_efull;
     const char* v_ebody;
+    const char* v_rb;
     if ((f_has_import(v_src) == (1 != 1))) {
         return v_src;
     }
     v_out = "";
+    v_aliases = ({ arr_str __a = arr_str_new(); __a; });
     v_i = 0;
     v_lstart = 0;
     while ((v_i <= ((int64_t)strlen(v_src)))) {
@@ -9748,6 +9915,10 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
             v_line = substr(v_src, v_lstart, v_i);
             v_imp = f_import_path(v_line);
             if ((((int64_t)strlen(v_imp)) > 0)) {
+                v_alias = f_import_alias(v_line);
+                if ((((int64_t)strlen(v_alias)) > 0)) {
+                    v_aliases = arr_str_push(v_aliases, v_alias);
+                }
                 v_full = scat(v_dir, v_imp);
                 if ((map_str_str_has(v_seen, v_full) == (1 != 1))) {
                     map_str_str_set(v_seen, v_full, "1");
@@ -9779,7 +9950,11 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                         printf("%s\n", scat(scat("error: cannot resolve import \"", v_imp), "\" — not found beside the source, in AILANG_STD, or next to ailc"));
                         exit((int)(1));
                     }
-                    v_out = scat(scat(v_out, f_resolve_imports(v_body, v_bdir, v_seen)), "\n");
+                    v_rb = f_resolve_imports(v_body, v_bdir, v_seen);
+                    if ((((int64_t)strlen(v_alias)) > 0)) {
+                        v_rb = f_prefix_idents(v_rb, f_module_fn_names(v_body), scat(v_alias, "_"));
+                    }
+                    v_out = scat(scat(v_out, v_rb), "\n");
                 }
             } else {
                 v_out = scat(scat(v_out, v_line), "\n");
@@ -9788,7 +9963,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
         }
         v_i = (v_i + 1);
     }
-    return v_out;
+    return f_rewrite_qualified(v_out, v_aliases);
 }
 
 int main(int argc, char** argv){
