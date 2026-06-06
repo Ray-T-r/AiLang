@@ -1,3 +1,6 @@
+#ifndef _WIN32
+#define GC_THREADS
+#endif
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -145,6 +148,21 @@ static int64_t pg_affected(int64_t res){ if(res==0) return 0; const char* s=PQcm
 static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return "''"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return "''"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }
 #endif
 static int g_argc=0; static char** g_argv=0;
+typedef struct { void* fn; void* env; } closure_t;
+#ifndef _WIN32
+typedef struct { pthread_t th; closure_t clo; } ail_thread_t;
+static void* ail_thread_tramp(void* p){ closure_t* c=(closure_t*)p; return (void*)(intptr_t)((int64_t(*)(void*))c->fn)(c->env); }
+static int64_t thread_spawn(closure_t clo){ ail_thread_t* t=(ail_thread_t*)GC_MALLOC(sizeof(ail_thread_t)); t->clo=clo; if(pthread_create(&t->th,0,ail_thread_tramp,&t->clo)!=0) return 0; return (int64_t)(intptr_t)t; }
+static int64_t thread_join(int64_t h){ if(h==0) return 0; ail_thread_t* t=(ail_thread_t*)(intptr_t)h; void* rv=0; pthread_join(t->th,&rv); return (int64_t)(intptr_t)rv; }
+static int64_t mutex_new(void){ pthread_mutex_t* m=(pthread_mutex_t*)GC_MALLOC(sizeof(pthread_mutex_t)); pthread_mutex_init(m,0); return (int64_t)(intptr_t)m; }
+static int64_t mutex_lock(int64_t h){ if(h) pthread_mutex_lock((pthread_mutex_t*)(intptr_t)h); return 0; }
+static int64_t mutex_unlock(int64_t h){ if(h) pthread_mutex_unlock((pthread_mutex_t*)(intptr_t)h); return 0; }
+typedef struct { pthread_mutex_t m; pthread_cond_t ne, nf; int64_t* buf; int64_t cap, head, tail, cnt; int closed; } ail_chan_t;
+static int64_t chan_new(int64_t cap){ if(cap<1) cap=1; ail_chan_t* c=(ail_chan_t*)GC_MALLOC(sizeof(ail_chan_t)); pthread_mutex_init(&c->m,0); pthread_cond_init(&c->ne,0); pthread_cond_init(&c->nf,0); c->buf=(int64_t*)GC_MALLOC(sizeof(int64_t)*(size_t)cap); c->cap=cap; c->head=0; c->tail=0; c->cnt=0; c->closed=0; return (int64_t)(intptr_t)c; }
+static int64_t chan_send(int64_t h, int64_t v){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==c->cap && !c->closed) pthread_cond_wait(&c->nf,&c->m); if(c->closed){ pthread_mutex_unlock(&c->m); return 0; } c->buf[c->tail]=v; c->tail=(c->tail+1)%c->cap; c->cnt++; pthread_cond_signal(&c->ne); pthread_mutex_unlock(&c->m); return 1; }
+static int64_t chan_recv(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==0 && !c->closed) pthread_cond_wait(&c->ne,&c->m); if(c->cnt==0 && c->closed){ pthread_mutex_unlock(&c->m); return 0; } int64_t v=c->buf[c->head]; c->head=(c->head+1)%c->cap; c->cnt--; pthread_cond_signal(&c->nf); pthread_mutex_unlock(&c->m); return v; }
+static int64_t chan_close(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); c->closed=1; pthread_cond_broadcast(&c->ne); pthread_cond_broadcast(&c->nf); pthread_mutex_unlock(&c->m); return 0; }
+#endif
 
 typedef struct s_Token s_Token;
 typedef struct s_StructDef s_StructDef;
@@ -4297,6 +4315,9 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((((strcmp(v_fname, "proc_fork") == 0) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0))) {
         return "i64";
     }
+    if ((((((((((strcmp(v_fname, "thread_spawn") == 0) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
+        return "i64";
+    }
     if ((strcmp(v_fname, "regex_match") == 0)) {
         return "bool";
     }
@@ -4376,7 +4397,7 @@ const char* f_tcon_var(s_Syms* v_sy, const char* v_name) {
 }
 
 const char* f_builtin_fixed_ret(const char* v_fname) {
-    if (((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0))) {
+    if ((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
         return "i64";
     }
     if ((((((((((((((((((((((((strcmp(v_fname, "to_str") == 0) || (strcmp(v_fname, "cstr") == 0)) || (strcmp(v_fname, "int_to_str") == 0)) || (strcmp(v_fname, "float_to_str") == 0)) || (strcmp(v_fname, "substring") == 0)) || (strcmp(v_fname, "read_file") == 0)) || (strcmp(v_fname, "bytes_to_str") == 0)) || (strcmp(v_fname, "err_msg") == 0)) || (strcmp(v_fname, "time_iso") == 0)) || (strcmp(v_fname, "regex_find") == 0)) || (strcmp(v_fname, "to_upper") == 0)) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
@@ -5558,6 +5579,33 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "proc_reap") == 0) && (arr_Expr_len(v_args) == 0))) {
         return "proc_reap()";
     }
+    if (((strcmp(v_fname, "thread_spawn") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("thread_spawn(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "thread_join") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("thread_join(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "mutex_new") == 0) && (arr_Expr_len(v_args) == 0))) {
+        return "mutex_new()";
+    }
+    if (((strcmp(v_fname, "mutex_lock") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("mutex_lock(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "mutex_unlock") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("mutex_unlock(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_new") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_new(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_send") == 0) && (arr_Expr_len(v_args) == 2))) {
+        return scat(scat("chan_send(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_recv") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_recv(", f_gen_args(v_sy, v_args)), ")");
+    }
+    if (((strcmp(v_fname, "chan_close") == 0) && (arr_Expr_len(v_args) == 1))) {
+        return scat(scat("chan_close(", f_gen_args(v_sy, v_args)), ")");
+    }
     if (((strcmp(v_fname, "regex_match") == 0) && (arr_Expr_len(v_args) == 2))) {
         return scat(scat("regex_match(", f_gen_args(v_sy, v_args)), ")");
     }
@@ -5749,11 +5797,16 @@ const char* f_gen_tuple_typedef(const char* v_ty) {
 
 const char* f_block_type(s_Syms* v_sy, arr_Stmt v_body) {
     int64_t v_n;
+    const char* v_t;
     v_n = arr_Stmt_len(v_body);
     if ((v_n == 0)) {
         return "i64";
     }
-    return f_last_expr_type(v_sy, arr_Stmt_get(v_body, (v_n - 1)));
+    v_t = f_last_expr_type(v_sy, arr_Stmt_get(v_body, (v_n - 1)));
+    if ((((int64_t)strlen(v_t)) == 0)) {
+        return "i64";
+    }
+    return v_t;
 }
 
 const char* f_gen_blk_decl(s_Syms* v_sy, const char* v_name, s_Expr v_e) {
@@ -7546,6 +7599,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_needs_time;
     int64_t v_needs_sock;
     int64_t v_needs_proc;
+    int64_t v_needs_thread;
     int64_t v_needs_regex;
     int64_t v_needs_tls;
     int64_t v_needs_pg;
@@ -7846,10 +7900,14 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_needs_time = ((((f_has_sub(v_src, "now_ms") || f_has_sub(v_src, "now_us")) || f_has_sub(v_src, "mono_ms")) || f_has_sub(v_src, "sleep_ms")) || f_has_sub(v_src, "time_iso"));
     v_needs_sock = (((((f_has_sub(v_src, "tcp_listen") || f_has_sub(v_src, "tcp_connect")) || f_has_sub(v_src, "tcp_accept")) || f_has_sub(v_src, "sock_send")) || f_has_sub(v_src, "sock_recv")) || f_has_sub(v_src, "sock_close"));
     v_needs_proc = (((f_has_sub(v_src, "proc_fork") || f_has_sub(v_src, "proc_getpid")) || f_has_sub(v_src, "proc_no_zombies")) || f_has_sub(v_src, "proc_reap"));
+    v_needs_thread = ((((((((f_has_sub(v_src, "thread_spawn") || f_has_sub(v_src, "thread_join")) || f_has_sub(v_src, "mutex_new")) || f_has_sub(v_src, "mutex_lock")) || f_has_sub(v_src, "mutex_unlock")) || f_has_sub(v_src, "chan_new")) || f_has_sub(v_src, "chan_send")) || f_has_sub(v_src, "chan_recv")) || f_has_sub(v_src, "chan_close"));
     v_needs_regex = (f_has_sub(v_src, "regex_match") || f_has_sub(v_src, "regex_find"));
     v_needs_tls = (f_has_sub(v_src, "tls_") || f_has_sub(v_src, "sha1"));
     v_needs_pg = f_has_sub(v_src, "pg_");
     v_needs_exedir = f_has_sub(v_src, "exe_dir");
+    if (v_needs_thread) {
+        v_out = scat(v_out, "#ifndef _WIN32\n#define GC_THREADS\n#endif\n");
+    }
     v_out = scat(v_out, "#include <stdio.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n#include <gc.h>\n");
     if (v_needs_time) {
         v_out = scat(v_out, "#include <time.h>\n");
@@ -7987,8 +8045,24 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(v_out, "static int g_argc=0; static char** g_argv=0;\n");
-    if ((arr_Func_len((v_base).lams) > 0)) {
+    if (((arr_Func_len((v_base).lams) > 0) || v_needs_thread)) {
         v_out = scat(v_out, "typedef struct { void* fn; void* env; } closure_t;\n");
+    }
+    if (v_needs_thread) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "typedef struct { pthread_t th; closure_t clo; } ail_thread_t;\n");
+        v_out = scat(v_out, "static void* ail_thread_tramp(void* p){ closure_t* c=(closure_t*)p; return (void*)(intptr_t)((int64_t(*)(void*))c->fn)(c->env); }\n");
+        v_out = scat(v_out, "static int64_t thread_spawn(closure_t clo){ ail_thread_t* t=(ail_thread_t*)GC_MALLOC(sizeof(ail_thread_t)); t->clo=clo; if(pthread_create(&t->th,0,ail_thread_tramp,&t->clo)!=0) return 0; return (int64_t)(intptr_t)t; }\n");
+        v_out = scat(v_out, "static int64_t thread_join(int64_t h){ if(h==0) return 0; ail_thread_t* t=(ail_thread_t*)(intptr_t)h; void* rv=0; pthread_join(t->th,&rv); return (int64_t)(intptr_t)rv; }\n");
+        v_out = scat(v_out, "static int64_t mutex_new(void){ pthread_mutex_t* m=(pthread_mutex_t*)GC_MALLOC(sizeof(pthread_mutex_t)); pthread_mutex_init(m,0); return (int64_t)(intptr_t)m; }\n");
+        v_out = scat(v_out, "static int64_t mutex_lock(int64_t h){ if(h) pthread_mutex_lock((pthread_mutex_t*)(intptr_t)h); return 0; }\n");
+        v_out = scat(v_out, "static int64_t mutex_unlock(int64_t h){ if(h) pthread_mutex_unlock((pthread_mutex_t*)(intptr_t)h); return 0; }\n");
+        v_out = scat(v_out, "typedef struct { pthread_mutex_t m; pthread_cond_t ne, nf; int64_t* buf; int64_t cap, head, tail, cnt; int closed; } ail_chan_t;\n");
+        v_out = scat(v_out, "static int64_t chan_new(int64_t cap){ if(cap<1) cap=1; ail_chan_t* c=(ail_chan_t*)GC_MALLOC(sizeof(ail_chan_t)); pthread_mutex_init(&c->m,0); pthread_cond_init(&c->ne,0); pthread_cond_init(&c->nf,0); c->buf=(int64_t*)GC_MALLOC(sizeof(int64_t)*(size_t)cap); c->cap=cap; c->head=0; c->tail=0; c->cnt=0; c->closed=0; return (int64_t)(intptr_t)c; }\n");
+        v_out = scat(v_out, "static int64_t chan_send(int64_t h, int64_t v){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==c->cap && !c->closed) pthread_cond_wait(&c->nf,&c->m); if(c->closed){ pthread_mutex_unlock(&c->m); return 0; } c->buf[c->tail]=v; c->tail=(c->tail+1)%c->cap; c->cnt++; pthread_cond_signal(&c->ne); pthread_mutex_unlock(&c->m); return 1; }\n");
+        v_out = scat(v_out, "static int64_t chan_recv(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); while(c->cnt==0 && !c->closed) pthread_cond_wait(&c->ne,&c->m); if(c->cnt==0 && c->closed){ pthread_mutex_unlock(&c->m); return 0; } int64_t v=c->buf[c->head]; c->head=(c->head+1)%c->cap; c->cnt--; pthread_cond_signal(&c->nf); pthread_mutex_unlock(&c->m); return v; }\n");
+        v_out = scat(v_out, "static int64_t chan_close(int64_t h){ ail_chan_t* c=(ail_chan_t*)(intptr_t)h; if(!c) return 0; pthread_mutex_lock(&c->m); c->closed=1; pthread_cond_broadcast(&c->ne); pthread_cond_broadcast(&c->nf); pthread_mutex_unlock(&c->m); return 0; }\n");
+        v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(v_out, "\n");
     v_si = 0;
@@ -8603,6 +8677,9 @@ int main(int argc, char** argv){
         }
         if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
             v_extra = scat(v_extra, " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)");
+        }
+        if (f_has_sub(v_cprog, "pthread_")) {
+            v_extra = scat(v_extra, " -lpthread");
         }
         v_extra = scat(scat(v_extra, f_link_flags(v_cprog)), " -lm");
         if ((arr_str_len(v_shims) == 0)) {

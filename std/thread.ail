@@ -1,0 +1,34 @@
+// std/thread.ail — ergonomic, typed wrappers over the OS-thread / mutex /
+// channel builtins (pthread, POSIX-only). The builtins (thread_spawn,
+// thread_join, mutex_new/lock/unlock, chan_new/send/recv/close) are always
+// available without an import; this module just gives them tidy names and type
+// annotations. Handles and channels are i64 — an opaque, pointer-sized word.
+//
+//   im "std/thread.ail"
+//   h  := spawn(fn() work(x))     // run a closure on its own thread
+//   r  := wait(h)                 // join, get its i64 result
+//   m  := mutex(); lock(m); …; unlock(m)
+//   ch := channel(16); send(ch, v); … ; close(ch); recv(ch)
+
+// --- threads ---------------------------------------------------------------
+fn spawn(f: fn() -> i64) -> i64 { thread_spawn(f) }   // run a closure on a new thread
+fn wait(h: i64) -> i64          { thread_join(h) }    // join; returns the thread's i64 result
+
+// Join every handle in order, returning the sum of their results — the common
+// "fan out, then barrier and reduce" pattern. Pass an array of spawn() handles.
+fn wait_all(hs: [i64]) -> i64 {
+  mu s := 0
+  lp k in 0..len(hs) { s = s + thread_join(hs[k]) }
+  s
+}
+
+// --- mutex -----------------------------------------------------------------
+fn mutex() -> i64        { mutex_new() }
+fn lock(m: i64) -> i64   { mutex_lock(m) }
+fn unlock(m: i64) -> i64 { mutex_unlock(m) }
+
+// --- channels (bounded, blocking) ------------------------------------------
+fn channel(cap: i64) -> i64     { chan_new(cap) }      // capacity-bounded ring buffer
+fn send(ch: i64, v: i64) -> i64 { chan_send(ch, v) }   // blocks while full; 0 if closed
+fn recv(ch: i64) -> i64         { chan_recv(ch) }      // blocks while empty; 0 if closed+drained
+fn close(ch: i64) -> i64        { chan_close(ch) }

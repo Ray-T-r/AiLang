@@ -1,0 +1,31 @@
+// OS threads + mutex (pthread, POSIX). Four workers each sum a quarter of
+// [0,1000) on its own thread, then add their partial sum into a SHARED counter
+// under a mutex. join() acts as a barrier: we wait for all four before reading
+// the total. The lock serializes the read-modify-write, so the result is exactly
+// 499500 (sum of 0..1000) no matter how the threads interleave.
+// Expected output:  499500
+fn part(a:i64, b:i64) -> i64 {
+  mu s := 0
+  lp i in a..b { s = s + i }
+  s
+}
+
+cnt := [0]            // shared total — a 1-element array is reference-typed, so
+m := mutex_new()      // every worker's closure sees the same backing storage
+
+mu hs:[i64] := []
+lp k in 0..4 {
+  a := k * 250
+  b := a + 250
+  h := thread_spawn(fn() {
+    p := part(a, b)         // compute this quarter (no lock needed — thread-local)
+    mutex_lock(m)
+    cnt[0] = cnt[0] + p     // shared read-modify-write, serialized by the lock
+    mutex_unlock(m)
+    p
+  })
+  hs = push(hs, h)
+}
+
+lp k in 0..4 { thread_join(hs[k]) }   // barrier: every worker has finished
+println(cnt[0])                        // 499500

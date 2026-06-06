@@ -115,6 +115,7 @@ if win {
   mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
   if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
   if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+  if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }   // threads (the threaded GC pulled by pkg-config may add it too — redundant is safe)
   extra = extra + link_flags(cprog) + " -lm"
 
   if len(shims) == 0 {

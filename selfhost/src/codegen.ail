@@ -822,6 +822,15 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "proc_getpid" && len(args) == 0 { rt "proc_getpid()" }
   if fname == "proc_no_zombies" && len(args) == 0 { rt "proc_no_zombies()" }
   if fname == "proc_reap" && len(args) == 0 { rt "proc_reap()" }
+  if fname == "thread_spawn" && len(args) == 1 { rt "thread_spawn(" + gen_args(sy, args) + ")" }
+  if fname == "thread_join" && len(args) == 1 { rt "thread_join(" + gen_args(sy, args) + ")" }
+  if fname == "mutex_new" && len(args) == 0 { rt "mutex_new()" }
+  if fname == "mutex_lock" && len(args) == 1 { rt "mutex_lock(" + gen_args(sy, args) + ")" }
+  if fname == "mutex_unlock" && len(args) == 1 { rt "mutex_unlock(" + gen_args(sy, args) + ")" }
+  if fname == "chan_new" && len(args) == 1 { rt "chan_new(" + gen_args(sy, args) + ")" }
+  if fname == "chan_send" && len(args) == 2 { rt "chan_send(" + gen_args(sy, args) + ")" }
+  if fname == "chan_recv" && len(args) == 1 { rt "chan_recv(" + gen_args(sy, args) + ")" }
+  if fname == "chan_close" && len(args) == 1 { rt "chan_close(" + gen_args(sy, args) + ")" }
   if fname == "regex_match" && len(args) == 2 { rt "regex_match(" + gen_args(sy, args) + ")" }
   if fname == "regex_find" && len(args) == 2 { rt "regex_find(" + gen_args(sy, args) + ")" }
   if fname == "format" && len(args) >= 1 { rt "format(" + gen_args(sy, args) + ")" }
@@ -1014,7 +1023,13 @@ fn gen_tuple_typedef(ty:str) -> str {
 fn block_type(sy:*Syms, body:[Stmt]) -> str {
   n := len(body)
   if n == 0 rt "i64"
-  last_expr_type(sy, body[n - 1])
+  t := last_expr_type(sy, body[n - 1])
+  // A non-value tail (assignment / loop / if-stmt …) has no expr type, but a
+  // block USED AS AN EXPRESSION still yields a value — gen_blk_tail emits a
+  // trailing `0`, so the block is an i64. (Without this, the "" propagates into
+  // a lambda's return type and cty("") spells the bogus C type `s_`.)
+  if len(t) == 0 rt "i64"
+  t
 }
 // One non-tail statement inside a block: a `:=` declares a block-local (full C
 // decl with its type); every other form reuses the normal statement codegen.
