@@ -331,6 +331,9 @@ ex fn set_new() -> i64
 | `std/ws.ail`    | WebSocket | `ws_handshake_response(key)`, `ws_send_text(fd,p)`, `ws_recv_text(fd)`, `b64_encode(bytes)` |
 | `std/thread.ail`| OS threads (pthread, POSIX) | `spawn(fn()->i64)`/`wait(h)`/`wait_all(hs)`, `mutex()`/`lock`/`unlock`, `channel(cap)`/`send`/`recv`/`close` (bounded blocking) |
 | `std/seq.ail`   | generic combinators (`\|>`-friendly) | `any`/`all`/`count`/`find_index`/`take`/`drop`/`keep`/`map_to`/`flat_map`/`fold`/`sort_by`/`for_each`/`zip_with` — each takes a passed closure; annotate the lambda param when elements aren't `i64` |
+| `std/web.ail`   | Express-style web framework (POSIX) | `web_new()`, `web_get`/`web_post`/`web_put`/`web_delete(&app, pat, fn(r:Req)->str)`, `web_use(&app, mw)` middleware, `:id` path params via `req_param(r,"id")`, `web_handle(&app, raw)->resp` (socket-free, testable), `web_listen(&app, host, port)` (live server). Handlers are closures in the routes table. |
+| `std/jwt.ail`   | JWT HS256 (POSIX) | `jwt_sign(payload_json, secret)->str`, `jwt_verify(token, secret)->bool`, `jwt_payload(token)->str`, `jwt_claim(token, key)->str`; `b64url_encode`/`b64url_decode_str`. Real interoperable tokens (byte-identical to PyJWT). |
+| `std/mysql.ail` | MySQL/MariaDB (libmysqlclient, POSIX) | `mysql_must_connect(host,user,pass,db,port)`, `mysql_one(c,sql)->str`, `mysql_rows(c,sql)->[MRow]`, `mysql_exec`/`mysql_escape`/`mysql_close`. Opt-in (only programs that use it link `-lmysqlclient`); needs the client lib + a server. (Postgres: `std/pg.ail`.) |
 
 `std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis/thread builtins are baked into codegen, so the modules are thin convenience wrappers.
 
