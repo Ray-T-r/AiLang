@@ -1,0 +1,75 @@
+// std/mysql.ail — MySQL / MariaDB client via libmysqlclient (mirrors std/pg.ail).
+//
+//   c := mysql_must_connect("127.0.0.1", "root", "pw", "mydb", 3306)
+//   n := mysql_one(c, "SELECT count(*) FROM users")          // first cell
+//   lp r in mysql_rows(c, "SELECT id, name FROM users") {     // [MRow]
+//     println(r.cells[0] + " " + r.cells[1])
+//   }
+//   mysql_close(c)
+//
+// Opt-in: only programs that call these (i.e. import this module) pull in
+// libmysqlclient — the compiler itself does not. Build/run needs libmysqlclient
+// (brew install mysql-client | mariadb-connector-c) AND a running MySQL/MariaDB
+// server. POSIX-only. The low-level handles are `myq_*` builtins (named apart from
+// the real mysql_* C symbols the wrappers call).
+
+st MRow { cells:[str] }
+
+fn _my_erow() -> [MRow] { mu e:[MRow] := [] e }
+
+fn mysql_connect(host:str, user:str, pass:str, db:str, port:i64) -> i64 { myq_conn(host, user, pass, db, port) }
+
+fn mysql_must_connect(host:str, user:str, pass:str, db:str, port:i64) -> i64 {
+  c := myq_conn(host, user, pass, db, port)
+  if c == 0 { println("mysql: connection failed")  exit(1) }
+  c
+}
+
+fn mysql_exec(c:i64, sql:str) -> i64 { myq_query(c, sql) }   // 0 on success
+fn mysql_error(c:i64) -> str { myq_err(c) }
+fn mysql_escape(c:i64, s:str) -> str { myq_escape(c, s) }
+fn mysql_close(c:i64) -> i64 { myq_close(c) }
+
+// First cell of the first row ("" if no rows / error).
+fn mysql_one(c:i64, sql:str) -> str {
+  if myq_query(c, sql) != 0 rt ""
+  res := myq_store(c)
+  if res == 0 rt ""
+  mu out := ""
+  row := myq_fetch(res)
+  if row != 0 { out = myq_field(row, 0) }
+  myq_free(res)
+  out
+}
+
+// All rows as [MRow] (each MRow.cells holds the row's columns as strings).
+fn mysql_rows(c:i64, sql:str) -> [MRow] {
+  mu rows:[MRow] := []
+  if myq_query(c, sql) != 0 rt rows
+  res := myq_store(c)
+  if res == 0 rt rows
+  nf := myq_nfields(res)
+  mu alive := true
+  lp alive {
+    row := myq_fetch(res)
+    if row == 0 { alive = false } el {
+      mu cells:[str] := []
+      mu i := 0
+      lp i < nf { cells = push(cells, myq_field(row, i))  i = i + 1 }
+      rows = push(rows, MRow(cells))
+    }
+  }
+  myq_free(res)
+  rows
+}
+
+// Print a result set as a " | "-separated table (debug).
+fn mysql_print_table(c:i64, sql:str) -> i64 {
+  rows := mysql_rows(c, sql)
+  mu i := 0
+  lp i < len(rows) {
+    println(join(rows[i].cells, " | "))
+    i = i + 1
+  }
+  0
+}

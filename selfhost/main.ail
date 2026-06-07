@@ -116,7 +116,12 @@ if win {
   if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
   if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
   if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }   // threads (the threaded GC pulled by pkg-config may add it too — redundant is safe)
-  extra = extra + link_flags(cprog) + " -lm"
+  // MySQL is opt-in via the head `// @links:` marker (read offset-anchored, so the
+  // compiler's own string data never self-triggers it). A "mysqlclient" token there
+  // → pull libmysqlclient's -I/-L via pkg-config/brew (the -l comes from link_flags).
+  mu lf := link_flags(cprog)
+  if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
+  extra = extra + lf + " -lm"
 
   if len(shims) == 0 {
     // Unchanged single-clang command, byte-identical to the legacy path

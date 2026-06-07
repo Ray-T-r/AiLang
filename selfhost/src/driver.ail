@@ -1826,7 +1826,9 @@ fn compile_to_c(src:str, dir:str) -> str {
     if len(externs[lk].lib) > 0 { libline = libline + " " + externs[lk].lib }
     lk += 1
   }
-  if len(libline) > 0 { out = "// @links:" + libline + "\n" }
+  // The `// @links:` marker is prepended AFTER body codegen (see end of this fn),
+  // so @uses-driven libs (mysqlclient — recorded only on a real myq_ call) can join
+  // it. Prepending at offset 0 keeps it byte-identical for programs with no @uses.
 
   // C++ shim marker: one comment line listing the `csrc "..."` .cpp paths, read
   // back by main()'s driver to compile each with clang++ and link with clang++.
@@ -2009,6 +2011,10 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return \"''\"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return \"''\"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }\n"
     out = out + "#endif\n"
   }
+  // MySQL prelude slot — filled below ONLY when a real myq_ call was emitted. The
+  // marker is split ("/*@MY"+"SQL@*/") so the contiguous token never appears in the
+  // compiler's own string data (else the replace below would corrupt it).
+  out = out + "/*@MY" + "SQL@*/"
   out = out + "static int g_argc=0; static char** g_argv=0;\n"
   // Closure value type — only when the program actually has first-class lambdas,
   // so the existing samples + main.ail emit byte-identical C (fixpoint safe).
@@ -2208,6 +2214,33 @@ fn compile_to_c(src:str, dir:str) -> str {
   mu mk := 0
   lp mk < len(funcs) { if funcs[mk].name == "main" && len(funcs[mk].params) == 0 { maincall = "    f_main();\n" } mk += 1 }
   out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+
+  // MySQL is opt-in: fill the slot with the libmysqlclient wrappers (+ header) only
+  // when a real myq_ call set @uses.mysql, and add "mysqlclient" to the link marker.
+  // The compiler itself never calls myq_, so its self-compile stays mysql-free and
+  // builds with NO libmysqlclient. (pat is split so it doesn't match string data.)
+  pat := "/*@MY" + "SQL@*/"
+  mu mlib := libline
+  if has(base.evar, "@uses.mysql") {
+    mu mp := "#ifndef _WIN32\n#include <mysql/mysql.h>\n"
+    mp = mp + "static int64_t myq_conn(const char* host, const char* user, const char* pass, const char* db, int64_t port){ MYSQL* m=mysql_init(NULL); if(!m) return 0; if(!mysql_real_connect(m,host,user,pass,db,(unsigned int)port,NULL,0)){ mysql_close(m); return 0; } return (int64_t)(intptr_t)m; }\n"
+    mp = mp + "static int64_t myq_query(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)mysql_query((MYSQL*)(intptr_t)c, sql); }\n"
+    mp = mp + "static int64_t myq_store(int64_t c){ if(c==0) return 0; MYSQL_RES* r=mysql_store_result((MYSQL*)(intptr_t)c); return (int64_t)(intptr_t)r; }\n"
+    mp = mp + "static int64_t myq_nrows(int64_t res){ if(res==0) return 0; return (int64_t)mysql_num_rows((MYSQL_RES*)(intptr_t)res); }\n"
+    mp = mp + "static int64_t myq_nfields(int64_t res){ if(res==0) return 0; return (int64_t)mysql_num_fields((MYSQL_RES*)(intptr_t)res); }\n"
+    mp = mp + "static int64_t myq_fetch(int64_t res){ if(res==0) return 0; MYSQL_ROW row=mysql_fetch_row((MYSQL_RES*)(intptr_t)res); return (int64_t)(intptr_t)row; }\n"
+    mp = mp + "static const char* myq_field(int64_t row, int64_t i){ if(row==0) return \"\"; char** r=(char**)(intptr_t)row; const char* v=r[i]; if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n"
+    mp = mp + "static const char* myq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=mysql_error((MYSQL*)(intptr_t)c); return e?e:\"\"; }\n"
+    mp = mp + "static int64_t myq_free(int64_t res){ if(res!=0) mysql_free_result((MYSQL_RES*)(intptr_t)res); return 0; }\n"
+    mp = mp + "static int64_t myq_close(int64_t c){ if(c!=0) mysql_close((MYSQL*)(intptr_t)c); return 0; }\n"
+    mp = mp + "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n"
+    mp = mp + "#endif\n"
+    out = replace(out, pat, mp)
+    mlib = mlib + " mysqlclient"
+  } el {
+    out = replace(out, pat, "")
+  }
+  if len(mlib) > 0 { out = "// @links:" + mlib + "\n" + out }
   out
 }
 

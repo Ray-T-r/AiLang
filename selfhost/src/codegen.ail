@@ -1014,7 +1014,10 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
     if is_array_ann(t) { rt "arr_" + arr_suffix(elem_of_ann(t)) + "_join(" + gen_expr(sy, args[0]) + ", " + gen_expr(sy, args[1]) + ")" }
   }
   // Phase 3 TLS/PG native builtins → same-named C helper (gated into the prelude).
-  if is_native_call(fname) { rt fname + "(" + gen_args(sy, args) + ")" }
+  if is_native_call(fname) {
+    if has_sub(fname, "myq_") { sy.evar["@uses.mysql"] = "1" }   // record real MySQL use → gate its prelude+link (not a src self-match)
+    rt fname + "(" + gen_args(sy, args) + ")"
+  }
   if is_gstruct(sy, fname) {                                  // generic-struct ctor → its monomorphic mk_Box_i64
     rt "mk_" + gstruct_mono(sy, fname, args) + "(" + gen_args(sy, args) + ")"
   }

@@ -4509,6 +4509,9 @@ int64_t f_is_native_call(const char* v_fname) {
     if ((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return (1 == 1);
     }
+    if ((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+        return (1 == 1);
+    }
     return (1 != 1);
 }
 
@@ -4775,7 +4778,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "pop") == 0) && (arr_Expr_len(v_args) > 0))) {
         return f_type_of_expr(v_sy, arr_Expr_get(v_args, 0));
     }
-    if (((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
+    if ((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
         return "str";
     }
     if ((((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
@@ -6340,6 +6343,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
         }
     }
     if (f_is_native_call(v_fname)) {
+        if (f_has_sub(v_fname, "myq_")) {
+            map_str_str_set((v_sy)->evar, "@uses.mysql", "1");
+        }
         return scat(scat(scat(v_fname, "("), f_gen_args(v_sy, v_args)), ")");
     }
     if (f_is_gstruct(v_sy, v_fname)) {
@@ -9212,6 +9218,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_mdecls;
     const char* v_maincall;
     int64_t v_mk;
+    const char* v_pat;
+    const char* v_mlib;
+    const char* v_mp;
     v_toks = f_lex(v_src);
     v_p = mk_P(v_toks, 0, v_src);
     v_structs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
@@ -9648,9 +9657,6 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         }
         v_lk = (v_lk + 1);
     }
-    if ((((int64_t)strlen(v_libline)) > 0)) {
-        v_out = scat(scat("// @links:", v_libline), "\n");
-    }
     v_cline = "";
     v_cs = 0;
     while ((v_cs < arr_str_len(v_csrcs))) {
@@ -9817,6 +9823,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static const char* pg_escape(int64_t conn, const char* s){ if(conn==0||!s) return \"''\"; char* esc=PQescapeLiteral((PGconn*)(intptr_t)conn,s,strlen(s)); if(!esc) return \"''\"; size_t n=strlen(esc); char* o=(char*)GC_MALLOC(n+1); memcpy(o,esc,n+1); PQfreemem(esc); return o; }\n");
         v_out = scat(v_out, "#endif\n");
     }
+    v_out = scat(scat(v_out, "/*@MY"), "SQL@*/");
     v_out = scat(v_out, "static int g_argc=0; static char** g_argv=0;\n");
     if (((arr_Func_len((v_base).lams) > 0) || v_needs_thread)) {
         v_out = scat(v_out, "typedef struct { void* fn; void* env; } closure_t;\n");
@@ -10033,6 +10040,30 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mk = (v_mk + 1);
     }
     v_out = scat(scat(scat(scat(scat(v_out, "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n"), v_mdecls), f_gen_stmts((&v_msy), v_mmains, "    ")), v_maincall), "    return 0;\n}\n");
+    v_pat = scat("/*@MY", "SQL@*/");
+    v_mlib = v_libline;
+    if (map_str_str_has((v_base).evar, "@uses.mysql")) {
+        v_mp = "#ifndef _WIN32\n#include <mysql/mysql.h>\n";
+        v_mp = scat(v_mp, "static int64_t myq_conn(const char* host, const char* user, const char* pass, const char* db, int64_t port){ MYSQL* m=mysql_init(NULL); if(!m) return 0; if(!mysql_real_connect(m,host,user,pass,db,(unsigned int)port,NULL,0)){ mysql_close(m); return 0; } return (int64_t)(intptr_t)m; }\n");
+        v_mp = scat(v_mp, "static int64_t myq_query(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)mysql_query((MYSQL*)(intptr_t)c, sql); }\n");
+        v_mp = scat(v_mp, "static int64_t myq_store(int64_t c){ if(c==0) return 0; MYSQL_RES* r=mysql_store_result((MYSQL*)(intptr_t)c); return (int64_t)(intptr_t)r; }\n");
+        v_mp = scat(v_mp, "static int64_t myq_nrows(int64_t res){ if(res==0) return 0; return (int64_t)mysql_num_rows((MYSQL_RES*)(intptr_t)res); }\n");
+        v_mp = scat(v_mp, "static int64_t myq_nfields(int64_t res){ if(res==0) return 0; return (int64_t)mysql_num_fields((MYSQL_RES*)(intptr_t)res); }\n");
+        v_mp = scat(v_mp, "static int64_t myq_fetch(int64_t res){ if(res==0) return 0; MYSQL_ROW row=mysql_fetch_row((MYSQL_RES*)(intptr_t)res); return (int64_t)(intptr_t)row; }\n");
+        v_mp = scat(v_mp, "static const char* myq_field(int64_t row, int64_t i){ if(row==0) return \"\"; char** r=(char**)(intptr_t)row; const char* v=r[i]; if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n");
+        v_mp = scat(v_mp, "static const char* myq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=mysql_error((MYSQL*)(intptr_t)c); return e?e:\"\"; }\n");
+        v_mp = scat(v_mp, "static int64_t myq_free(int64_t res){ if(res!=0) mysql_free_result((MYSQL_RES*)(intptr_t)res); return 0; }\n");
+        v_mp = scat(v_mp, "static int64_t myq_close(int64_t c){ if(c!=0) mysql_close((MYSQL*)(intptr_t)c); return 0; }\n");
+        v_mp = scat(v_mp, "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n");
+        v_mp = scat(v_mp, "#endif\n");
+        v_out = str_replace(v_out, v_pat, v_mp);
+        v_mlib = scat(v_mlib, " mysqlclient");
+    } else {
+        v_out = str_replace(v_out, v_pat, "");
+    }
+    if ((((int64_t)strlen(v_mlib)) > 0)) {
+        v_out = scat(scat(scat("// @links:", v_mlib), "\n"), v_out);
+    }
     return v_out;
 }
 
@@ -10540,6 +10571,7 @@ int main(int argc, char** argv){
     int64_t v_rc;
     const char* v_cmd;
     const char* v_extra;
+    const char* v_lf;
     const char* v_shimline;
     int64_t v_si;
     int64_t v_ci2;
@@ -10624,7 +10656,11 @@ int main(int argc, char** argv){
         if (f_has_sub(v_cprog, "pthread_")) {
             v_extra = scat(v_extra, " -lpthread");
         }
-        v_extra = scat(scat(v_extra, f_link_flags(v_cprog)), " -lm");
+        v_lf = f_link_flags(v_cprog);
+        if (f_has_sub(v_lf, "lmysqlclient")) {
+            v_extra = scat(v_extra, " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)");
+        }
+        v_extra = scat(scat(v_extra, v_lf), " -lm");
         if ((arr_str_len(v_shims) == 0)) {
             v_cmd = scat(scat(scat(scat("clang -O2 ", v_cpath), v_extra), " -o "), v_outbin);
             v_rc = f_system(v_cmd);
