@@ -131,6 +131,32 @@ echo 'println("hello from ailang")' > /tmp/hi.ail
 ailc /tmp/hi.ail /tmp/hi && /tmp/hi          # → hello from ailang
 ```
 
+### Installing by hand (or when GitHub is unreachable)
+
+The installer auto-installs the native deps; if you install manually — or the
+one-liner hangs because GitHub is blocked — do it yourself. The macOS `ailc`
+**dynamically links** Boehm GC, OpenSSL, and libpq (from `/opt/homebrew`), so
+install those **first** or the binary won't start:
+
+```bash
+brew install bdw-gc openssl@3 libpq pkg-config       # macOS — required at runtime
+```
+
+Then grab the binary + std library, optionally through a GitHub mirror (set
+`M=` empty to hit github.com directly):
+
+```bash
+M=https://ghfast.top/     # GitHub mirror prefix — mirrors come and go, try another if it fails
+mkdir -p ~/.local/bin ~/.local/share/ailang
+curl -fL "${M}https://github.com/Ray-T-r/AiLang/releases/latest/download/ailc-macos-aarch64.tar.gz" | tar -xz -C ~/.local/bin
+curl -fL "${M}https://github.com/Ray-T-r/AiLang/releases/latest/download/ailc-std.tar.gz"          | tar -xz -C ~/.local/share/ailang
+echo 'export PATH="$HOME/.local/bin:$PATH"'          >> ~/.zshrc
+echo 'export AILANG_STD="$HOME/.local/share/ailang"' >> ~/.zshrc
+```
+
+(Linux: install the deps with your package manager — see [Requirements](#requirements) —
+and use the `ailc-linux-x86_64.tar.gz` asset.)
+
 ### Windows
 
 `ailc` runs **natively** on Windows and builds **self-contained `.exe`** files —
@@ -211,7 +237,7 @@ currently links them unconditionally — OpenSSL and libpq.
 
 ```bash
 # macOS
-brew install bdw-gc openssl libpq pkg-config
+brew install bdw-gc openssl@3 libpq pkg-config
 # Debian / Ubuntu
 sudo apt-get install -y clang libgc-dev libssl-dev libpq-dev pkg-config
 ```
