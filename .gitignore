@@ -15,6 +15,10 @@ CLAUDE.md
 *.ll
 *.bc
 
+# release staging — built by scripts/package-release.sh, uploaded to GitHub
+# Releases, never committed
+/dist
+
 # ---- compiler-generated artifacts (next to .ail sources) ----
 # Whitelist style: ignore everything in the dir, re-include the sources/fixtures
 # we track. New generated files (binaries, .c) get ignored automatically.

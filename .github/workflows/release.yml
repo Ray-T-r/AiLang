@@ -1,0 +1,37 @@
+name: Release artifacts
+
+# Manually-triggered build of the per-platform release binaries that the host
+# running scripts/package-release.sh locally can't produce. Today: the Linux
+# x86_64 binary (macOS is built on the maintainer's Mac, Windows on the Win box).
+# Trigger from the Actions tab or: gh workflow run release.yml --ref main
+# then download the artifact and attach it to the GitHub Release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: build ailc-linux-x86_64 (from the C seed, no Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Same deps as ci.yml: Boehm GC + OpenSSL + libpq (prelude) + zlib (cinc).
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libgc-dev libssl-dev libpq-dev zlib1g-dev pkg-config
+
+      - name: Build the Linux binary from the seed
+        run: bash scripts/package-release.sh
+
+      - name: Upload Linux tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: ailc-linux-x86_64
+          path: dist/ailc-linux-x86_64.tar.gz
+          if-no-files-found: error
