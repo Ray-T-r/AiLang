@@ -105,9 +105,10 @@ fn fib(n) {                              // block body
 }
 fn greet(name:str) -> str "Hello, " + name + "!"   // annotate non-i64
 
-fn id<T>(x:T) -> T x                     // real generic, monomorphized per call
+fn id<T>(x:T) -> T x                     // real generic, monomorphized to a real C fn per call
 fn pick<A,B>(a:A, b:B) -> A a            // multi-param — A and B inferred independently
 fn dump<T: Show>(x:T) -> str x.fmt()     // constrained — T must satisfy trait Show (see Traits)
+fn map2<T,U>(xs:[T], f:fn(T)->U) -> [U] { map(xs, fn(x) f(x)) }  // generic HOF — takes a closure
 
 inc := fn(x) x + 1                          // lambda (closure) — fn(params) body
 println(inc(41))                            // 42 — stored lambda, direct call: fine
@@ -118,6 +119,8 @@ println(filter([1,2,3,4,5], fn(x) x > threshold))  // [4, 5] — capture by valu
 ```
 
 Lambda syntax is `fn(x) body` or `fn(x) { ... }`. **Not** `|x| ...`, `(x) => ...`, or `lambda x:`.
+
+Generic functions monomorphize into **real C functions** (one per type instantiation), so a generic fn may take a **closure parameter** (`fn map2<T,U>(xs:[T], f:fn(T)->U)`) and have a full multi-statement body with loops, locals, and early return. `std/seq.ail` is a combinator library built this way. (When you pass a lambda to such a fn over non-`i64` elements, annotate the lambda's param to match: `keep(words, fn(s:str) starts_with(s,"a"))`.)
 
 Two real constraints of the current self-hosted compiler:
 - A fn that takes a `fn(...)->R` **parameter** and returns the result of calling it must **annotate its return type** (`-> i64`) or use an explicit `rt` — implicit-return inference fails there and defaults to `void`.
@@ -306,7 +309,7 @@ ex fn set_new() -> i64
 | `str_to_int`/`int_to_str`/`str_to_float`/`float_to_str` | conversions |
 | `regex_match(pat,s)` / `regex_find(pat,s)` | POSIX extended |
 | `to_str(x)` | used by `${...}` interpolation |
-| time / io: `now_ms()`, `mono_ms()`, `time_iso(ms)`, `sleep_ms(ms)`, `flush()`, `read_line()`, `get_env(name)` | **`time_iso` takes a ms timestamp** — current ISO time is `time_iso(now_ms())`, *not* `time_iso()`. `flush()` flushes stdout, needed for live output: `lp { print(time_iso(now_ms()) + "\r"); flush(); sleep_ms(1000) }` |
+| time / io: `now_ms()`, `mono_ms()`, `time_iso(ms)`, `sleep_ms(ms)`, `flush()`, `read_line()`, `read_stdin()`, `get_env(name)` | **`time_iso` takes a ms timestamp** — current ISO time is `time_iso(now_ms())`, *not* `time_iso()`. `read_line()` reads one line (returns `""` at EOF *and* for a blank line); `read_stdin()` reads **all** of stdin (use it for multi-line/JSON input). `flush()` flushes stdout: `lp { print(time_iso(now_ms()) + "\r"); flush(); sleep_ms(1000) }` |
 | socket/net builtins: `tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1`, ... | baked into codegen — no extern decls needed; POSIX-only (need WSL on Windows) |
 
 **Don't name your own functions after a builtin** (e.g. `unwrap`, `split`, `len`, `keys`, `to_str`) — the builtin wins and your fn is silently misrouted. Pick a distinct name (`opt_get`, not `unwrap`).
@@ -320,12 +323,14 @@ ex fn set_new() -> i64
 | `std/time.ail`  | timing | `tick()`, `elapsed_ms(t)`, `since(t)`, `sleep_s(s)`, `now_iso()` |
 | `std/sock.ail`  | TCP | `must_listen(host,port,banner)`, `sock_send_str_all(fd,s)`, `env_int(name,def)` |
 | `std/http.ail`  | HTTP/1.1 | `http_recv_request(fd)`, `http_method`/`http_path`/`http_header(req[,name])`, `http_text`/`http_json`/`http_html(status,body)` |
-| `std/json.ail`  | flat JSON | `parse_flat_obj_str(s) -> {str:str}`, `parse_flat_obj_int(s) -> {str:i64}` |
+| `std/json.ail`  | JSON (flat + nested) | flat: `parse_flat_obj_str`/`parse_flat_obj_int`; **nested**: `json_parse(s) -> Json`, `json_str(j)`, accessors `obj_get(j,k)`/`arr_at(j,i)`/`arr_len`/`as_int`/`as_float`/`as_str`/`as_bool`/`is_null`/`json_keys` |
+| `std/csv.ail`   | CSV reader/writer | `csv_parse(text) -> [Row]` (quoted fields, CRLF/LF), `csv_emit(rows)`, `csv_field(f)`, `row_map(header,r) -> {str:str}` (a `Row` wraps `cells:[str]`) |
 | `std/tls.ail`   | TLS I/O | `tls_send_str_all(ssl,s)`, `tls_send_all(ssl,bytes)` |
 | `std/pg.ail`    | Postgres | `pg_must_connect(dsn)`, `pg_one(conn,sql)`, `pg_first_col(conn,sql) -> [str]`, `pg_print_table(res)` |
 | `std/redis.ail` | Redis | `redis_connect(host,port)`, `redis_get`/`redis_set`, `redis_incr`, `redis_del`, `redis_ping` |
 | `std/ws.ail`    | WebSocket | `ws_handshake_response(key)`, `ws_send_text(fd,p)`, `ws_recv_text(fd)`, `b64_encode(bytes)` |
 | `std/thread.ail`| OS threads (pthread, POSIX) | `spawn(fn()->i64)`/`wait(h)`/`wait_all(hs)`, `mutex()`/`lock`/`unlock`, `channel(cap)`/`send`/`recv`/`close` (bounded blocking) |
+| `std/seq.ail`   | generic combinators (`\|>`-friendly) | `any`/`all`/`count`/`find_index`/`take`/`drop`/`keep`/`map_to`/`flat_map`/`fold`/`sort_by`/`for_each`/`zip_with` — each takes a passed closure; annotate the lambda param when elements aren't `i64` |
 
 `std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis/thread builtins are baked into codegen, so the modules are thin convenience wrappers.
 
@@ -345,7 +350,7 @@ ex fn set_new() -> i64
 8. **Lambdas are `fn(x) body`** — no `|x|` / `=>` / `->` arrow forms.
 9. **Implicit `main`** — don't wrap a top-level script in `fn main`.
 10. **Integer widths are cosmetic** (stored 64-bit). The type checker is conservative but real — it reports confident mistakes at the `.ail` `line:col` (type/`!T` mismatches, `mt` exhaustiveness/variants/arity, call & generic arity, `<T: Trait>` bounds, generic-instance mismatches), **all errors in one run**, with *"did you mean?"* spelling suggestions. It's not a full type system, so some mistakes still surface as C-compiler errors.
-11. **`map`/`filter`/`reduce` need an inline lambda** — `map(xs, fn(x) x*2)`, not a lambda stored in a variable. And a fn that returns the result of calling a `fn(...)->R` parameter must **annotate its return type** (`-> i64`) or use explicit `rt`.
+11. **`map`/`filter`/`reduce` need an inline lambda** — `map(xs, fn(x) x*2)`, not a lambda stored in a variable. (`std/seq.ail`'s `keep`/`map_to`/`fold` accept a *passed/stored* closure where the builtins won't.) And a non-generic fn that returns the result of calling a `fn(...)->R` parameter must **annotate its return type** (`-> i64`) or use explicit `rt`.
 
 ## Worked examples
 
