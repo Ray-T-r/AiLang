@@ -41,7 +41,13 @@ for src in examples-selfhost/*.ail; do
   exp="examples-selfhost/expected/$name.out"
   [ -f "$exp" ] || { echo "    skip $name (no fixture)"; continue; }
   guard 30 "$AILC" "$src" "/tmp/vf_$name" >/dev/null 2>&1 || true
-  guard 10 "/tmp/vf_$name" >"/tmp/vf_$name.out" 2>&1 || true
+  # A committed examples-selfhost/<name>.in, when present, is fed as stdin —
+  # lets samples that read stdin (read_stdin/read_line) be deterministic.
+  if [ -f "examples-selfhost/$name.in" ]; then
+    guard 10 "/tmp/vf_$name" <"examples-selfhost/$name.in" >"/tmp/vf_$name.out" 2>&1 || true
+  else
+    guard 10 "/tmp/vf_$name" >"/tmp/vf_$name.out" 2>&1 || true
+  fi
   if diff -q "/tmp/vf_$name.out" "$exp" >/dev/null 2>&1; then
     echo "    ok   $name"; n=$((n+1))
   else

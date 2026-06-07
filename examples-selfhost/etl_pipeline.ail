@@ -1,0 +1,16 @@
+im "std/csv.ail"
+im "std/json.ail"
+
+// End-to-end: CSV in → pipe through filter/map/reduce → JSON out.
+data := "name,dept,salary\nalice,eng,180\nbob,sales,150\ncarol,eng,120"
+rows := csv_parse(data)
+body := slice(rows, 1, len(rows))                    // drop the header row
+
+total := body
+  |> filter(fn(r:Row) r.cells[1] == "eng")
+  |> map(fn(r:Row) str_to_int(r.cells[2]))
+  |> reduce(0, fn(a, b) a + b)
+cnt := len(filter(body, fn(r:Row) r.cells[1] == "eng"))
+
+out := JObj(["dept", "total", "count"], [JStr("eng"), JInt(total), JInt(cnt)])
+println(json_str(out))                               // {"dept":"eng","total":300,"count":2}

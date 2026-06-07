@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 10,177 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 10,182 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -33,9 +33,12 @@ C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or a
 external `.cpp`, POSIX), variadic externs
 (`ex fn printf(fmt, ...)`), OS-thread concurrency (pthread-backed
 `thread_spawn`/`thread_join`, `mutex_*`, and bounded blocking `chan_*` channels,
-POSIX), and the 11 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
-WebSocket, JSON, time, str, math, threads — pulled in via `im` (with optional
-`im "path" as m` aliasing for a namespaced, collision-free `m.fn()`).
+POSIX), and the 12 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
+WebSocket, JSON (flat + nested), CSV, time, str, math, threads — pulled in via
+`im` (with optional `im "path" as m` aliasing for a namespaced, collision-free
+`m.fn()`). Whole-stream stdin (`read_stdin`) plus the CSV reader/writer and the
+recursive JSON parser/serializer make read→transform→write pipelines —
+`csv_parse(data) |> filter(…) |> map(…)`, then `json_str(…)` — a few tokens.
 
 ## Benchmarks
 
@@ -75,11 +78,11 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~7,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **10,177 lines, byte-identical** |
-| sample programs | **49**, each output-verified against a frozen fixture |
-| standard library | 11 modules, all compiling |
+| strict fixpoint | `stage2.c == stage3.c` — **10,182 lines, byte-identical** |
+| sample programs | **53**, each output-verified against a frozen fixture |
+| standard library | 12 modules, all compiling |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **36 negative tests**, all caught |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **39 negative tests**, all caught |
 | Rust in the build | **none** |
 
 ## Layout

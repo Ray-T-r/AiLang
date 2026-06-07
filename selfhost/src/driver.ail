@@ -1688,6 +1688,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static int64_t sign(int64_t n){ return (n>0)-(n<0); }\n"
   out = out + "static int64_t clamp(int64_t n, int64_t lo, int64_t hi){ if(n<lo) return lo; if(n>hi) return hi; return n; }\n"
   out = out + "static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return \"\"; return b; }\n"
+  out = out + "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n"
   out = out + "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n"
   out = out + "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n"
   // exe_dir() — directory of the running compiler, so `im "std/…"` finds the

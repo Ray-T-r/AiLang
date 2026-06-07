@@ -1,0 +1,5 @@
+// EXPECT: argument 1 to 'json_parse' expects str, got i64
+// std/json.ail's json_parse takes a str; passing an int is a type error.
+// (neg tests can't `im` std, so this inlines a stand-in with the real shape.)
+fn json_parse(text:str) -> i64 { len(text) }
+json_parse(42)

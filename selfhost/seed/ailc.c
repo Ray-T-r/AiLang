@@ -74,6 +74,7 @@ static double abs_f64(double x){ return x<0?-x:x; }
 static int64_t sign(int64_t n){ return (n>0)-(n<0); }
 static int64_t clamp(int64_t n, int64_t lo, int64_t hi){ if(n<lo) return lo; if(n>hi) return hi; return n; }
 static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return ""; return b; }
+static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }
 static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:""; }
 static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:"",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }
 static const char* exe_dir(void){ char buf[4096]; buf[0]=0;
@@ -4695,7 +4696,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((((strcmp(v_fname, "index_of") == 0) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0))) {
         return "i64";
     }
-    if ((((((((((((((strcmp(v_fname, "to_upper") == 0) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
+    if (((((((((((((((strcmp(v_fname, "to_upper") == 0) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "read_stdin") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
         return "str";
     }
     if ((strcmp(v_fname, "split") == 0)) {
@@ -4808,7 +4809,7 @@ const char* f_builtin_fixed_ret(const char* v_fname) {
     if ((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
         return "i64";
     }
-    if ((((((((((((((((((((((((strcmp(v_fname, "to_str") == 0) || (strcmp(v_fname, "cstr") == 0)) || (strcmp(v_fname, "int_to_str") == 0)) || (strcmp(v_fname, "float_to_str") == 0)) || (strcmp(v_fname, "substring") == 0)) || (strcmp(v_fname, "read_file") == 0)) || (strcmp(v_fname, "bytes_to_str") == 0)) || (strcmp(v_fname, "err_msg") == 0)) || (strcmp(v_fname, "time_iso") == 0)) || (strcmp(v_fname, "regex_find") == 0)) || (strcmp(v_fname, "to_upper") == 0)) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
+    if (((((((((((((((((((((((((strcmp(v_fname, "to_str") == 0) || (strcmp(v_fname, "cstr") == 0)) || (strcmp(v_fname, "int_to_str") == 0)) || (strcmp(v_fname, "float_to_str") == 0)) || (strcmp(v_fname, "substring") == 0)) || (strcmp(v_fname, "read_file") == 0)) || (strcmp(v_fname, "bytes_to_str") == 0)) || (strcmp(v_fname, "err_msg") == 0)) || (strcmp(v_fname, "time_iso") == 0)) || (strcmp(v_fname, "regex_find") == 0)) || (strcmp(v_fname, "to_upper") == 0)) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "read_stdin") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
         return "str";
     }
     if (((strcmp(v_fname, "str_to_float") == 0) || (strcmp(v_fname, "abs_f64") == 0))) {
@@ -6026,6 +6027,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "read_line") == 0) && (arr_Expr_len(v_args) == 0))) {
         return "read_line()";
+    }
+    if (((strcmp(v_fname, "read_stdin") == 0) && (arr_Expr_len(v_args) == 0))) {
+        return "read_stdin()";
     }
     if (((strcmp(v_fname, "get_env") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("get_env(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ")");
@@ -9259,6 +9263,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_out = scat(v_out, "static int64_t sign(int64_t n){ return (n>0)-(n<0); }\n");
     v_out = scat(v_out, "static int64_t clamp(int64_t n, int64_t lo, int64_t hi){ if(n<lo) return lo; if(n>hi) return hi; return n; }\n");
     v_out = scat(v_out, "static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF&&c!=10){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; if(len==0&&c==EOF) return \"\"; return b; }\n");
+    v_out = scat(v_out, "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n");
     v_out = scat(v_out, "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n");
     v_out = scat(v_out, "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n");
     if (v_needs_exedir) {

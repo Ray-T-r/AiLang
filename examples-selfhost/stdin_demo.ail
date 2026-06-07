@@ -1,0 +1,6 @@
+// Read all of stdin, drop blank lines, then count + upper-case + join them.
+// verify.sh feeds examples-selfhost/stdin_demo.in as stdin.
+s := read_stdin()
+lines := filter(split(s, "\n"), fn(x:str) len(x) > 0)
+println(len(lines))
+println(join(map(lines, fn(x:str) to_upper(x)), "|"))

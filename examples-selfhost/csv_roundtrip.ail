@@ -1,0 +1,8 @@
+im "std/csv.ail"
+
+// Parse 3 rows — the middle one has a quoted field containing a comma —
+// then re-emit; csv_emit re-quotes "a,b" so the round-trip is faithful.
+data := "name,note\nx,\"a,b\"\ny,plain"
+rows := csv_parse(data)
+println(len(rows))          // 3
+println(csv_emit(rows))

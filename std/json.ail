@@ -158,3 +158,291 @@ fn parse_flat_obj_int(text:str) -> {str:i64} {
   }
   out
 }
+
+// ======================================================================
+//  Nested JSON — a recursive value type with a full parse/serialize API,
+//  added alongside the flat helpers above.
+//
+//    json_parse(text) -> Json   recursive-descent parse. Lenient: malformed
+//                               input yields JNull; `\uXXXX` is consumed but
+//                               not decoded to UTF-8 (emits '?').
+//    json_str(j)      -> str    compact serialize; object keys keep their
+//                               parse/insertion order (byte-stable output).
+//    accessors: obj_get / arr_at / arr_len / as_int / as_float / as_str /
+//               as_bool / is_null / json_keys  (receiver-first, UFCS-friendly)
+//
+// JInt and JFloat are distinct (not one JNum(f64)) so integers round-trip
+// exactly. JObj keeps parallel keys/vals arrays (not {str:Json}) so key
+// order is preserved.
+// ======================================================================
+
+en Json {
+  JNull,
+  JBool(b:bool),
+  JInt(n:i64),
+  JFloat(f:f64),
+  JStr(s:str),
+  JArr(items:[Json]),
+  JObj(keys:[str], vals:[Json])
+}
+
+// A parse cursor over the source — mirrors the compiler's own *P pattern.
+st Jp { s:str  i:i64 }
+fn _jp_more(p:*Jp) -> bool { p.i < len(p.s) }
+fn _jp_ch(p:*Jp) -> i64 { p.s[p.i] }
+fn _jp_adv(p:*Jp) { p.i = p.i + 1 }
+fn _jp_ws(p:*Jp) {
+  lp _jp_more(p) {
+    c := _jp_ch(p)
+    if c == 32 || c == 9 || c == 10 || c == 13 { _jp_adv(p) } el { br }
+  }
+}
+
+// A freshly-typed empty [str] (a bare `xs = []` would infer [i64]).
+fn _jstrs() -> [str] { mu e:[str] := []  e }
+
+// -- parsing ------------------------------------------------------------
+
+fn json_parse(text:str) -> Json {
+  mu p := Jp(text, 0)
+  _jp_value(&p)
+}
+
+fn _jp_value(p:*Jp) -> Json {
+  _jp_ws(p)
+  if _jp_more(p) == false rt JNull
+  c := _jp_ch(p)
+  if c == 123 rt _jp_object(p)                  // '{'
+  if c == 91 rt _jp_array(p)                    // '['
+  if c == 34 rt JStr(_jp_string(p))             // '"'
+  if c == 116 { p.i = p.i + 4  rt JBool(true) }  // true
+  if c == 102 { p.i = p.i + 5  rt JBool(false) } // false
+  if c == 110 { p.i = p.i + 4  rt JNull }        // null
+  if c == 45 || (c >= 48 && c <= 57) rt _jp_number(p)  // '-' or digit
+  JNull
+}
+
+fn _jp_string(p:*Jp) -> str {
+  _jp_adv(p)                                     // consume opening '"'
+  mu out := ""
+  lp _jp_more(p) {
+    c := _jp_ch(p)
+    if c == 34 { _jp_adv(p)  br }                 // closing '"'
+    if c == 92 {                                  // '\' escape
+      _jp_adv(p)
+      if _jp_more(p) {
+        n := _jp_ch(p)
+        _jp_adv(p)
+        if n == 110 { out = out + "\n" }
+        el if n == 116 { out = out + "\t" }
+        el if n == 114 { out = out + "\r" }
+        el if n == 34 { out = out + "\"" }
+        el if n == 92 { out = out + "\\" }
+        el if n == 47 { out = out + "/" }
+        el if n == 98 { out = out + chr(8) }
+        el if n == 102 { out = out + chr(12) }
+        el if n == 117 {                          // \uXXXX — not decoded
+          out = out + "?"
+          mu k := 0
+          lp k < 4 { if _jp_more(p) { _jp_adv(p) }  k = k + 1 }
+        }
+        el { out = out + chr(n) }
+      }
+    } el {
+      out = out + substring(p.s, p.i, p.i + 1)
+      _jp_adv(p)
+    }
+  }
+  out
+}
+
+fn _jp_number(p:*Jp) -> Json {
+  start := p.i
+  mu is_flt := false
+  if _jp_more(p) && (_jp_ch(p) == 45 || _jp_ch(p) == 43) { _jp_adv(p) }
+  lp _jp_more(p) {
+    c := _jp_ch(p)
+    if c >= 48 && c <= 57 { _jp_adv(p) }
+    el if c == 46 || c == 101 || c == 69 || c == 43 || c == 45 { is_flt = true  _jp_adv(p) }
+    el { br }
+  }
+  sub := substring(p.s, start, p.i)
+  if is_flt rt JFloat(str_to_float(sub))
+  JInt(str_to_int(sub))
+}
+
+fn _jp_array(p:*Jp) -> Json {
+  _jp_adv(p)                                     // consume '['
+  mu items:[Json] := []
+  _jp_ws(p)
+  if _jp_more(p) && _jp_ch(p) == 93 { _jp_adv(p)  rt JArr(items) }  // empty
+  lp _jp_more(p) {
+    v := _jp_value(p)
+    items = push(items, v)
+    _jp_ws(p)
+    if _jp_more(p) == false br
+    c := _jp_ch(p)
+    if c == 44 { _jp_adv(p)  _jp_ws(p) }         // ','
+    el if c == 93 { _jp_adv(p)  br }              // ']'
+    el { br }
+  }
+  JArr(items)
+}
+
+fn _jp_object(p:*Jp) -> Json {
+  _jp_adv(p)                                     // consume '{'
+  mu keys:[str] := []
+  mu vals:[Json] := []
+  _jp_ws(p)
+  if _jp_more(p) && _jp_ch(p) == 125 { _jp_adv(p)  rt JObj(keys, vals) }  // empty
+  lp _jp_more(p) {
+    _jp_ws(p)
+    if _jp_more(p) == false br
+    if _jp_ch(p) != 34 br                         // expect "key"
+    k := _jp_string(p)
+    _jp_ws(p)
+    if _jp_more(p) && _jp_ch(p) == 58 { _jp_adv(p) }  // ':'
+    v := _jp_value(p)
+    keys = push(keys, k)
+    vals = push(vals, v)
+    _jp_ws(p)
+    if _jp_more(p) == false br
+    c := _jp_ch(p)
+    if c == 44 { _jp_adv(p) }                     // ','
+    el if c == 125 { _jp_adv(p)  br }              // '}'
+    el { br }
+  }
+  JObj(keys, vals)
+}
+
+// -- serializing --------------------------------------------------------
+
+fn _json_esc(s:str) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(s) {
+    c := s[i]
+    if c == 34 { out = out + "\\\"" }
+    el if c == 92 { out = out + "\\\\" }
+    el if c == 10 { out = out + "\\n" }
+    el if c == 9 { out = out + "\\t" }
+    el if c == 13 { out = out + "\\r" }
+    el { out = out + substring(s, i, i + 1) }
+    i = i + 1
+  }
+  out
+}
+
+fn _join_json(items:[Json]) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(items) {
+    if i > 0 { out = out + "," }
+    out = out + json_str(items[i])
+    i = i + 1
+  }
+  out
+}
+
+fn _obj_str(keys:[str], vals:[Json]) -> str {
+  mu out := "{"
+  mu i := 0
+  lp i < len(keys) {
+    if i > 0 { out = out + "," }
+    out = out + "\"" + _json_esc(keys[i]) + "\":" + json_str(vals[i])
+    i = i + 1
+  }
+  out + "}"
+}
+
+fn json_str(j:Json) -> str {
+  mt j {
+    JNull => "null";
+    JBool(b) => if b { "true" } el { "false" };
+    JInt(n) => int_to_str(n);
+    JFloat(f) => float_to_str(f);
+    JStr(s) => "\"" + _json_esc(s) + "\"";
+    JArr(items) => "[" + _join_json(items) + "]";
+    JObj(ks, vs) => _obj_str(ks, vs);
+  }
+}
+
+// -- accessors (receiver-first for UFCS: j.obj_get("k")) ----------------
+
+fn _obj_lookup(keys:[str], vals:[Json], key:str) -> Json {
+  mu i := 0
+  lp i < len(keys) {
+    if keys[i] == key rt vals[i]
+    i = i + 1
+  }
+  JNull
+}
+
+fn obj_get(j:Json, key:str) -> Json {
+  mt j {
+    JObj(ks, vs) => _obj_lookup(ks, vs, key);
+    _ => JNull;
+  }
+}
+
+fn _arr_idx(items:[Json], idx:i64) -> Json {
+  if idx >= 0 && idx < len(items) rt items[idx]
+  JNull
+}
+
+fn arr_at(j:Json, idx:i64) -> Json {
+  mt j {
+    JArr(items) => _arr_idx(items, idx);
+    _ => JNull;
+  }
+}
+
+fn arr_len(j:Json) -> i64 {
+  mt j {
+    JArr(items) => len(items);
+    JObj(ks, vs) => len(ks);
+    _ => 0;
+  }
+}
+
+fn as_int(j:Json) -> i64 {
+  mt j {
+    JInt(n) => n;
+    _ => 0;
+  }
+}
+
+fn as_float(j:Json) -> f64 {
+  mt j {
+    JFloat(f) => f;
+    _ => 0.0;
+  }
+}
+
+fn as_str(j:Json) -> str {
+  mt j {
+    JStr(s) => s;
+    _ => "";
+  }
+}
+
+fn as_bool(j:Json) -> bool {
+  mt j {
+    JBool(b) => b;
+    _ => false;
+  }
+}
+
+fn is_null(j:Json) -> bool {
+  mt j {
+    JNull => true;
+    _ => false;
+  }
+}
+
+fn json_keys(j:Json) -> [str] {
+  mt j {
+    JObj(ks, vs) => ks;
+    _ => _jstrs();
+  }
+}

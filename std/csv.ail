@@ -1,0 +1,111 @@
+// std/csv.ail — a small RFC4180-ish CSV reader/writer.
+//
+//   csv_parse(text)      -> [Row]      full parse: quotes, CRLF/LF, embedded
+//                                       commas and newlines inside "quoted" fields
+//   csv_parse_line(line) -> Row        parse a single record (no row breaks)
+//   csv_emit(rows)       -> str        serialize back; minimal quoting; rows "\n"-joined
+//   csv_field(f)         -> str        quote one field iff it needs it
+//   row_map(header, r)   -> {str:str}  zip a data row against a header row
+//
+// A Row is a thin wrapper over its cells so we never need the (unregistered)
+// nested array type [[str]]. A field is quoted iff it contains a comma, a
+// double-quote, CR, or LF; an inner quote is escaped by doubling it ("").
+// A trailing empty final line is skipped. `\uXXXX` is not relevant to CSV.
+
+st Row { cells:[str] }
+
+// A freshly-typed empty [str]; a bare `xs = []` would infer [i64].
+fn _empty_strs() -> [str] { mu e:[str] := []  e }
+
+// -- parsing ------------------------------------------------------------
+
+fn csv_parse(text:str) -> [Row] {
+  mu rows:[Row] := []
+  mu cells:[str] := []
+  mu cur := ""
+  mu in_q := false
+  mu i := 0
+  n := len(text)
+  lp i < n {
+    c := text[i]
+    if in_q {
+      if c == 34 {                                   // '"'
+        if i + 1 < n && text[i + 1] == 34 {          // "" -> a literal quote
+          cur = cur + "\""
+          i = i + 2
+        } el {                                       // closing quote
+          in_q = false
+          i = i + 1
+        }
+      } el {
+        cur = cur + substring(text, i, i + 1)         // comma/CR/LF are literal here
+        i = i + 1
+      }
+    } el {
+      if c == 34 {                                   // opening quote
+        in_q = true
+        i = i + 1
+      } el if c == 44 {                              // ',' -> end of field
+        cells = push(cells, cur)
+        cur = ""
+        i = i + 1
+      } el if c == 13 || c == 10 {                   // CR / LF / CRLF -> end of row
+        if c == 13 && i + 1 < n && text[i + 1] == 10 { i = i + 1 }
+        i = i + 1
+        cells = push(cells, cur)
+        cur = ""
+        rows = push(rows, Row(cells))
+        cells = _empty_strs()
+      } el {
+        cur = cur + substring(text, i, i + 1)
+        i = i + 1
+      }
+    }
+  }
+  // Flush the final field/row unless the input ended exactly on a row break.
+  if len(cur) > 0 || len(cells) > 0 {
+    cells = push(cells, cur)
+    rows = push(rows, Row(cells))
+  }
+  rows
+}
+
+fn csv_parse_line(line:str) -> Row {
+  rows := csv_parse(line)
+  if len(rows) > 0 rt rows[0]
+  Row(_empty_strs())
+}
+
+// -- serializing --------------------------------------------------------
+
+fn csv_field(f:str) -> str {
+  if index_of(f, ",") >= 0 || index_of(f, "\"") >= 0 || index_of(f, "\r") >= 0 || index_of(f, "\n") >= 0 {
+    rt "\"" + replace(f, "\"", "\"\"") + "\""
+  }
+  f
+}
+
+fn csv_emit(rows:[Row]) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(rows) {
+    if i > 0 out = out + "\n"
+    out = out + join(map(rows[i].cells, fn(x:str) csv_field(x)), ",")
+    i = i + 1
+  }
+  out
+}
+
+// -- convenience --------------------------------------------------------
+
+// Zip a data row against a header row into a column-name -> value map,
+// up to the shorter of the two (extra cells on either side are dropped).
+fn row_map(header:Row, r:Row) -> {str:str} {
+  mu out:{str:str} := {}
+  mu i := 0
+  lp i < len(header.cells) && i < len(r.cells) {
+    out[header.cells[i]] = r.cells[i]
+    i = i + 1
+  }
+  out
+}

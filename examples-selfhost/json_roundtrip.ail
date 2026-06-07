@@ -1,0 +1,7 @@
+im "std/json.ail"
+
+// Parse a nested object, serialize it back (keys keep their order, ints stay
+// exact, 0.5 prints as 0.5), then read one field via a UFCS accessor chain.
+j := json_parse("{\"id\":1,\"tags\":[\"a\",\"b\"],\"ok\":true,\"ratio\":0.5}")
+println(json_str(j))
+println(int_to_str(j.obj_get("id").as_int()))   // 1

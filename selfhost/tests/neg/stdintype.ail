@@ -1,0 +1,5 @@
+// EXPECT: argument 1 to 'f' expects i64, got str
+// read_stdin() returns str — feeding it to an i64 param must be caught, which
+// confirms the builtin's return type is registered (Phase 1 wiring).
+fn f(n:i64) -> i64 { n }
+f(read_stdin())

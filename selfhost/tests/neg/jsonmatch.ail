@@ -1,0 +1,12 @@
+// EXPECT: non-exhaustive match: enum Json missing variant 'JObj'
+// Forgetting a variant when matching a JSON value is the likeliest mistake
+// extending the std/json API — the checker catches it.
+en Json { JNull, JInt(n:i64), JStr(s:str), JObj(keys:[str], vals:[Json]) }
+fn json_str(j:Json) -> str {
+  mt j {
+    JNull => "null";
+    JInt(n) => int_to_str(n);
+    JStr(s) => s;
+  }
+}
+println(json_str(JNull))

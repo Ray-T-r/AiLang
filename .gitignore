@@ -40,6 +40,9 @@ CLAUDE.md
 # sources/headers so a fresh clone can compile it (else verify.sh fails on CI)
 !/examples-selfhost/*.cpp
 !/examples-selfhost/*.h
+# stdin fixtures (verify.sh feeds <name>.in to the matching sample); re-include
+# so the stdin samples are reproducible on a clean checkout / CI
+!/examples-selfhost/*.in
 
 # selfhost/ bootstrap build outputs are covered by selfhost/.gitignore
 
