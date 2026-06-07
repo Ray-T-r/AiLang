@@ -376,6 +376,12 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   // a closure-typed local called as `f(...)` yields its fn-type's return type
   if has(sy.vty, fname) && is_fn_ann(sy.vty[fname]) rt fn_ret_of(sy.vty[fname])
   if has(sy.frets, fname) rt sy.frets[fname]
+  // a closure stored in a struct field, called UFCS-style `r.handler(req)` → the
+  // field's fn-type return (mirrors codegen's gen_fclosure_call dispatch)
+  if len(args) >= 1 {
+    fty := field_type(sy, args[0], fname)
+    if is_fn_ann(fty) rt fn_ret_of(fty)
+  }
   "i64"
 }
 

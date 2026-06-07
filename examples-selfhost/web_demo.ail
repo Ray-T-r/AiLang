@@ -1,0 +1,15 @@
+im "std/web.ail"
+
+// Express-style app: routes with :params, a POST echo, and an auth-ish middleware.
+mu app := web_new()
+web_get(&app, "/", fn(r:Req) http_json(200, "{\"msg\":\"home\"}"))
+web_get(&app, "/users/:id", fn(r:Req) http_json(200, "{\"id\":\"" + req_param(r, "id") + "\"}"))
+web_post(&app, "/users", fn(r:Req) http_json(201, r.body))
+web_use(&app, fn(r:Req) if starts_with(r.path, "/admin") { http_json(403, "{\"err\":\"forbidden\"}") } el { "" })
+
+// Drive the router with literal requests (no socket). Print each response body.
+println(http_body(web_handle(&app, "GET / HTTP/1.1\r\n\r\n")))
+println(http_body(web_handle(&app, "GET /users/42 HTTP/1.1\r\n\r\n")))
+println(http_body(web_handle(&app, "POST /users HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"n\":\"bob\"}")))
+println(http_body(web_handle(&app, "GET /admin/x HTTP/1.1\r\n\r\n")))
+println(http_body(web_handle(&app, "GET /nope HTTP/1.1\r\n\r\n")))

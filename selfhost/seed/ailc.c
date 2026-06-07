@@ -1242,6 +1242,7 @@ const char* f_inline_stmt_value(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_generic_call(s_Syms* v_sy, const char* v_name, arr_Expr v_args);
 const char* f_gen_lambda(s_Syms* v_sy, int64_t v_id);
 const char* f_gen_closure_call(s_Syms* v_sy, const char* v_fname, const char* v_ret, arr_Expr v_args);
+const char* f_gen_fclosure_call(s_Syms* v_sy, s_Expr v_recv, const char* v_fname, const char* v_fty, arr_Expr v_rargs);
 const char* f_class_parent(s_Syms* v_sy, const char* v_cls);
 int64_t f_is_class_method(s_Syms* v_sy, const char* v_cls, const char* v_m);
 const char* f_defining_class(s_Syms* v_sy, const char* v_cls, const char* v_m);
@@ -4597,6 +4598,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_mk;
     const char* v_et;
     arr_str v_ps;
+    const char* v_fty;
     if (f_is_gstruct(v_sy, v_fname)) {
         return f_gstruct_mono(v_sy, v_fname, v_args);
     }
@@ -4789,6 +4791,12 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (map_str_str_has((v_sy)->frets, v_fname)) {
         return map_str_str_get((v_sy)->frets, v_fname);
+    }
+    if ((arr_Expr_len(v_args) >= 1)) {
+        v_fty = f_field_type(v_sy, arr_Expr_get(v_args, 0), v_fname);
+        if (f_is_fn_ann(v_fty)) {
+            return f_fn_ret_of(v_fty);
+        }
     }
     return "i64";
 }
@@ -5771,6 +5779,32 @@ const char* f_gen_closure_call(s_Syms* v_sy, const char* v_fname, const char* v_
     return scat(v_out, "))");
 }
 
+const char* f_gen_fclosure_call(s_Syms* v_sy, s_Expr v_recv, const char* v_fname, const char* v_fty, arr_Expr v_rargs) {
+    const char* v_ret;
+    arr_str v_pts;
+    const char* v_cast;
+    int64_t v_k;
+    const char* v_pt;
+    const char* v_out;
+    v_ret = f_fn_ret_of(v_fty);
+    v_pts = f_fn_params_of(v_fty);
+    v_cast = scat(f_cty(v_ret), " (*)(void*");
+    v_k = 0;
+    while ((v_k < arr_Expr_len(v_rargs))) {
+        v_pt = ({ const char* __r; if ((v_k < arr_str_len(v_pts))) { __r = arr_str_get(v_pts, v_k); } else { __r = "i64"; } __r; });
+        v_cast = scat(scat(v_cast, ", "), f_cty(v_pt));
+        v_k = (v_k + 1);
+    }
+    v_cast = scat(v_cast, ")");
+    v_out = scat(scat(scat(scat("({ closure_t __fc = ", f_gen_field(v_sy, v_recv, v_fname)), "; ((("), v_cast), ")__fc.fn)(__fc.env");
+    v_k = 0;
+    while ((v_k < arr_Expr_len(v_rargs))) {
+        v_out = scat(scat(v_out, ", "), f_gen_expr(v_sy, arr_Expr_get(v_rargs, v_k)));
+        v_k = (v_k + 1);
+    }
+    return scat(v_out, ")); })");
+}
+
 const char* f_class_parent(s_Syms* v_sy, const char* v_cls) {
     if (map_str_str_has((v_sy)->evar, scat("@class.parent.", v_cls))) {
         return map_str_str_get((v_sy)->evar, scat("@class.parent.", v_cls));
@@ -5915,6 +5949,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     const char* v_t;
     const char* v_suf;
     const char* v_gm;
+    const char* v_fty;
+    arr_Expr v_rargs;
+    int64_t v_ri;
     if (f_is_generic(v_sy, v_fname)) {
         return f_gen_generic_call(v_sy, v_fname, v_args);
     }
@@ -6315,6 +6352,18 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if ((map_str_str_has((v_sy)->vty, v_fname) && f_is_fn_ann(map_str_str_get((v_sy)->vty, v_fname)))) {
         return f_gen_closure_call(v_sy, v_fname, f_fn_ret_of(map_str_str_get((v_sy)->vty, v_fname)), v_args);
+    }
+    if (((arr_Expr_len(v_args) >= 1) && (map_str_str_has((v_sy)->frets, v_fname) == (1 != 1)))) {
+        v_fty = f_field_type(v_sy, arr_Expr_get(v_args, 0), v_fname);
+        if (f_is_fn_ann(v_fty)) {
+            v_rargs = ({ arr_Expr __a = arr_Expr_new(); __a; });
+            v_ri = 1;
+            while ((v_ri < arr_Expr_len(v_args))) {
+                v_rargs = arr_Expr_push(v_rargs, arr_Expr_get(v_args, v_ri));
+                v_ri = (v_ri + 1);
+            }
+            return f_gen_fclosure_call(v_sy, arr_Expr_get(v_args, 0), v_fname, v_fty, v_rargs);
+        }
     }
     return scat(scat(scat(scat("f_", v_fname), "("), f_gen_args(v_sy, v_args)), ")");
 }

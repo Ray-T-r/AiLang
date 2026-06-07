@@ -1,0 +1,104 @@
+// std/web.ail — a tiny Express-style web framework over std/http + std/sock.
+//
+//   app := web_new()
+//   web_get(&app, "/users/:id", fn(r:Req) http_json(200, "{\"id\":\"" + req_param(r,"id") + "\"}"))
+//   web_post(&app, "/users", fn(r:Req) http_json(201, r.body))
+//   web_use(&app, fn(r:Req) if needs_auth(r) { http_json(401,"…") } el { "" })  // middleware
+//   web_listen(&app, "0.0.0.0", 8080)        // the live server loop (POSIX sockets)
+//
+// Handlers are closures stored in the routes table (a struct-field closure call —
+// `route.handler(req)`). `web_handle(&app, raw_request) -> response` is the socket-free
+// core (route match + :params + middleware + dispatch) — drive it with literal request
+// strings to test routing without opening a socket. POSIX-only (sockets).
+
+im "std/sock.ail"
+im "std/http.ail"
+
+st Req   { method:str  path:str  body:str  pkeys:[str]  pvals:[str] }
+st Route { method:str  pat:str  handler:fn(Req)->str }
+st Mw    { h:fn(Req)->str }
+st App   { routes:[Route]  befores:[Mw] }
+st MatchRes { ok:i64  pkeys:[str]  pvals:[str] }
+
+fn _w_estr() -> [str]    { mu e:[str] := []    e }
+fn _w_eroute() -> [Route] { mu e:[Route] := [] e }
+fn _w_emw() -> [Mw]      { mu e:[Mw] := []     e }
+
+fn web_new() -> App { App(_w_eroute(), _w_emw()) }
+
+fn web_get(app:*App, pat:str, h:fn(Req)->str)    { app.routes = push(app.routes, Route("GET", pat, h)) }
+fn web_post(app:*App, pat:str, h:fn(Req)->str)   { app.routes = push(app.routes, Route("POST", pat, h)) }
+fn web_put(app:*App, pat:str, h:fn(Req)->str)    { app.routes = push(app.routes, Route("PUT", pat, h)) }
+fn web_delete(app:*App, pat:str, h:fn(Req)->str) { app.routes = push(app.routes, Route("DELETE", pat, h)) }
+fn web_use(app:*App, h:fn(Req)->str)             { app.befores = push(app.befores, Mw(h)) }
+
+// A captured path param, or "" if absent.
+fn req_param(r:Req, name:str) -> str {
+  mu i := 0
+  lp i < len(r.pkeys) { if r.pkeys[i] == name rt r.pvals[i]   i = i + 1 }
+  ""
+}
+
+// Match a route pattern against a path, capturing `:name` segments.
+fn web_match(pat:str, path:str) -> MatchRes {
+  ps := split(pat, "/")
+  qs := split(path, "/")
+  if len(ps) != len(qs) rt MatchRes(0, _w_estr(), _w_estr())
+  mu pk:[str] := []
+  mu pv:[str] := []
+  mu i := 0
+  lp i < len(ps) {
+    seg := ps[i]
+    if len(seg) > 0 && seg[0] == 58 {                 // ':' → capture this segment
+      pk = push(pk, substring(seg, 1, len(seg)))
+      pv = push(pv, qs[i])
+    } el {
+      if seg != qs[i] rt MatchRes(0, _w_estr(), _w_estr())
+    }
+    i = i + 1
+  }
+  MatchRes(1, pk, pv)
+}
+
+// Route + dispatch a raw HTTP request to a response string (no socket — testable).
+fn web_handle(app:*App, raw:str) -> str {
+  method := http_method(raw)
+  mu path := http_path(raw)
+  qi := index_of(path, "?")                            // drop any query string
+  if qi >= 0 { path = substring(path, 0, qi) }
+  body := http_body(raw)
+  // middleware: first non-"" return short-circuits (e.g. auth)
+  mu mi := 0
+  lp mi < len(app.befores) {
+    mw := app.befores[mi]
+    res := mw.h(Req(method, path, body, _w_estr(), _w_estr()))
+    if len(res) > 0 rt res
+    mi = mi + 1
+  }
+  // routes: first method+pattern match wins
+  mu i := 0
+  lp i < len(app.routes) {
+    rte := app.routes[i]
+    if rte.method == method {
+      mr := web_match(rte.pat, path)
+      if mr.ok == 1 rt rte.handler(Req(method, path, body, mr.pkeys, mr.pvals))
+    }
+    i = i + 1
+  }
+  http_json(404, "{\"error\":\"not found\"}")
+}
+
+// The live server: accept → recv → route → respond → close. POSIX sockets.
+fn web_listen(app:*App, host:str, port:i64) -> i64 {
+  fd := must_listen(host, port, "web: listening on " + host + ":" + int_to_str(port))
+  mu alive := true
+  lp alive {
+    cli := tcp_accept(fd)
+    if cli < 0 ct
+    raw := http_recv_request(cli)
+    if len(raw) == 0 { sock_close(cli)  ct }
+    sock_send_str_all(cli, web_handle(app, raw))
+    sock_close(cli)
+  }
+  0
+}

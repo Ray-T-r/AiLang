@@ -639,6 +639,24 @@ fn gen_closure_call(sy:*Syms, fname:str, ret:str, args:[Expr]) -> str {
   lp k < len(args) { out = out + ", " + gen_expr(sy, args[k]); k += 1 }
   out + "))"
 }
+// `recv.field(rargs)`: call a closure stored in struct field `field` (type `fty`).
+// Binds the closure once (so recv isn't re-evaluated) then calls through its fn ptr.
+fn gen_fclosure_call(sy:*Syms, recv:Expr, fname:str, fty:str, rargs:[Expr]) -> str {
+  ret := fn_ret_of(fty)
+  pts := fn_params_of(fty)
+  mu cast := cty(ret) + " (*)(void*"
+  mu k := 0
+  lp k < len(rargs) {
+    pt := if k < len(pts) { pts[k] } el { "i64" }
+    cast = cast + ", " + cty(pt)
+    k += 1
+  }
+  cast = cast + ")"
+  mu out := "({ closure_t __fc = " + gen_field(sy, recv, fname) + "; (((" + cast + ")__fc.fn)(__fc.env"
+  k = 0
+  lp k < len(rargs) { out = out + ", " + gen_expr(sy, rargs[k]); k += 1 }
+  out + ")); })"
+}
 
 // ----- class method dispatch (static, across single inheritance) ------------
 // A method call `obj.m(a)` parses (UFCS) to Call("m", [obj, a]); when obj's
@@ -1014,6 +1032,19 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   // user-fn `f_<name>` fallback, since a closure var shadows that path)
   if has(sy.vty, fname) && is_fn_ann(sy.vty[fname]) {
     rt gen_closure_call(sy, fname, fn_ret_of(sy.vty[fname]), args)
+  }
+  // a closure stored in a STRUCT FIELD, called UFCS-style: `r.handler(req)` was
+  // parsed as Call("handler",[r,req]); if `handler` is a closure-typed field of r's
+  // struct, call through it (args[0]=receiver, args[1..]=the real args). Guarded on
+  // "no top-level fn of this name" so a real fn `f(x)` still wins over a same-named field.
+  if len(args) >= 1 && has(sy.frets, fname) == false {
+    fty := field_type(sy, args[0], fname)
+    if is_fn_ann(fty) {
+      mu rargs:[Expr] := []
+      mu ri := 1
+      lp ri < len(args) { rargs = push(rargs, args[ri]); ri += 1 }
+      rt gen_fclosure_call(sy, args[0], fname, fty, rargs)
+    }
   }
   "f_" + fname + "(" + gen_args(sy, args) + ")"
 }
