@@ -1,0 +1,5 @@
+// EXPECT: generic function 'ap' expects 2 arguments, got 1
+// A generic fn with a closure parameter is still arity-checked against its
+// template (the check fires before monomorphization, so it can't be bypassed).
+fn ap<T,U>(x:T, f:fn(T)->U) -> U { f(x) }
+println(ap(5))

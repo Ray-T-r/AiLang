@@ -470,14 +470,40 @@ fn find_gfn(sy:*Syms, name:str) -> Func {
   mu noa:[str] := []
   Func("", noa, noa, "", "", noa, nob)
 }
+// Find `tp` inside a closure param's `@fn(P…)R` annotation by matching it against
+// the argument's concrete `@fn(…)…` type — so `U` in `f:fn(T)->U` is recovered from
+// the lambda's return type. "" if not found / arg isn't a fn type.
+fn fn_targ_match(pann:str, aann:str, tp:str) -> str {
+  if is_fn_ann(aann) == false rt ""
+  pps := fn_params_of(pann)
+  aps := fn_params_of(aann)
+  mu i := 0
+  lp i < len(pps) {
+    if i < len(aps) {
+      if pps[i] == tp rt aps[i]
+      if pps[i] == "[" + tp + "]" rt elem_of_ann(aps[i])
+    }
+    i += 1
+  }
+  pr := fn_ret_of(pann)
+  ar := fn_ret_of(aann)
+  if pr == tp rt ar
+  if pr == "[" + tp + "]" rt elem_of_ann(ar)
+  ""
+}
 // The concrete type for a SPECIFIC type param `tp`, inferred from the arg whose param
-// type is `tp` (or `[tp]` → its element). Enables distinct multi-param generics `<A,B>`.
+// type is `tp` (or `[tp]` → its element, or inside a closure param's `@fn(…)`).
+// Enables distinct multi-param generics `<A,B>` and generic HOF params `fn(T)->U`.
 fn targ_for(sy:*Syms, f:Func, tp:str, args:[Expr]) -> str {
   mu i := 0
   lp i < len(f.ptypes) {
     if i < len(args) {
       if f.ptypes[i] == tp rt type_of_expr(sy, args[i])
       if f.ptypes[i] == "[" + tp + "]" rt elem_of_ann(type_of_expr(sy, args[i]))
+      if is_fn_ann(f.ptypes[i]) {
+        m := fn_targ_match(f.ptypes[i], type_of_expr(sy, args[i]), tp)
+        if len(m) > 0 rt m
+      }
     }
     i += 1
   }
@@ -495,6 +521,46 @@ fn subst_multi(sy:*Syms, f:Func, ty:str, args:[Expr]) -> str {
     i += 1
   }
   ty
+}
+// ----- generic-fn monomorphization: mangle a type to a C-ident fragment, name
+// an instance, and record (template + concrete type args) so driver's
+// lower_generic_funcs emits one real C function per instantiation. -----------
+fn ty_mangle(ty:str) -> str {
+  if is_array_ann(ty) rt "arr_" + ty_mangle(elem_of_ann(ty))
+  if is_fn_ann(ty) {
+    pp := fn_params_of(ty)
+    mu s := "fn"
+    mu k := 0
+    lp k < len(pp) { s = s + "_" + ty_mangle(pp[k]); k += 1 }
+    rt s + "_r_" + ty_mangle(fn_ret_of(ty))
+  }
+  if is_map_ann(ty) rt "map_" + ty_mangle(map_ktype(ty)) + "_" + ty_mangle(map_vtype(ty))
+  if is_ptr_ann(ty) rt "ptr_" + ty_mangle(deref_ann(ty))
+  ty                                          // scalar / struct / enum — already a C ident
+}
+fn mono_fn_name(name:str, targs:[str]) -> str {
+  mu nm := name + "__"
+  mu i := 0
+  lp i < len(targs) { if i > 0 { nm = nm + "_" }   nm = nm + ty_mangle(targs[i]); i += 1 }
+  nm
+}
+// Record a generic call's instantiation (no-op unless `fname` is generic). The
+// concrete type args (one per tparam, inferred from the call's args) are stored
+// under @gi.<mangle> as "template;targ;…"; @gilist accumulates the mangles. Driven
+// from the closure-collection walk, so it sees the same seeded types codegen does.
+fn record_gi(sy:*Syms, fname:str, args:[Expr]) -> i64 {
+  if is_generic(sy, fname) == false rt 0
+  f := find_gfn(sy, fname)
+  if len(f.name) == 0 rt 0
+  if len(f.tparams) == 0 rt 0
+  mu targs:[str] := []
+  mu ti := 0
+  lp ti < len(f.tparams) { targs = push(targs, targ_for(sy, f, f.tparams[ti], args)); ti += 1 }
+  mangle := mono_fn_name(fname, targs)
+  if has(sy.evar, "@gi." + mangle) rt 0
+  sy.evar["@gi." + mangle] = fname + ";" + join_semi(targs)
+  if has(sy.evar, "@gilist") && len(sy.evar["@gilist"]) > 0 { sy.evar["@gilist"] = sy.evar["@gilist"] + ";" + mangle } el { sy.evar["@gilist"] = mangle }
+  0
 }
 fn generic_T(sy:*Syms, f:Func, args:[Expr]) -> str {
   mu i := 0
@@ -526,21 +592,17 @@ fn inline_stmt_value(sy:*Syms, s:Stmt) -> str {
     SContinue             => "0;";
   }
 }
+// A generic call now resolves to its monomorphized C function `f_<name>__<targs>`
+// (emitted once per instantiation by driver's lower_generic_funcs). The mangle is
+// computed from the same per-tparam inference (targ_for) the recorder used, so the
+// two agree. (Was: inline the body as a stmt-expr — which forbade early return,
+// local decls, and multi-statement bodies; that limitation is gone.)
 fn gen_generic_call(sy:*Syms, name:str, args:[Expr]) -> str {
   f := find_gfn(sy, name)
-  mu o := "({ "
-  mu i := 0
-  lp i < len(f.params) {
-    pt := subst_multi(sy, f, f.ptypes[i], args)   // per-tparam: each `<A,B>` → its own inferred type
-    set_ty(sy, f.params[i], pt)
-    o = o + cty(pt) + " v_" + f.params[i] + " = " + gen_expr(sy, args[i]) + "; "
-    i += 1
-  }
-  n := len(f.body)
-  mu j := 0
-  lp j < n - 1 { o = o + gen_stmt(sy, f.body[j], "") j += 1 }
-  if n > 0 { o = o + inline_stmt_value(sy, f.body[n - 1]) }
-  o + " })"
+  mu targs:[str] := []
+  mu ti := 0
+  lp ti < len(f.tparams) { targs = push(targs, targ_for(sy, f, f.tparams[ti], args)); ti += 1 }
+  "f_" + mono_fn_name(name, targs) + "(" + gen_args(sy, args) + ")"
 }
 
 // ----- first-class closures -------------------------------------------------

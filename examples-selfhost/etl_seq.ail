@@ -1,0 +1,16 @@
+im "std/csv.ail"
+im "std/json.ail"
+im "std/seq.ail"
+
+// CSV → seq combinators (drop/keep/map_to/fold) → JSON. The combinators run over
+// [Row] and produce [Json] — element types the inline generic model couldn't reach.
+data := "name,dept,salary\nalice,eng,180\nbob,sales,150\ncarol,eng,120\ndave,eng,95"
+body := drop(csv_parse(data), 1)                          // drop the header row
+
+eng := keep(body, fn(r:Row) r.cells[1] == "eng")
+total := eng |> map_to(fn(r:Row) str_to_int(r.cells[2])) |> fold(0, fn(a, n) a + n)
+names := map_to(eng, fn(r:Row) JStr(r.cells[0]))          // [Json]
+
+out := JObj(["dept", "count", "total", "names"],
+            [JStr("eng"), JInt(len(eng)), JInt(total), JArr(names)])
+println(json_str(out))   // {"dept":"eng","count":3,"total":395,"names":["alice","carol","dave"]}

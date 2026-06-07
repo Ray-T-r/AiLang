@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 10,182 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 10,596 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -21,10 +21,12 @@ The core language plus the full standard library: functions and recursion,
 control flow, structs, classes (`cl` — single inheritance + `vt` virtual
 methods, lowered to C vtables), `en` enums + `mt` match (recursive ADTs,
 heap-boxed self-references; guards `if`, `_` catch-all, and nested
-destructuring), real generics — generic functions, generic data types
-(`st Box<T>` and `en Option<T>` / `Result<T>`, monomorphized per use),
-multi-parameter generics (`<A,B>`), and `tr` traits + `<T: Trait>` constrained
-generics (compile-time-checked) — closures with capture, `[T]` arrays
+destructuring), real generics — generic functions and generic data types
+(`st Box<T>`, `en Option<T>` / `Result<T>`) monomorphized per use into real C
+functions, so a generic fn may take a closure parameter
+(`fn map2<T,U>(xs:[T], f:fn(T)->U)`); multi-parameter generics (`<A,B>`), and
+`tr` traits + `<T: Trait>` constrained generics (compile-time-checked) — closures
+with capture, `[T]` arrays
 and `{K:V}` maps (open-addressing, hash-ordered like the reference), tuples +
 multi-return, `!T` / `?` error propagation, floats, bytes, string
 interpolation `"${e}"`, pointers, UFCS (`x.f(a)`), operator overloading
@@ -33,12 +35,14 @@ C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or a
 external `.cpp`, POSIX), variadic externs
 (`ex fn printf(fmt, ...)`), OS-thread concurrency (pthread-backed
 `thread_spawn`/`thread_join`, `mutex_*`, and bounded blocking `chan_*` channels,
-POSIX), and the 12 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
-WebSocket, JSON (flat + nested), CSV, time, str, math, threads — pulled in via
-`im` (with optional `im "path" as m` aliasing for a namespaced, collision-free
-`m.fn()`). Whole-stream stdin (`read_stdin`) plus the CSV reader/writer and the
-recursive JSON parser/serializer make read→transform→write pipelines —
-`csv_parse(data) |> filter(…) |> map(…)`, then `json_str(…)` — a few tokens.
+POSIX), and the 13 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
+WebSocket, JSON (flat + nested), CSV, time, str, math, threads, and `seq`
+(composable `any`/`keep`/`map_to`/`fold`/`sort_by`/`flat_map`/`zip_with`
+combinators) — pulled in via `im` (with optional `im "path" as m` aliasing for a
+namespaced, collision-free `m.fn()`). Whole-stream stdin (`read_stdin`) plus the
+CSV reader/writer and the recursive JSON parser/serializer make
+read→transform→write pipelines — `csv_parse(data) |> keep(…) |> map_to(…)`, then
+`json_str(…)` — a few tokens.
 
 ## Benchmarks
 
@@ -78,11 +82,11 @@ matching `clang -O2`).
 | | |
 |---|---|
 | compiler source | ~7,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **10,182 lines, byte-identical** |
-| sample programs | **53**, each output-verified against a frozen fixture |
-| standard library | 12 modules, all compiling |
+| strict fixpoint | `stage2.c == stage3.c` — **10,596 lines, byte-identical** |
+| sample programs | **55**, each output-verified against a frozen fixture |
+| standard library | 13 modules, all compiling |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **39 negative tests**, all caught |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **40 negative tests**, all caught |
 | Rust in the build | **none** |
 
 ## Layout

@@ -115,6 +115,239 @@ fn collect_struct_inst(structs:[StructDef], gstructs:[StructDef], ty:str) -> [St
   push(structs, gen_instance(gt, inst_args(ty)))
 }
 
+// ----- generic FUNCTIONS: monomorphize each instantiation into a real C function
+// (so bodies may early-return, declare locals, be multi-statement — impossible when
+// inlined). lower_generic_funcs collects instances from call sites (with the same
+// seeded type context codegen uses → same mangle), monomorphizes each, and appends
+// it to `funcs`; the existing proto+body assembly then emits it. gen_call emits the
+// matching `f_<name>__<targs>(…)` call. Inert when no generic fns exist (main.ail). -
+fn subst_ty_full(tps:[str], targs:[str], ty:str) -> str {
+  mu i := 0
+  lp i < len(tps) { if i < len(targs) && ty == tps[i] rt targs[i]   i += 1 }
+  if is_array_ann(ty) rt "[" + subst_ty_full(tps, targs, elem_of_ann(ty)) + "]"
+  if is_fn_ann(ty) {
+    pp := fn_params_of(ty)
+    mu sp:[str] := []
+    mu k := 0
+    lp k < len(pp) { sp = push(sp, subst_ty_full(tps, targs, pp[k])); k += 1 }
+    rt fn_type_of_pts(sp, subst_ty_full(tps, targs, fn_ret_of(ty)))
+  }
+  if is_map_ann(ty) rt "{" + subst_ty_full(tps, targs, map_ktype(ty)) + ":" + subst_ty_full(tps, targs, map_vtype(ty)) + "}"
+  ty
+}
+// Rewrite a generic body for one instantiation: substitute type params in the only
+// AST fields that carry them — Array element-type (`mu out:[U] := []`), Lambda param
+// types, and MapLit annotation. Every other node is rebuilt unchanged. (Identity on
+// a body with no tparam annotations, e.g. any/sort_by — they ride through verbatim.)
+fn subst_ptypes(tps:[str], targs:[str], pts:[str]) -> [str] {
+  mu out:[str] := []
+  mu i := 0
+  lp i < len(pts) { out = push(out, subst_ty_full(tps, targs, pts[i])); i += 1 }
+  out
+}
+fn subst_exprs(tps:[str], targs:[str], es:[Expr]) -> [Expr] {
+  mu out:[Expr] := []
+  mu i := 0
+  lp i < len(es) { out = push(out, subst_expr(tps, targs, es[i])); i += 1 }
+  out
+}
+fn subst_expr(tps:[str], targs:[str], e:Expr) -> Expr {
+  mt e {
+    Num(v)              => Num(v);
+    Flt(s)              => Flt(s);
+    Str(s)              => Str(s);
+    Var(name)           => Var(name);
+    Bad                 => Bad;
+    Bin(op,l,r)         => Bin(op, subst_expr(tps, targs, l), subst_expr(tps, targs, r));
+    Unary(op,x)         => Unary(op, subst_expr(tps, targs, x));
+    Call(cn,args)       => Call(cn, subst_exprs(tps, targs, args));
+    Field(obj,fnm)      => Field(subst_expr(tps, targs, obj), fnm);
+    Index(obj,idx)      => Index(subst_expr(tps, targs, obj), subst_expr(tps, targs, idx));
+    Array(elems,ety)    => Array(subst_exprs(tps, targs, elems), subst_ty_full(tps, targs, ety));
+    MapLit(mty,ks,vs)   => MapLit(subst_ty_full(tps, targs, mty), subst_exprs(tps, targs, ks), subst_exprs(tps, targs, vs));
+    Addr(x)             => Addr(subst_expr(tps, targs, x));
+    Match(sc,vn,vb,bd,gd) => Match(subst_expr(tps, targs, sc), vn, vb, subst_exprs(tps, targs, bd), subst_exprs(tps, targs, gd));
+    IfE(c,t,el2)        => IfE(subst_expr(tps, targs, c), subst_expr(tps, targs, t), subst_expr(tps, targs, el2));
+    Try(x)              => Try(subst_expr(tps, targs, x));
+    Lambda(ps,pts,b,id) => Lambda(ps, subst_ptypes(tps, targs, pts), subst_expr(tps, targs, b), id);
+    Tuple(tes)          => Tuple(subst_exprs(tps, targs, tes));
+    BlockE(bb)          => BlockE(subst_stmts(tps, targs, bb));
+  }
+}
+fn subst_stmts(tps:[str], targs:[str], body:[Stmt]) -> [Stmt] {
+  mu out:[Stmt] := []
+  mu i := 0
+  lp i < len(body) { out = push(out, subst_stmt(tps, targs, body[i])); i += 1 }
+  out
+}
+fn subst_stmt(tps:[str], targs:[str], s:Stmt) -> Stmt {
+  mt s {
+    SDecl(name,e,pos)       => SDecl(name, subst_expr(tps, targs, e), pos);
+    SDestructure(names,e)   => SDestructure(names, subst_expr(tps, targs, e));
+    SAssign(name,e,pos)     => SAssign(name, subst_expr(tps, targs, e), pos);
+    SIdxAssign(o,ix,e,pos)  => SIdxAssign(subst_expr(tps, targs, o), subst_expr(tps, targs, ix), subst_expr(tps, targs, e), pos);
+    SFieldAssign(o,f,e,pos) => SFieldAssign(subst_expr(tps, targs, o), f, subst_expr(tps, targs, e), pos);
+    SReturn(e,pos)          => SReturn(subst_expr(tps, targs, e), pos);
+    SPrint(e,pos)           => SPrint(subst_expr(tps, targs, e), pos);
+    SIf(c,b,eb)             => SIf(subst_expr(tps, targs, c), subst_stmts(tps, targs, b), subst_stmts(tps, targs, eb));
+    SLoop(c,b)              => SLoop(subst_expr(tps, targs, c), subst_stmts(tps, targs, b));
+    SLoopIn(vnm,coll,b)     => SLoopIn(vnm, subst_expr(tps, targs, coll), subst_stmts(tps, targs, b));
+    SLoopKV(kn,vn,coll,b)   => SLoopKV(kn, vn, subst_expr(tps, targs, coll), subst_stmts(tps, targs, b));
+    SLoopRange(v,lo,hi,b)   => SLoopRange(v, subst_expr(tps, targs, lo), subst_expr(tps, targs, hi), subst_stmts(tps, targs, b));
+    SBreak                  => SBreak;
+    SContinue               => SContinue;
+    SExpr(e,pos)            => SExpr(subst_expr(tps, targs, e), pos);
+  }
+}
+fn monomorphize_fn(gt:Func, targs:[str]) -> Func {
+  mu pts:[str] := []
+  mu i := 0
+  lp i < len(gt.ptypes) { pts = push(pts, subst_ty_full(gt.tparams, targs, gt.ptypes[i])); i += 1 }
+  ret := subst_ty_full(gt.tparams, targs, gt.ret)
+  mu notp:[str] := []
+  Func(mono_fn_name(gt.name, targs), gt.params, pts, ret, gt.lib, notp, subst_stmts(gt.tparams, targs, gt.body))
+}
+// Recursive walk recording every generic call (record_gi is a no-op for non-generics).
+// Seeds map/filter/reduce inlined-lambda params (mirrors gen_map/…) so generic calls
+// inside those lambdas infer the same types codegen will.
+fn cgi2(sy:*Syms, a:Expr, b:Expr) -> i64 { collect_gi_expr(sy, a)   collect_gi_expr(sy, b)   0 }
+fn cgi3(sy:*Syms, a:Expr, b:Expr, c:Expr) -> i64 { collect_gi_expr(sy, a)   collect_gi_expr(sy, b)   collect_gi_expr(sy, c)   0 }
+fn collect_gi_args(sy:*Syms, args:[Expr]) -> i64 {
+  mu i := 0
+  lp i < len(args) { collect_gi_expr(sy, args[i]); i += 1 }
+  0
+}
+fn cgi_kv(sy:*Syms, ks:[Expr], vs:[Expr]) -> i64 { collect_gi_args(sy, ks)   collect_gi_args(sy, vs)   0 }
+fn cgi_match(sy:*Syms, sc:Expr, bd:[Expr], gd:[Expr]) -> i64 { collect_gi_expr(sy, sc)   collect_gi_args(sy, bd)   collect_gi_args(sy, gd)   0 }
+fn cgi_seed1(sy:*Syms, lam:Expr, t:str) -> i64 {
+  ps := lam_params(lam)
+  if len(ps) > 0 { set_ty(sy, ps[0], t) }
+  collect_gi_expr(sy, lam_body(lam))
+  0
+}
+fn cgi_seed2(sy:*Syms, lam:Expr, t0:str, t1:str) -> i64 {
+  ps := lam_params(lam)
+  if len(ps) > 0 { set_ty(sy, ps[0], t0) }
+  if len(ps) > 1 { set_ty(sy, ps[1], t1) }
+  collect_gi_expr(sy, lam_body(lam))
+  0
+}
+fn cgi_call(sy:*Syms, fname:str, args:[Expr]) -> i64 {
+  record_gi(sy, fname, args)
+  if (fname == "map" || fname == "filter") && len(args) == 2 {
+    collect_gi_expr(sy, args[0])
+    cgi_seed1(sy, args[1], elem_of_ann(type_of_expr(sy, args[0])))
+    rt 0
+  }
+  if fname == "reduce" && len(args) == 3 {
+    collect_gi_expr(sy, args[0])
+    collect_gi_expr(sy, args[1])
+    cgi_seed2(sy, args[2], type_of_expr(sy, args[1]), elem_of_ann(type_of_expr(sy, args[0])))
+    rt 0
+  }
+  collect_gi_args(sy, args)
+  0
+}
+fn collect_gi_expr(sy:*Syms, e:Expr) -> i64 {
+  mt e {
+    Num(v)           => 0;
+    Flt(s)           => 0;
+    Str(s)           => 0;
+    Var(n)           => 0;
+    Bad              => 0;
+    Bin(op,l,r)      => cgi2(sy, l, r);
+    Unary(op,x)      => collect_gi_expr(sy, x);
+    Call(fname,args) => cgi_call(sy, fname, args);
+    Field(obj,fnm)   => collect_gi_expr(sy, obj);
+    Index(obj,idx)   => cgi2(sy, obj, idx);
+    Array(elems,ety) => collect_gi_args(sy, elems);
+    MapLit(m,mks,mvs) => cgi_kv(sy, mks, mvs);
+    Addr(x)          => collect_gi_expr(sy, x);
+    Match(sc,vn,vb,bd,gd) => cgi_match(sy, sc, bd, gd);
+    IfE(c,t,el2)     => cgi3(sy, c, t, el2);
+    Try(x)           => collect_gi_expr(sy, x);
+    Lambda(ps,pts,b,id) => collect_gi_expr(sy, b);
+    Tuple(tes)       => collect_gi_args(sy, tes);
+    BlockE(bb)       => collect_gi_body(sy, bb);
+  }
+}
+fn cgi_if(sy:*Syms, c:Expr, b:[Stmt], eb:[Stmt]) -> i64 { collect_gi_expr(sy, c)   collect_gi_body(sy, b)   collect_gi_body(sy, eb)   0 }
+fn cgi_cb(sy:*Syms, c:Expr, b:[Stmt]) -> i64 { collect_gi_expr(sy, c)   collect_gi_body(sy, b)   0 }
+fn cgi_range(sy:*Syms, lo:Expr, hi:Expr, b:[Stmt]) -> i64 { collect_gi_expr(sy, lo)   collect_gi_expr(sy, hi)   collect_gi_body(sy, b)   0 }
+fn collect_gi_stmt(sy:*Syms, s:Stmt) -> i64 {
+  mt s {
+    SDecl(name,e)         => collect_gi_expr(sy, e);
+    SDestructure(names,e) => collect_gi_expr(sy, e);
+    SAssign(name,e)       => collect_gi_expr(sy, e);
+    SIdxAssign(o,ix,e)    => cgi3(sy, o, ix, e);
+    SFieldAssign(o,f,e)   => cgi2(sy, o, e);
+    SReturn(e)            => collect_gi_expr(sy, e);
+    SPrint(e)             => collect_gi_expr(sy, e);
+    SExpr(e)              => collect_gi_expr(sy, e);
+    SIf(c,b,eb)           => cgi_if(sy, c, b, eb);
+    SLoop(c,b)            => cgi_cb(sy, c, b);
+    SLoopIn(vnm,coll,b)   => cgi_cb(sy, coll, b);
+    SLoopKV(kn,vn,coll,b) => cgi_cb(sy, coll, b);
+    SLoopRange(v,lo,hi,b) => cgi_range(sy, lo, hi, b);
+    SBreak                => 0;
+    SContinue             => 0;
+  }
+}
+fn collect_gi_body(sy:*Syms, body:[Stmt]) -> i64 {
+  mu i := 0
+  lp i < len(body) { collect_gi_stmt(sy, body[i]); i += 1 }
+  0
+}
+fn gi_count(base:*Syms) -> i64 {
+  if has(base.evar, "@gilist") == false rt 0
+  if len(base.evar["@gilist"]) == 0 rt 0
+  len(split_semi(base.evar["@gilist"]))
+}
+fn gi_at(base:*Syms, idx:i64) -> str {
+  list := split_semi(base.evar["@gilist"])
+  if idx < len(list) rt list[idx]
+  ""
+}
+fn lower_generic_funcs(base:*Syms, funcs:[Func], mains:[Stmt]) -> [Func] {
+  if len(base.gfns) == 0 rt funcs
+  base.evar["@gilist"] = ""
+  mu i := 0
+  lp i < len(funcs) {
+    mu sy := seed_fn(base, funcs[i])
+    hoist_decls(&sy, funcs[i].body, "")
+    collect_gi_body(&sy, funcs[i].body)
+    i += 1
+  }
+  mu msy := Syms(base.vty, base.fld, base.ctors, base.frets, base.evar, base.vft, base.gfns, base.lams, base.errc)
+  msy.vty = {}
+  hoist_decls(&msy, mains, "")
+  collect_gi_body(&msy, mains)
+  mu result := funcs
+  mu idx := 0
+  lp idx < gi_count(base) {
+    mangle := gi_at(base, idx)
+    payload := if len(mangle) > 0 { base.evar["@gi." + mangle] } el { "" }
+    parts := split_semi(payload)
+    if len(parts) > 0 {
+      tname := parts[0]
+      mu targs:[str] := []
+      mu pi := 1
+      lp pi < len(parts) { targs = push(targs, parts[pi]); pi += 1 }
+      gt := find_gfn(base, tname)
+      if len(gt.name) > 0 {
+        cf := monomorphize_fn(gt, targs)
+        base.frets[cf.name] = cf.ret
+        result = push(result, cf)
+        mu sy2 := seed_fn(base, cf)
+        hoist_decls(&sy2, cf.body, "")
+        collect_gi_body(&sy2, cf.body)
+      }
+    }
+    idx += 1
+  }
+  result
+}
+
 // ----- generic enums: monomorphize instantiations (variants mangled per-instance) -
 // `mono_variant("Option_i64", "Some")` → "Option_i64_Some" — a per-instance variant
 // name so the existing enum machinery (evar/@order/@vfld/mkv_/union) handles each
@@ -1577,6 +1810,11 @@ fn compile_to_c(src:str, dir:str) -> str {
     if n > 1 { println("found " + int_to_str(n) + " errors") }   // summary only for multi-error; single-error output stays byte-identical to before
     exit(1)
   }
+
+  // Monomorphize generic functions into real C functions (one per instantiation),
+  // appended to `funcs` so the proto+body assembly below emits them. No-op for
+  // main.ail (uses no generic fns) → emitted C unchanged → fixpoint safe.
+  funcs = lower_generic_funcs(&base, funcs, mains)
 
   // Link-flag marker: one comment line listing the libs from `ex "lib"` decls,
   // read back by the driver to append `-l<lib>` to clang. Absent when nothing

@@ -1,0 +1,26 @@
+im "std/seq.ail"
+
+// Generic combinators compose with the |> pipe — and now work over any element
+// type because each is monomorphized to a real C function.
+nums := [5, 3, 8, 1, 9, 2, 7]
+
+total := nums |> keep(fn(n) n > 3) |> map_to(fn(n) n * n) |> fold(0, fn(a, n) a + n)
+println(total)                                   // 219  (5,8,9,7 → 25,64,81,49 → sum)
+println(any(nums, fn(n) n > 8))                  // true
+println(count(nums, fn(n) n > 4))                // 4
+sorted := sort_by(nums, fn(n) n)
+println(sorted[0])                               // 1
+println(sorted[6])                               // 9
+
+words := ["pear", "fig", "apple", "kiwi"]
+bylen := words |> sort_by(fn(s:str) len(s))
+println(bylen[0])                                // fig
+println(bylen[3])                                // apple
+upper := words |> keep(fn(s:str) len(s) > 3) |> map_to(fn(s:str) to_upper(s))
+println(upper[0])                                // PEAR
+println(len(upper))                              // 3
+
+pairs := flat_map([1, 2, 3], fn(n) [n, n * n])   // [1,1,2,4,3,9]
+println(pairs[5])                                // 9
+sums := zip_with([1, 2, 3], [10, 20, 30], fn(a, b) a + b)
+println(sums[1])                                 // 22

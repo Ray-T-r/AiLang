@@ -1231,8 +1231,12 @@ int64_t f_is_tparam(s_Func v_f, const char* v_ty);
 int64_t f_is_array_tparam(s_Func v_f, const char* v_ty);
 const char* f_subst_tparam(s_Func v_f, const char* v_ty, const char* v_concrete);
 s_Func f_find_gfn(s_Syms* v_sy, const char* v_name);
+const char* f_fn_targ_match(const char* v_pann, const char* v_aann, const char* v_tp);
 const char* f_targ_for(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args);
 const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v_args);
+const char* f_ty_mangle(const char* v_ty);
+const char* f_mono_fn_name(const char* v_name, arr_str v_targs);
+int64_t f_record_gi(s_Syms* v_sy, const char* v_fname, arr_Expr v_args);
 const char* f_generic_T(s_Syms* v_sy, s_Func v_f, arr_Expr v_args);
 const char* f_inline_stmt_value(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_generic_call(s_Syms* v_sy, const char* v_name, arr_Expr v_args);
@@ -1350,6 +1354,30 @@ s_StructDef f_find_gstruct(arr_StructDef v_gstructs, const char* v_nm);
 s_Func f_norm_func(s_Func v_f);
 s_StructDef f_norm_struct(s_StructDef v_sd);
 arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gstructs, const char* v_ty);
+const char* f_subst_ty_full(arr_str v_tps, arr_str v_targs, const char* v_ty);
+arr_str f_subst_ptypes(arr_str v_tps, arr_str v_targs, arr_str v_pts);
+arr_Expr f_subst_exprs(arr_str v_tps, arr_str v_targs, arr_Expr v_es);
+s_Expr f_subst_expr(arr_str v_tps, arr_str v_targs, s_Expr v_e);
+arr_Stmt f_subst_stmts(arr_str v_tps, arr_str v_targs, arr_Stmt v_body);
+s_Stmt f_subst_stmt(arr_str v_tps, arr_str v_targs, s_Stmt v_s);
+s_Func f_monomorphize_fn(s_Func v_gt, arr_str v_targs);
+int64_t f_cgi2(s_Syms* v_sy, s_Expr v_a, s_Expr v_b);
+int64_t f_cgi3(s_Syms* v_sy, s_Expr v_a, s_Expr v_b, s_Expr v_c);
+int64_t f_collect_gi_args(s_Syms* v_sy, arr_Expr v_args);
+int64_t f_cgi_kv(s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs);
+int64_t f_cgi_match(s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bd, arr_Expr v_gd);
+int64_t f_cgi_seed1(s_Syms* v_sy, s_Expr v_lam, const char* v_t);
+int64_t f_cgi_seed2(s_Syms* v_sy, s_Expr v_lam, const char* v_t0, const char* v_t1);
+int64_t f_cgi_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args);
+int64_t f_collect_gi_expr(s_Syms* v_sy, s_Expr v_e);
+int64_t f_cgi_if(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb);
+int64_t f_cgi_cb(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b);
+int64_t f_cgi_range(s_Syms* v_sy, s_Expr v_lo, s_Expr v_hi, arr_Stmt v_b);
+int64_t f_collect_gi_stmt(s_Syms* v_sy, s_Stmt v_s);
+int64_t f_collect_gi_body(s_Syms* v_sy, arr_Stmt v_body);
+int64_t f_gi_count(s_Syms* v_base);
+const char* f_gi_at(s_Syms* v_base, int64_t v_idx);
+arr_Func f_lower_generic_funcs(s_Syms* v_base, arr_Func v_funcs, arr_Stmt v_mains);
 const char* f_mono_variant(const char* v_inst, const char* v_bareV);
 int64_t f_has_enum(arr_EnumDef v_xs, const char* v_nm);
 s_EnumDef f_find_genum(arr_EnumDef v_genums, const char* v_nm);
@@ -5513,8 +5541,43 @@ s_Func f_find_gfn(s_Syms* v_sy, const char* v_name) {
     return mk_Func("", v_noa, v_noa, "", "", v_noa, v_nob);
 }
 
+const char* f_fn_targ_match(const char* v_pann, const char* v_aann, const char* v_tp) {
+    arr_str v_pps;
+    arr_str v_aps;
+    int64_t v_i;
+    const char* v_pr;
+    const char* v_ar;
+    if ((f_is_fn_ann(v_aann) == (1 != 1))) {
+        return "";
+    }
+    v_pps = f_fn_params_of(v_pann);
+    v_aps = f_fn_params_of(v_aann);
+    v_i = 0;
+    while ((v_i < arr_str_len(v_pps))) {
+        if ((v_i < arr_str_len(v_aps))) {
+            if ((strcmp(arr_str_get(v_pps, v_i), v_tp) == 0)) {
+                return arr_str_get(v_aps, v_i);
+            }
+            if ((strcmp(arr_str_get(v_pps, v_i), scat(scat("[", v_tp), "]")) == 0)) {
+                return f_elem_of_ann(arr_str_get(v_aps, v_i));
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    v_pr = f_fn_ret_of(v_pann);
+    v_ar = f_fn_ret_of(v_aann);
+    if ((strcmp(v_pr, v_tp) == 0)) {
+        return v_ar;
+    }
+    if ((strcmp(v_pr, scat(scat("[", v_tp), "]")) == 0)) {
+        return f_elem_of_ann(v_ar);
+    }
+    return "";
+}
+
 const char* f_targ_for(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_args) {
     int64_t v_i;
+    const char* v_m;
     v_i = 0;
     while ((v_i < arr_str_len((v_f).ptypes))) {
         if ((v_i < arr_Expr_len(v_args))) {
@@ -5523,6 +5586,12 @@ const char* f_targ_for(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr_Expr v_ar
             }
             if ((strcmp(arr_str_get((v_f).ptypes, v_i), scat(scat("[", v_tp), "]")) == 0)) {
                 return f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i)));
+            }
+            if (f_is_fn_ann(arr_str_get((v_f).ptypes, v_i))) {
+                v_m = f_fn_targ_match(arr_str_get((v_f).ptypes, v_i), f_type_of_expr(v_sy, arr_Expr_get(v_args, v_i)), v_tp);
+                if ((((int64_t)strlen(v_m)) > 0)) {
+                    return v_m;
+                }
             }
         }
         v_i = (v_i + 1);
@@ -5545,6 +5614,81 @@ const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v
         v_i = (v_i + 1);
     }
     return v_ty;
+}
+
+const char* f_ty_mangle(const char* v_ty) {
+    arr_str v_pp;
+    const char* v_s;
+    int64_t v_k;
+    if (f_is_array_ann(v_ty)) {
+        return scat("arr_", f_ty_mangle(f_elem_of_ann(v_ty)));
+    }
+    if (f_is_fn_ann(v_ty)) {
+        v_pp = f_fn_params_of(v_ty);
+        v_s = "fn";
+        v_k = 0;
+        while ((v_k < arr_str_len(v_pp))) {
+            v_s = scat(scat(v_s, "_"), f_ty_mangle(arr_str_get(v_pp, v_k)));
+            v_k = (v_k + 1);
+        }
+        return scat(scat(v_s, "_r_"), f_ty_mangle(f_fn_ret_of(v_ty)));
+    }
+    if (f_is_map_ann(v_ty)) {
+        return scat(scat(scat("map_", f_ty_mangle(f_map_ktype(v_ty))), "_"), f_ty_mangle(f_map_vtype(v_ty)));
+    }
+    if (f_is_ptr_ann(v_ty)) {
+        return scat("ptr_", f_ty_mangle(f_deref_ann(v_ty)));
+    }
+    return v_ty;
+}
+
+const char* f_mono_fn_name(const char* v_name, arr_str v_targs) {
+    const char* v_nm;
+    int64_t v_i;
+    v_nm = scat(v_name, "__");
+    v_i = 0;
+    while ((v_i < arr_str_len(v_targs))) {
+        if ((v_i > 0)) {
+            v_nm = scat(v_nm, "_");
+        }
+        v_nm = scat(v_nm, f_ty_mangle(arr_str_get(v_targs, v_i)));
+        v_i = (v_i + 1);
+    }
+    return v_nm;
+}
+
+int64_t f_record_gi(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
+    s_Func v_f;
+    arr_str v_targs;
+    int64_t v_ti;
+    const char* v_mangle;
+    if ((f_is_generic(v_sy, v_fname) == (1 != 1))) {
+        return 0;
+    }
+    v_f = f_find_gfn(v_sy, v_fname);
+    if ((((int64_t)strlen((v_f).name)) == 0)) {
+        return 0;
+    }
+    if ((arr_str_len((v_f).tparams) == 0)) {
+        return 0;
+    }
+    v_targs = ({ arr_str __a = arr_str_new(); __a; });
+    v_ti = 0;
+    while ((v_ti < arr_str_len((v_f).tparams))) {
+        v_targs = arr_str_push(v_targs, f_targ_for(v_sy, v_f, arr_str_get((v_f).tparams, v_ti), v_args));
+        v_ti = (v_ti + 1);
+    }
+    v_mangle = f_mono_fn_name(v_fname, v_targs);
+    if (map_str_str_has((v_sy)->evar, scat("@gi.", v_mangle))) {
+        return 0;
+    }
+    map_str_str_set((v_sy)->evar, scat("@gi.", v_mangle), scat(scat(v_fname, ";"), f_join_semi(v_targs)));
+    if ((map_str_str_has((v_sy)->evar, "@gilist") && (((int64_t)strlen(map_str_str_get((v_sy)->evar, "@gilist"))) > 0))) {
+        map_str_str_set((v_sy)->evar, "@gilist", scat(scat(map_str_str_get((v_sy)->evar, "@gilist"), ";"), v_mangle));
+    } else {
+        map_str_str_set((v_sy)->evar, "@gilist", v_mangle);
+    }
+    return 0;
 }
 
 const char* f_generic_T(s_Syms* v_sy, s_Func v_f, arr_Expr v_args) {
@@ -5570,30 +5714,16 @@ const char* f_inline_stmt_value(s_Syms* v_sy, s_Stmt v_s) {
 
 const char* f_gen_generic_call(s_Syms* v_sy, const char* v_name, arr_Expr v_args) {
     s_Func v_f;
-    const char* v_o;
-    int64_t v_i;
-    const char* v_pt;
-    int64_t v_n;
-    int64_t v_j;
+    arr_str v_targs;
+    int64_t v_ti;
     v_f = f_find_gfn(v_sy, v_name);
-    v_o = "({ ";
-    v_i = 0;
-    while ((v_i < arr_str_len((v_f).params))) {
-        v_pt = f_subst_multi(v_sy, v_f, arr_str_get((v_f).ptypes, v_i), v_args);
-        f_set_ty(v_sy, arr_str_get((v_f).params, v_i), v_pt);
-        v_o = scat(scat(scat(scat(scat(scat(v_o, f_cty(v_pt)), " v_"), arr_str_get((v_f).params, v_i)), " = "), f_gen_expr(v_sy, arr_Expr_get(v_args, v_i))), "; ");
-        v_i = (v_i + 1);
+    v_targs = ({ arr_str __a = arr_str_new(); __a; });
+    v_ti = 0;
+    while ((v_ti < arr_str_len((v_f).tparams))) {
+        v_targs = arr_str_push(v_targs, f_targ_for(v_sy, v_f, arr_str_get((v_f).tparams, v_ti), v_args));
+        v_ti = (v_ti + 1);
     }
-    v_n = arr_Stmt_len((v_f).body);
-    v_j = 0;
-    while ((v_j < (v_n - 1))) {
-        v_o = scat(v_o, f_gen_stmt(v_sy, arr_Stmt_get((v_f).body, v_j), ""));
-        v_j = (v_j + 1);
-    }
-    if ((v_n > 0)) {
-        v_o = scat(v_o, f_inline_stmt_value(v_sy, arr_Stmt_get((v_f).body, (v_n - 1))));
-    }
-    return scat(v_o, " })");
+    return scat(scat(scat(scat("f_", f_mono_fn_name(v_name, v_targs)), "("), f_gen_args(v_sy, v_args)), ")");
 }
 
 const char* f_gen_lambda(s_Syms* v_sy, int64_t v_id) {
@@ -7451,6 +7581,289 @@ arr_StructDef f_collect_struct_inst(arr_StructDef v_structs, arr_StructDef v_gst
     return arr_StructDef_push(v_structs, f_gen_instance(v_gt, f_inst_args(v_ty)));
 }
 
+const char* f_subst_ty_full(arr_str v_tps, arr_str v_targs, const char* v_ty) {
+    int64_t v_i;
+    arr_str v_pp;
+    arr_str v_sp;
+    int64_t v_k;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_tps))) {
+        if (((v_i < arr_str_len(v_targs)) && (strcmp(v_ty, arr_str_get(v_tps, v_i)) == 0))) {
+            return arr_str_get(v_targs, v_i);
+        }
+        v_i = (v_i + 1);
+    }
+    if (f_is_array_ann(v_ty)) {
+        return scat(scat("[", f_subst_ty_full(v_tps, v_targs, f_elem_of_ann(v_ty))), "]");
+    }
+    if (f_is_fn_ann(v_ty)) {
+        v_pp = f_fn_params_of(v_ty);
+        v_sp = ({ arr_str __a = arr_str_new(); __a; });
+        v_k = 0;
+        while ((v_k < arr_str_len(v_pp))) {
+            v_sp = arr_str_push(v_sp, f_subst_ty_full(v_tps, v_targs, arr_str_get(v_pp, v_k)));
+            v_k = (v_k + 1);
+        }
+        return f_fn_type_of_pts(v_sp, f_subst_ty_full(v_tps, v_targs, f_fn_ret_of(v_ty)));
+    }
+    if (f_is_map_ann(v_ty)) {
+        return scat(scat(scat(scat("{", f_subst_ty_full(v_tps, v_targs, f_map_ktype(v_ty))), ":"), f_subst_ty_full(v_tps, v_targs, f_map_vtype(v_ty))), "}");
+    }
+    return v_ty;
+}
+
+arr_str f_subst_ptypes(arr_str v_tps, arr_str v_targs, arr_str v_pts) {
+    arr_str v_out;
+    int64_t v_i;
+    v_out = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len(v_pts))) {
+        v_out = arr_str_push(v_out, f_subst_ty_full(v_tps, v_targs, arr_str_get(v_pts, v_i)));
+        v_i = (v_i + 1);
+    }
+    return v_out;
+}
+
+arr_Expr f_subst_exprs(arr_str v_tps, arr_str v_targs, arr_Expr v_es) {
+    arr_Expr v_out;
+    int64_t v_i;
+    v_out = ({ arr_Expr __a = arr_Expr_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_Expr_len(v_es))) {
+        v_out = arr_Expr_push(v_out, f_subst_expr(v_tps, v_targs, arr_Expr_get(v_es, v_i)));
+        v_i = (v_i + 1);
+    }
+    return v_out;
+}
+
+s_Expr f_subst_expr(arr_str v_tps, arr_str v_targs, s_Expr v_e) {
+    return ({ s_Expr __m; s_Expr __s = v_e; if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = mkv_Num(v_v); } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = mkv_Flt(v_s); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = mkv_Str(v_s); } else if(__s.tag==3){ const char* v_name = __s.u.Var.f0; __m = mkv_Var(v_name); } else if(__s.tag==18){ __m = mkv_Bad(); } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = mkv_Bin(v_op, f_subst_expr(v_tps, v_targs, v_l), f_subst_expr(v_tps, v_targs, v_r)); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = mkv_Unary(v_op, f_subst_expr(v_tps, v_targs, v_x)); } else if(__s.tag==6){ const char* v_cn = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = mkv_Call(v_cn, f_subst_exprs(v_tps, v_targs, v_args)); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = mkv_Field(f_subst_expr(v_tps, v_targs, v_obj), v_fnm); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = mkv_Index(f_subst_expr(v_tps, v_targs, v_obj), f_subst_expr(v_tps, v_targs, v_idx)); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = mkv_Array(f_subst_exprs(v_tps, v_targs, v_elems), f_subst_ty_full(v_tps, v_targs, v_ety)); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_ks = __s.u.MapLit.f1; arr_Expr v_vs = __s.u.MapLit.f2; __m = mkv_MapLit(f_subst_ty_full(v_tps, v_targs, v_mty), f_subst_exprs(v_tps, v_targs, v_ks), f_subst_exprs(v_tps, v_targs, v_vs)); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = mkv_Addr(f_subst_expr(v_tps, v_targs, v_x)); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = mkv_Match(f_subst_expr(v_tps, v_targs, v_sc), v_vn, v_vb, f_subst_exprs(v_tps, v_targs, v_bd), f_subst_exprs(v_tps, v_targs, v_gd)); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = mkv_IfE(f_subst_expr(v_tps, v_targs, v_c), f_subst_expr(v_tps, v_targs, v_t), f_subst_expr(v_tps, v_targs, v_el2)); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = mkv_Try(f_subst_expr(v_tps, v_targs, v_x)); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = mkv_Lambda(v_ps, f_subst_ptypes(v_tps, v_targs, v_pts), f_subst_expr(v_tps, v_targs, v_b), v_id); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = mkv_Tuple(f_subst_exprs(v_tps, v_targs, v_tes)); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = mkv_BlockE(f_subst_stmts(v_tps, v_targs, v_bb)); } __m; });
+}
+
+arr_Stmt f_subst_stmts(arr_str v_tps, arr_str v_targs, arr_Stmt v_body) {
+    arr_Stmt v_out;
+    int64_t v_i;
+    v_out = ({ arr_Stmt __a = arr_Stmt_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_Stmt_len(v_body))) {
+        v_out = arr_Stmt_push(v_out, f_subst_stmt(v_tps, v_targs, arr_Stmt_get(v_body, v_i)));
+        v_i = (v_i + 1);
+    }
+    return v_out;
+}
+
+s_Stmt f_subst_stmt(arr_str v_tps, arr_str v_targs, s_Stmt v_s) {
+    return ({ s_Stmt __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); int64_t v_pos = __s.u.SDecl.f2; __m = mkv_SDecl(v_name, f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = mkv_SDestructure(v_names, f_subst_expr(v_tps, v_targs, v_e)); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); int64_t v_pos = __s.u.SAssign.f2; __m = mkv_SAssign(v_name, f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_ix = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); int64_t v_pos = __s.u.SIdxAssign.f3; __m = mkv_SIdxAssign(f_subst_expr(v_tps, v_targs, v_o), f_subst_expr(v_tps, v_targs, v_ix), f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); int64_t v_pos = __s.u.SFieldAssign.f3; __m = mkv_SFieldAssign(f_subst_expr(v_tps, v_targs, v_o), v_f, f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); int64_t v_pos = __s.u.SReturn.f1; __m = mkv_SReturn(f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); int64_t v_pos = __s.u.SPrint.f1; __m = mkv_SPrint(f_subst_expr(v_tps, v_targs, v_e), v_pos); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = mkv_SIf(f_subst_expr(v_tps, v_targs, v_c), f_subst_stmts(v_tps, v_targs, v_b), f_subst_stmts(v_tps, v_targs, v_eb)); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = mkv_SLoop(f_subst_expr(v_tps, v_targs, v_c), f_subst_stmts(v_tps, v_targs, v_b)); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = mkv_SLoopIn(v_vnm, f_subst_expr(v_tps, v_targs, v_coll), f_subst_stmts(v_tps, v_targs, v_b)); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = mkv_SLoopKV(v_kn, v_vn, f_subst_expr(v_tps, v_targs, v_coll), f_subst_stmts(v_tps, v_targs, v_b)); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = mkv_SLoopRange(v_v, f_subst_expr(v_tps, v_targs, v_lo), f_subst_expr(v_tps, v_targs, v_hi), f_subst_stmts(v_tps, v_targs, v_b)); } else if(__s.tag==12){ __m = mkv_SBreak(); } else if(__s.tag==13){ __m = mkv_SContinue(); } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); int64_t v_pos = __s.u.SExpr.f1; __m = mkv_SExpr(f_subst_expr(v_tps, v_targs, v_e), v_pos); } __m; });
+}
+
+s_Func f_monomorphize_fn(s_Func v_gt, arr_str v_targs) {
+    arr_str v_pts;
+    int64_t v_i;
+    const char* v_ret;
+    arr_str v_notp;
+    v_pts = ({ arr_str __a = arr_str_new(); __a; });
+    v_i = 0;
+    while ((v_i < arr_str_len((v_gt).ptypes))) {
+        v_pts = arr_str_push(v_pts, f_subst_ty_full((v_gt).tparams, v_targs, arr_str_get((v_gt).ptypes, v_i)));
+        v_i = (v_i + 1);
+    }
+    v_ret = f_subst_ty_full((v_gt).tparams, v_targs, (v_gt).ret);
+    v_notp = ({ arr_str __a = arr_str_new(); __a; });
+    return mk_Func(f_mono_fn_name((v_gt).name, v_targs), (v_gt).params, v_pts, v_ret, (v_gt).lib, v_notp, f_subst_stmts((v_gt).tparams, v_targs, (v_gt).body));
+}
+
+int64_t f_cgi2(s_Syms* v_sy, s_Expr v_a, s_Expr v_b) {
+    f_collect_gi_expr(v_sy, v_a);
+    f_collect_gi_expr(v_sy, v_b);
+    return 0;
+}
+
+int64_t f_cgi3(s_Syms* v_sy, s_Expr v_a, s_Expr v_b, s_Expr v_c) {
+    f_collect_gi_expr(v_sy, v_a);
+    f_collect_gi_expr(v_sy, v_b);
+    f_collect_gi_expr(v_sy, v_c);
+    return 0;
+}
+
+int64_t f_collect_gi_args(s_Syms* v_sy, arr_Expr v_args) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_Expr_len(v_args))) {
+        f_collect_gi_expr(v_sy, arr_Expr_get(v_args, v_i));
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
+int64_t f_cgi_kv(s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs) {
+    f_collect_gi_args(v_sy, v_ks);
+    f_collect_gi_args(v_sy, v_vs);
+    return 0;
+}
+
+int64_t f_cgi_match(s_Syms* v_sy, s_Expr v_sc, arr_Expr v_bd, arr_Expr v_gd) {
+    f_collect_gi_expr(v_sy, v_sc);
+    f_collect_gi_args(v_sy, v_bd);
+    f_collect_gi_args(v_sy, v_gd);
+    return 0;
+}
+
+int64_t f_cgi_seed1(s_Syms* v_sy, s_Expr v_lam, const char* v_t) {
+    arr_str v_ps;
+    v_ps = f_lam_params(v_lam);
+    if ((arr_str_len(v_ps) > 0)) {
+        f_set_ty(v_sy, arr_str_get(v_ps, 0), v_t);
+    }
+    f_collect_gi_expr(v_sy, f_lam_body(v_lam));
+    return 0;
+}
+
+int64_t f_cgi_seed2(s_Syms* v_sy, s_Expr v_lam, const char* v_t0, const char* v_t1) {
+    arr_str v_ps;
+    v_ps = f_lam_params(v_lam);
+    if ((arr_str_len(v_ps) > 0)) {
+        f_set_ty(v_sy, arr_str_get(v_ps, 0), v_t0);
+    }
+    if ((arr_str_len(v_ps) > 1)) {
+        f_set_ty(v_sy, arr_str_get(v_ps, 1), v_t1);
+    }
+    f_collect_gi_expr(v_sy, f_lam_body(v_lam));
+    return 0;
+}
+
+int64_t f_cgi_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
+    f_record_gi(v_sy, v_fname, v_args);
+    if ((((strcmp(v_fname, "map") == 0) || (strcmp(v_fname, "filter") == 0)) && (arr_Expr_len(v_args) == 2))) {
+        f_collect_gi_expr(v_sy, arr_Expr_get(v_args, 0));
+        f_cgi_seed1(v_sy, arr_Expr_get(v_args, 1), f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, 0))));
+        return 0;
+    }
+    if (((strcmp(v_fname, "reduce") == 0) && (arr_Expr_len(v_args) == 3))) {
+        f_collect_gi_expr(v_sy, arr_Expr_get(v_args, 0));
+        f_collect_gi_expr(v_sy, arr_Expr_get(v_args, 1));
+        f_cgi_seed2(v_sy, arr_Expr_get(v_args, 2), f_type_of_expr(v_sy, arr_Expr_get(v_args, 1)), f_elem_of_ann(f_type_of_expr(v_sy, arr_Expr_get(v_args, 0))));
+        return 0;
+    }
+    f_collect_gi_args(v_sy, v_args);
+    return 0;
+}
+
+int64_t f_collect_gi_expr(s_Syms* v_sy, s_Expr v_e) {
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } else if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_cgi2(v_sy, v_l, v_r); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_collect_gi_expr(v_sy, v_x); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_cgi_call(v_sy, v_fname, v_args); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_collect_gi_expr(v_sy, v_obj); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_cgi2(v_sy, v_obj, v_idx); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_collect_gi_args(v_sy, v_elems); } else if(__s.tag==10){ const char* v_m = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_cgi_kv(v_sy, v_mks, v_mvs); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_collect_gi_expr(v_sy, v_x); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_cgi_match(v_sy, v_sc, v_bd, v_gd); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_cgi3(v_sy, v_c, v_t, v_el2); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_collect_gi_expr(v_sy, v_x); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_collect_gi_expr(v_sy, v_b); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = f_collect_gi_args(v_sy, v_tes); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_collect_gi_body(v_sy, v_bb); } __m; });
+}
+
+int64_t f_cgi_if(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb) {
+    f_collect_gi_expr(v_sy, v_c);
+    f_collect_gi_body(v_sy, v_b);
+    f_collect_gi_body(v_sy, v_eb);
+    return 0;
+}
+
+int64_t f_cgi_cb(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b) {
+    f_collect_gi_expr(v_sy, v_c);
+    f_collect_gi_body(v_sy, v_b);
+    return 0;
+}
+
+int64_t f_cgi_range(s_Syms* v_sy, s_Expr v_lo, s_Expr v_hi, arr_Stmt v_b) {
+    f_collect_gi_expr(v_sy, v_lo);
+    f_collect_gi_expr(v_sy, v_hi);
+    f_collect_gi_body(v_sy, v_b);
+    return 0;
+}
+
+int64_t f_collect_gi_stmt(s_Syms* v_sy, s_Stmt v_s) {
+    return ({ int64_t __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_ix = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = f_cgi3(v_sy, v_o, v_ix, v_e); } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = f_cgi2(v_sy, v_o, v_e); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = f_collect_gi_expr(v_sy, v_e); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_cgi_if(v_sy, v_c, v_b, v_eb); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = f_cgi_cb(v_sy, v_c, v_b); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = f_cgi_cb(v_sy, v_coll, v_b); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = f_cgi_cb(v_sy, v_coll, v_b); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = f_cgi_range(v_sy, v_lo, v_hi, v_b); } else if(__s.tag==12){ __m = 0; } else if(__s.tag==13){ __m = 0; } __m; });
+}
+
+int64_t f_collect_gi_body(s_Syms* v_sy, arr_Stmt v_body) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_Stmt_len(v_body))) {
+        f_collect_gi_stmt(v_sy, arr_Stmt_get(v_body, v_i));
+        v_i = (v_i + 1);
+    }
+    return 0;
+}
+
+int64_t f_gi_count(s_Syms* v_base) {
+    if ((map_str_str_has((v_base)->evar, "@gilist") == (1 != 1))) {
+        return 0;
+    }
+    if ((((int64_t)strlen(map_str_str_get((v_base)->evar, "@gilist"))) == 0)) {
+        return 0;
+    }
+    return arr_str_len(f_split_semi(map_str_str_get((v_base)->evar, "@gilist")));
+}
+
+const char* f_gi_at(s_Syms* v_base, int64_t v_idx) {
+    arr_str v_list;
+    v_list = f_split_semi(map_str_str_get((v_base)->evar, "@gilist"));
+    if ((v_idx < arr_str_len(v_list))) {
+        return arr_str_get(v_list, v_idx);
+    }
+    return "";
+}
+
+arr_Func f_lower_generic_funcs(s_Syms* v_base, arr_Func v_funcs, arr_Stmt v_mains) {
+    int64_t v_i;
+    s_Syms v_sy;
+    s_Syms v_msy;
+    arr_Func v_result;
+    int64_t v_idx;
+    const char* v_mangle;
+    const char* v_payload;
+    arr_str v_parts;
+    const char* v_tname;
+    arr_str v_targs;
+    int64_t v_pi;
+    s_Func v_gt;
+    s_Func v_cf;
+    s_Syms v_sy2;
+    if ((arr_Func_len((v_base)->gfns) == 0)) {
+        return v_funcs;
+    }
+    map_str_str_set((v_base)->evar, "@gilist", "");
+    v_i = 0;
+    while ((v_i < arr_Func_len(v_funcs))) {
+        v_sy = f_seed_fn(v_base, arr_Func_get(v_funcs, v_i));
+        f_hoist_decls((&v_sy), (arr_Func_get(v_funcs, v_i)).body, "");
+        f_collect_gi_body((&v_sy), (arr_Func_get(v_funcs, v_i)).body);
+        v_i = (v_i + 1);
+    }
+    v_msy = mk_Syms((v_base)->vty, (v_base)->fld, (v_base)->ctors, (v_base)->frets, (v_base)->evar, (v_base)->vft, (v_base)->gfns, (v_base)->lams, (v_base)->errc);
+    (v_msy).vty = map_str_str_new();
+    f_hoist_decls((&v_msy), v_mains, "");
+    f_collect_gi_body((&v_msy), v_mains);
+    v_result = v_funcs;
+    v_idx = 0;
+    while ((v_idx < f_gi_count(v_base))) {
+        v_mangle = f_gi_at(v_base, v_idx);
+        v_payload = ({ const char* __r; if ((((int64_t)strlen(v_mangle)) > 0)) { __r = map_str_str_get((v_base)->evar, scat("@gi.", v_mangle)); } else { __r = ""; } __r; });
+        v_parts = f_split_semi(v_payload);
+        if ((arr_str_len(v_parts) > 0)) {
+            v_tname = arr_str_get(v_parts, 0);
+            v_targs = ({ arr_str __a = arr_str_new(); __a; });
+            v_pi = 1;
+            while ((v_pi < arr_str_len(v_parts))) {
+                v_targs = arr_str_push(v_targs, arr_str_get(v_parts, v_pi));
+                v_pi = (v_pi + 1);
+            }
+            v_gt = f_find_gfn(v_base, v_tname);
+            if ((((int64_t)strlen((v_gt).name)) > 0)) {
+                v_cf = f_monomorphize_fn(v_gt, v_targs);
+                map_str_str_set((v_base)->frets, (v_cf).name, (v_cf).ret);
+                v_result = arr_Func_push(v_result, v_cf);
+                v_sy2 = f_seed_fn(v_base, v_cf);
+                f_hoist_decls((&v_sy2), (v_cf).body, "");
+                f_collect_gi_body((&v_sy2), (v_cf).body);
+            }
+        }
+        v_idx = (v_idx + 1);
+    }
+    return v_result;
+}
+
 const char* f_mono_variant(const char* v_inst, const char* v_bareV) {
     return scat(scat(v_inst, "_"), v_bareV);
 }
@@ -9168,6 +9581,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         }
         exit((int)(1));
     }
+    v_funcs = f_lower_generic_funcs((&v_base), v_funcs, v_mains);
     v_out = "";
     v_lk = 0;
     v_libline = "";

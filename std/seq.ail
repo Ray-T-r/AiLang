@@ -1,0 +1,106 @@
+// std/seq.ail — composable sequence combinators over `[T]`, as generic functions
+// that take a closure parameter. These complement the built-in map/filter/reduce
+// (which require a literal lambda) by accepting a *passed* closure, and add the
+// predicate/search/order operations the builtins lack. Each is monomorphized to a
+// real C function per element type, so they're native-speed and `|>`-friendly:
+//
+//   nums |> keep(is_pos) |> map_to(square) |> fold(0, add)
+//
+//   any(xs, pred)      -> bool     true if pred holds for some element
+//   all(xs, pred)      -> bool     true if pred holds for every element
+//   count(xs, pred)    -> i64      how many elements satisfy pred
+//   find_index(xs, p)  -> i64      index of the first match, -1 if none
+//   take(xs, n)        -> [T]      the first n elements
+//   drop(xs, n)        -> [T]      all but the first n elements
+//   keep(xs, pred)     -> [T]      the elements where pred holds (generic filter)
+//   map_to(xs, f)      -> [U]      f applied to each (generic map, U = f's result)
+//   flat_map(xs, f)    -> [U]      map then concat (f returns a [U] per element)
+//   fold(xs, init, f)  -> U        left fold (generic reduce with a passed closure)
+//   sort_by(xs, key)   -> [T]      a sorted copy, ascending by the i64 key
+//   for_each(xs, f)    -> i64      apply f to each for its side effect
+//   zip_with(xs,ys,f)  -> [R]      combine xs & ys element-wise through f
+//
+// (group_by is intentionally absent: it needs a {str:[T]} map-of-array value type
+//  the codegen doesn't support yet.)
+//
+// NOTE: when the element type isn't i64, annotate the lambda's parameter so it
+// matches T — e.g. `keep(words, fn(s:str) starts_with(s, "a"))` — since an
+// unannotated lambda parameter defaults to i64.
+
+fn any<T>(xs:[T], pred:fn(T)->bool) -> bool {
+  mu found := false
+  lp x in xs { if pred(x) { found = true } }
+  found
+}
+
+fn all<T>(xs:[T], pred:fn(T)->bool) -> bool {
+  mu ok := true
+  lp x in xs { if pred(x) == false { ok = false } }
+  ok
+}
+
+fn count<T>(xs:[T], pred:fn(T)->bool) -> i64 {
+  mu c := 0
+  lp x in xs { if pred(x) { c = c + 1 } }
+  c
+}
+
+fn find_index<T>(xs:[T], pred:fn(T)->bool) -> i64 {
+  mu idx := -1
+  mu i := 0
+  lp i < len(xs) {
+    if idx < 0 && pred(xs[i]) { idx = i }
+    i = i + 1
+  }
+  idx
+}
+
+fn take<T>(xs:[T], n:i64) -> [T] { slice(xs, 0, n) }
+
+fn drop<T>(xs:[T], n:i64) -> [T] { slice(xs, n, len(xs)) }
+
+fn keep<T>(xs:[T], pred:fn(T)->bool) -> [T] { filter(xs, fn(x) pred(x)) }
+
+fn map_to<T,U>(xs:[T], f:fn(T)->U) -> [U] { map(xs, fn(x) f(x)) }
+
+fn flat_map<T,U>(xs:[T], f:fn(T)->[U]) -> [U] {
+  mu out:[U] := []                           // body-substituted: [U] → concrete per instance
+  lp x in xs {
+    ys := f(x)
+    lp y in ys { out = push(out, y) }
+  }
+  out
+}
+
+fn fold<T,U>(xs:[T], init:U, f:fn(U,T)->U) -> U { reduce(xs, init, fn(a, x) f(a, x)) }
+
+fn sort_by<T>(xs:[T], key:fn(T)->i64) -> [T] {
+  mu out := slice(xs, 0, len(xs))            // fresh copy (slice allocates new backing)
+  mu i := 1
+  lp i < len(out) {
+    mu j := i
+    lp j > 0 && key(out[j - 1]) > key(out[j]) {
+      tmp := out[j]
+      out[j] = out[j - 1]
+      out[j - 1] = tmp
+      j = j - 1
+    }
+    i = i + 1
+  }
+  out
+}
+
+fn for_each<T>(xs:[T], f:fn(T)->i64) -> i64 {
+  lp x in xs { f(x) }
+  0
+}
+
+fn zip_with<T,U,R>(xs:[T], ys:[U], f:fn(T,U)->R) -> [R] {
+  mu out:[R] := []                           // body-substituted: [R] → concrete per instance
+  mu i := 0
+  lp i < len(xs) && i < len(ys) {
+    out = push(out, f(xs[i], ys[i]))
+    i = i + 1
+  }
+  out
+}
