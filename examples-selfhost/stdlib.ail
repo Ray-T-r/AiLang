@@ -1,0 +1,16 @@
+// std-library regression — guards the whole `im "std/…"` resolution path, which
+// no other sample exercises (imports.ail uses a local lib; floatmath uses cinc+ex).
+// Covers BOTH resolution routes: the explicit `im "std/str.ail"` below, and the
+// auto-imported std/math (referenced via gcd/ipow/max/sqrt/floor). std/ is found
+// via $AILANG_STD (set by verify.sh and by the installer) — see the skill's
+// "Standard library" note. Output is fully deterministic for the fixture.
+im "std/str.ail"
+
+println(gcd(48, 36))          // 12     std/math (auto-imported)
+println(ipow(2, 10))          // 1024
+println(max(7, 3))            // 7
+println(sqrt(2.0))            // 1.41421  libm via std/math (-lm)
+println(floor(3.9))           // 3
+println(parse_int("789"))     // 789    std/str (explicit im)
+println(eq("hi", "hi"))       // true
+println(eq("hi", "no"))       // false

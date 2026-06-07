@@ -17,7 +17,7 @@ ailc [--keep-c|-k] <input.ail> [output-binary]
 - Positional only. Arg 1 = input `.ail`; optional arg 2 = output path. Default output = input with `.ail` stripped (`fib.ail` → `fib`).
 - `--keep-c` / `-k` keeps the generated `<output>.c` (deleted by default after a successful compile).
 - **There is NO `run`, `compile`, `--emit-c`, `--backend`, or any subcommand.** (Old docs for the Rust `ailangc run/compile` are obsolete — that's a different, archived compiler.)
-- `im "..."` imports and `std/` modules are resolved automatically; `ailc` then shells out to `clang`, auto-adding `-lgc` and (when used) OpenSSL / libpq / `-lm`.
+- `im "..."` imports resolve relative to the source file; `std/` modules resolve via `$AILANG_STD` (set by the installer — see "Standard library" below). `ailc` then shells out to `clang`, auto-adding `-lgc` and (when used) OpenSSL / libpq / `-lm`.
 
 ```bash
 echo 'println("hi")' > hi.ail
@@ -296,7 +296,7 @@ ex fn set_new() -> i64
 
 | Name | Notes |
 |------|-------|
-| `print(x)` / `println(x)` | type-dispatched; arrays of scalars and scalar maps print directly; bools print `true`/`false` |
+| `print(x)` / `println(x)` | type-dispatched; arrays of scalars and scalar maps print directly; **bools print `true`/`false` in every form** — the `true`/`false` literal, a comparison (`==` `<` …), a logical (`&&` `\|\|` `!`), an overloaded `==`, a bool variable, or a bool-returning call |
 | `len(x)` | str / bytes / `[T]` / `{K:V}` |
 | `has(m, k)` | map membership |
 | `push`/`pop`/`sort`/`reverse`/`slice` | return a fresh array |
@@ -328,6 +328,8 @@ ex fn set_new() -> i64
 | `std/thread.ail`| OS threads (pthread, POSIX) | `spawn(fn()->i64)`/`wait(h)`/`wait_all(hs)`, `mutex()`/`lock`/`unlock`, `channel(cap)`/`send`/`recv`/`close` (bounded blocking) |
 
 `std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis/thread builtins are baked into codegen, so the modules are thin convenience wrappers.
+
+**Resolving `std/`.** `im "std/…"` is searched in three places, in order: (1) beside your source file, (2) `$AILANG_STD/std/…`, (3) beside the `ailc` binary. The installer sets `AILANG_STD` — and it must point at the directory that **contains** `std/` (e.g. the repo root), **not** at `std/` itself (a common mistake: `AILANG_STD=…/std` makes it look for `…/std/std/math.ail`). So once `AILANG_STD` is set, `im "std/math.ail"` resolves from any directory; otherwise put a `std/` next to your `.ail` or next to `ailc`. An import that resolves nowhere is a hard error (it no longer silently drops).
 
 **Namespaced imports.** `im "path" as m` aliases a module; call its fns qualified as `m.fn(...)`. The module's functions are isolated under the alias, so two modules can define the same name without colliding (`im "a.ail" as a` + `im "b.ail" as b` → `a.run()` / `b.run()`). Plain `im "path"` still splices unqualified.
 

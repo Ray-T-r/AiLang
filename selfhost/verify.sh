@@ -20,6 +20,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
+# The std/ library lives at the repo root; point AILANG_STD at it so the
+# stdlib.ail sample's `im "std/…"` imports (and std/math auto-imports) resolve —
+# the same env var the installer sets. main.ail imports only src/, so this does
+# not affect the bootstrap or the fixpoint.
+export AILANG_STD="$ROOT"
+
 echo "==> building ./ailc from the seed + checking the fixpoint (bootstrap.sh)"
 bash selfhost/bootstrap.sh
 AILC="$ROOT/selfhost/ailc"
