@@ -150,7 +150,7 @@ fn type_of_expr(sy:*Syms, e:Expr) -> str {
     Str(s)           => "str";
     Var(name)        => ty_of(sy, name);
     Bin(op,l,r)      => bin_type(sy, op, l, r);
-    Unary(op,x)      => "i64";
+    Unary(op,x)      => if op == OP_NOT() { "bool" } el { "i64" };   // !x → bool (prints true/false)
     Call(fname,args) => call_type_a(sy, fname, args);
     Field(obj,fnm)   => field_type(sy, obj, fnm);
     Index(obj,idx)   => index_type(sy, obj);

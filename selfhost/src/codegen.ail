@@ -1316,11 +1316,8 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
   if t == "f64" {                             // %g — matches AiLang's float format
     rt ind + "printf(\"%g\\n\", (double)(" + gen_expr(sy, e) + "));\n"
   }
-  if t == "bool" {                            // bool VALUE prints true/false; a raw
-    if expr_is_cmp(e) {                       // comparison/logic is C int → prints 1/0 (ailangc)
-      rt ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
-    }
-    rt ind + "printf(\"%s\\n\", (" + gen_expr(sy, e) + ") ? \"true\" : \"false\");\n"
+  if t == "bool" {                            // bool prints true/false — consistent with
+    rt ind + "printf(\"%s\\n\", (" + gen_expr(sy, e) + ") ? \"true\" : \"false\");\n"   // the print/println-expr/to_str/${} forms
   }
   if t == "bytes" {                           // pretty-print via helper, then a newline
     rt ind + "print_bytes(" + gen_expr(sy, e) + "); putchar(10);\n"
@@ -2000,32 +1997,6 @@ fn first_return_type(sy:*Syms, body:[Stmt]) -> str {
   ""                                  // empty body → no return
 }
 
-// A raw comparison/logic expression: its C value is `int` (1/0), so ailangc's
-// _Generic prints it as an int even though its inferred type is bool. (A bool
-// *variable* — typed from such an expr — prints true/false.)
-fn expr_is_cmp(e:Expr) -> bool {
-  mt e {
-    Bin(op, l, r)         => op >= OP_LT() && op <= OP_OR();
-    Unary(op, x)          => op == OP_NOT();
-    Num(v)                => false;
-    Flt(fs)               => false;
-    Str(ss)               => false;
-    Var(nm)               => false;
-    Call(fnm, args)       => false;
-    Field(ob, fnm2)       => false;
-    Index(ob, ix)         => false;
-    Array(els, ety)       => false;
-    MapLit(mty, ks, vs)   => false;
-    Addr(x)               => false;
-    Match(sc, vn, vb, bd) => false;
-    IfE(cnd, thn, el2)    => false;
-    Try(x)                => false;
-    Lambda(ps, pts, bd, id)    => false;
-    Tuple(tes)            => false;
-    BlockE(bb)            => false;
-    Bad                   => false;
-  }
-}
 fn expr_is_call(e:Expr) -> bool {
   mt e {
     Call(fnm, args)       => true;
