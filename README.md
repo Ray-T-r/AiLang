@@ -1,12 +1,12 @@
 # AiLang — the self-hosted compiler
 
-The AiLang compiler **written in AiLang itself**: a ~6,000-line compiler
+The AiLang compiler **written in AiLang itself**: a ~7,000-line compiler
 (`selfhost/main.ail` + the `selfhost/src/*.ail` modules) that lexes, parses,
 type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 10,185 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 10,177 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -58,13 +58,13 @@ language at its standard optimization (`clang -O2`, `rustc -O`, `go build`,
 
 | language | time | vs AiLang |
 |---|---|---|
-| **AiLang** (→ C, `clang -O2`) | **142 ms** | 1.00× |
-| C | 142 ms | 1.00× |
-| Rust | 143 ms | 1.00× |
-| Java | 159 ms | 1.12× |
-| Go | 219 ms | 1.54× |
-| Node | 479 ms | 3.37× |
-| Python | 5394 ms | 38× |
+| **AiLang** (→ C, `clang -O2`) | **145 ms** | 1.00× |
+| Rust | 145 ms | 1.00× |
+| C | 146 ms | 1.01× |
+| Java | 167 ms | 1.15× |
+| Go | 225 ms | 1.55× |
+| Node | 493 ms | 3.40× |
+| Python | 5436 ms | 37× |
 
 AiLang runs neck-and-neck with C and Rust — it *is* C, generated. The
 self-hosted `ailc` produces identically fast binaries (`ailc fib40.ail` → 145 ms,
@@ -74,12 +74,12 @@ matching `clang -O2`).
 
 | | |
 |---|---|
-| compiler source | ~6,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **10,185 lines, byte-identical** |
-| sample programs | **48**, each output-verified against a frozen fixture |
+| compiler source | ~7,000 lines across `main.ail` + 6 `src/` modules |
+| strict fixpoint | `stage2.c == stage3.c` — **10,177 lines, byte-identical** |
+| sample programs | **49**, each output-verified against a frozen fixture |
 | standard library | 11 modules, all compiling |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*) |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **36 negative tests**, all caught |
 | Rust in the build | **none** |
 
 ## Layout
