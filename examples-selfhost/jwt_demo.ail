@@ -1,0 +1,10 @@
+im "std/jwt.ail"
+
+secret := "topsecret"
+tok := jwt_sign("{\"sub\":\"alice\",\"role\":\"admin\"}", secret)
+
+println(jwt_verify(tok, secret))        // true  — correct secret
+println(jwt_verify(tok, "wrong"))       // false — wrong secret
+println(jwt_verify(tok + "x", secret))  // false — tampered
+println(jwt_claim(tok, "sub"))          // alice
+println(jwt_claim(tok, "role"))         // admin

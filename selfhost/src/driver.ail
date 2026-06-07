@@ -1861,6 +1861,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   // emitted C uses them. main.ail mentions these names so its self-compile pulls
   // them in (needs both libs installed — fixpoint-safe: stage2==stage3).
   needs_tls := has_sub(src, "tls_") || has_sub(src, "sha1")
+  needs_hmac := has_sub(src, "hmac_sha256")
   needs_pg := has_sub(src, "pg_")
   // exe_dir() — the compiler uses it (in resolve_imports) to find the std/ that
   // ships beside the ailc binary; gated, so user programs that never call it
@@ -1876,6 +1877,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   if needs_proc { out = out + "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n" }
   if needs_regex { out = out + "#ifndef _WIN32\n#include <regex.h>\n#endif\n" }
   if needs_tls { out = out + "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n" }
+  if needs_hmac { out = out + "#ifndef _WIN32\n#include <openssl/hmac.h>\n#include <openssl/evp.h>\n#endif\n" }
   if needs_pg { out = out + "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n" }
   if needs_exedir { out = out + "#ifdef _WIN32\nunsigned long GetModuleFileNameA(void*, char*, unsigned long);\n#elif defined(__APPLE__)\n#include <mach-o/dyld.h>\n#else\n#include <unistd.h>\n#endif\n" }
   mu ci := 0
@@ -1981,6 +1983,11 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }\n"
     out = out + "static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return \"\"; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }\n"
     out = out + "static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:\"\"), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }\n"
+    out = out + "#endif\n"
+  }
+  if needs_hmac {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "static ailang_bytes hmac_sha256(ailang_bytes key, ailang_bytes msg){ unsigned char* b=(unsigned char*)GC_MALLOC(32); unsigned int n=32; HMAC(EVP_sha256(), key.data, (int)key.len, msg.data, (size_t)msg.len, b, &n); ailang_bytes r; r.len=32; r.data=b; return r; }\n"
     out = out + "#endif\n"
   }
   if needs_pg {

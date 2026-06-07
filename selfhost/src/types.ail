@@ -218,7 +218,7 @@ fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
 // the name, no polymorphism), so they share one dispatch arm + grouped type rules
 // instead of ~26 identical per-builtin arms.
 fn is_native_call(fname:str) -> bool {
-  if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" rt true
+  if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" || fname == "hmac_sha256" rt true
   if fname == "pg_connect" || fname == "pg_status" || fname == "pg_error" || fname == "pg_close" || fname == "pg_exec" || fname == "pg_ok" || fname == "pg_result_error" || fname == "pg_clear" || fname == "pg_nrows" || fname == "pg_ncols" || fname == "pg_value" || fname == "pg_isnull" || fname == "pg_col_name" || fname == "pg_affected" || fname == "pg_escape" rt true
   false
 }
@@ -368,7 +368,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "pop" && len(args) > 0 rt type_of_expr(sy, args[0])   // same array type
   // Phase 3 TLS/PG return types (grouped); everything else native → i64.
   if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" rt "str"
-  if fname == "tls_recv" || fname == "sha1" rt "bytes"
+  if fname == "tls_recv" || fname == "sha1" || fname == "hmac_sha256" rt "bytes"
   if fname == "pg_ok" || fname == "pg_isnull" rt "bool"
   if is_native_call(fname) rt "i64"        // handles / counts / status (incl. void→i64)
   if is_ctor(sy, fname) rt fname           // a struct ctor produces that struct

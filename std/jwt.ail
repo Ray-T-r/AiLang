@@ -1,0 +1,109 @@
+// std/jwt.ail — JSON Web Tokens (HS256) over the hmac_sha256 builtin + base64url.
+//
+//   tok := jwt_sign("{\"sub\":\"alice\",\"role\":\"admin\"}", secret)
+//   ok  := jwt_verify(tok, secret)        // recompute HMAC, compare signatures
+//   sub := jwt_claim(tok, "sub")          // "alice"
+//
+// HS256 only (header is fixed {"alg":"HS256","typ":"JWT"}). jwt_claim/jwt_payload
+// decode the payload as text — correct for ASCII/JSON claims (non-ASCII byte values
+// in a claim aren't reconstructed). POSIX-only (hmac_sha256 → OpenSSL).
+
+im "std/json.ail"
+
+// -- base64url (no padding) --------------------------------------------------
+
+fn b64url_encode(b:bytes) -> str {
+  alpha := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  mu out := ""
+  mu i := 0
+  n := len(b)
+  lp i < n {
+    b0 := bytes_at(b, i)
+    mu b1 := 0
+    mu b2 := 0
+    mu have := 1
+    if i + 1 < n { b1 = bytes_at(b, i + 1)  have = 2 }
+    if i + 2 < n { b2 = bytes_at(b, i + 2)  have = 3 }
+    g := b0 * 65536 + b1 * 256 + b2
+    c0 := g / 262144
+    c1 := (g / 4096) % 64
+    c2 := (g / 64) % 64
+    c3 := g % 64
+    out = out + substring(alpha, c0, c0 + 1) + substring(alpha, c1, c1 + 1)
+    if have >= 2 { out = out + substring(alpha, c2, c2 + 1) }
+    if have >= 3 { out = out + substring(alpha, c3, c3 + 1) }
+    i = i + 3
+  }
+  out
+}
+
+fn _b64v(c:i64) -> i64 {
+  if c >= 65 && c <= 90 rt c - 65          // A-Z
+  if c >= 97 && c <= 122 rt c - 71         // a-z  (c-97+26)
+  if c >= 48 && c <= 57 rt c + 4           // 0-9  (c-48+52)
+  if c == 45 rt 62                          // '-'
+  if c == 95 rt 63                          // '_'
+  -1
+}
+
+// Decode base64url to text (ASCII/UTF-8-ASCII payloads — JWT claims).
+fn b64url_decode_str(s:str) -> str {
+  mu out := ""
+  mu i := 0
+  n := len(s)
+  lp i < n {
+    c0 := _b64v(s[i])
+    mu c1 := -1
+    mu c2 := -1
+    mu c3 := -1
+    mu have := 1
+    if i + 1 < n { c1 = _b64v(s[i + 1])  have = 2 }
+    if i + 2 < n { c2 = _b64v(s[i + 2])  if c2 >= 0 { have = 3 } }
+    if i + 3 < n { c3 = _b64v(s[i + 3])  if c3 >= 0 { have = 4 } }
+    e1 := if c1 < 0 { 0 } el { c1 }
+    e2 := if c2 < 0 { 0 } el { c2 }
+    e3 := if c3 < 0 { 0 } el { c3 }
+    g := c0 * 262144 + e1 * 4096 + e2 * 64 + e3
+    if have >= 2 { out = out + chr((g / 65536) % 256) }
+    if have >= 3 { out = out + chr((g / 256) % 256) }
+    if have >= 4 { out = out + chr(g % 256) }
+    i = i + 4
+  }
+  out
+}
+
+// -- tokens ------------------------------------------------------------------
+
+fn _jwt_signing(payload_json:str) -> str {
+  header := "{\"alg\":\"HS256\",\"typ\":\"JWT\"}"
+  b64url_encode(str_to_bytes(header)) + "." + b64url_encode(str_to_bytes(payload_json))
+}
+
+// Sign a (already-JSON) payload → a compact HS256 token.
+fn jwt_sign(payload_json:str, secret:str) -> str {
+  signing := _jwt_signing(payload_json)
+  sig := hmac_sha256(str_to_bytes(secret), str_to_bytes(signing))
+  signing + "." + b64url_encode(sig)
+}
+
+// True iff `token` is a well-formed HS256 token whose signature matches `secret`.
+fn jwt_verify(token:str, secret:str) -> bool {
+  parts := split(token, ".")
+  if len(parts) != 3 rt false
+  signing := parts[0] + "." + parts[1]
+  expect := b64url_encode(hmac_sha256(str_to_bytes(secret), str_to_bytes(signing)))
+  parts[2] == expect
+}
+
+// The decoded payload JSON (no signature check — pair with jwt_verify).
+fn jwt_payload(token:str) -> str {
+  parts := split(token, ".")
+  if len(parts) < 2 rt ""
+  b64url_decode_str(parts[1])
+}
+
+// A single string claim from the payload, "" if absent.
+fn jwt_claim(token:str, key:str) -> str {
+  j := json_parse(jwt_payload(token))
+  as_str(obj_get(j, key))
+}

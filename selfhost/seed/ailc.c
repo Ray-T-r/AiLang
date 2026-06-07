@@ -29,6 +29,10 @@
 #include <openssl/sha.h>
 #endif
 #ifndef _WIN32
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#endif
+#ifndef _WIN32
 #include <libpq-fe.h>
 #endif
 #ifdef _WIN32
@@ -130,6 +134,9 @@ static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0;
 static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }
 static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return ""; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }
 static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:""), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }
+#endif
+#ifndef _WIN32
+static ailang_bytes hmac_sha256(ailang_bytes key, ailang_bytes msg){ unsigned char* b=(unsigned char*)GC_MALLOC(32); unsigned int n=32; HMAC(EVP_sha256(), key.data, (int)key.len, msg.data, (size_t)msg.len, b, &n); ailang_bytes r; r.len=32; r.data=b; return r; }
 #endif
 #ifndef _WIN32
 static int64_t pg_connect(const char* conninfo){ PGconn* c=PQconnectdb(conninfo?conninfo:""); return (int64_t)(intptr_t)c; }
@@ -4496,7 +4503,7 @@ const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
 }
 
 int64_t f_is_native_call(const char* v_fname) {
-    if ((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0))) {
+    if (((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
         return (1 == 1);
     }
     if ((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
@@ -4771,7 +4778,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return "str";
     }
-    if (((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0))) {
+    if ((((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
         return "bytes";
     }
     if (((strcmp(v_fname, "pg_ok") == 0) || (strcmp(v_fname, "pg_isnull") == 0))) {
@@ -9179,6 +9186,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_needs_thread;
     int64_t v_needs_regex;
     int64_t v_needs_tls;
+    int64_t v_needs_hmac;
     int64_t v_needs_pg;
     int64_t v_needs_exedir;
     int64_t v_ci;
@@ -9658,6 +9666,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_needs_thread = ((((((((f_has_sub(v_src, "thread_spawn") || f_has_sub(v_src, "thread_join")) || f_has_sub(v_src, "mutex_new")) || f_has_sub(v_src, "mutex_lock")) || f_has_sub(v_src, "mutex_unlock")) || f_has_sub(v_src, "chan_new")) || f_has_sub(v_src, "chan_send")) || f_has_sub(v_src, "chan_recv")) || f_has_sub(v_src, "chan_close"));
     v_needs_regex = (f_has_sub(v_src, "regex_match") || f_has_sub(v_src, "regex_find"));
     v_needs_tls = (f_has_sub(v_src, "tls_") || f_has_sub(v_src, "sha1"));
+    v_needs_hmac = f_has_sub(v_src, "hmac_sha256");
     v_needs_pg = f_has_sub(v_src, "pg_");
     v_needs_exedir = f_has_sub(v_src, "exe_dir");
     if (v_needs_thread) {
@@ -9678,6 +9687,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     if (v_needs_tls) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n");
+    }
+    if (v_needs_hmac) {
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <openssl/hmac.h>\n#include <openssl/evp.h>\n#endif\n");
     }
     if (v_needs_pg) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <libpq-fe.h>\n#endif\n");
@@ -9779,6 +9791,11 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static void tls_close(int64_t ssl){ if(ssl>0){ SSL_shutdown((SSL*)(intptr_t)ssl); SSL_free((SSL*)(intptr_t)ssl); } }\n");
         v_out = scat(v_out, "static const char* tls_error(void){ unsigned long e=ERR_peek_error(); if(e==0) return \"\"; char* buf=(char*)GC_MALLOC(256); ERR_error_string_n(e,buf,256); return buf; }\n");
         v_out = scat(v_out, "static ailang_bytes sha1(const char* s){ ailang_bytes r; uint8_t* buf=(uint8_t*)GC_MALLOC(20); SHA1((const unsigned char*)(s?s:\"\"), s?strlen(s):0, buf); r.len=20; r.data=buf; return r; }\n");
+        v_out = scat(v_out, "#endif\n");
+    }
+    if (v_needs_hmac) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "static ailang_bytes hmac_sha256(ailang_bytes key, ailang_bytes msg){ unsigned char* b=(unsigned char*)GC_MALLOC(32); unsigned int n=32; HMAC(EVP_sha256(), key.data, (int)key.len, msg.data, (size_t)msg.len, b, &n); ailang_bytes r; r.len=32; r.data=b; return r; }\n");
         v_out = scat(v_out, "#endif\n");
     }
     if (v_needs_pg) {
@@ -10598,7 +10615,7 @@ int main(int argc, char** argv){
         }
     } else {
         v_extra = " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)";
-        if ((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1("))) {
+        if (((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1(")) || f_has_sub(v_cprog, "HMAC("))) {
             v_extra = scat(v_extra, " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)");
         }
         if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
