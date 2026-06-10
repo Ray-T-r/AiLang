@@ -28,16 +28,34 @@ im "src/parser.ail"
 im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
+AILC_VERSION := "0.5.0"
+USAGE := "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]"
 av := args()
 // `--keep-c` / `-k`: keep the generated C next to the binary. Default: delete
-// it after a clean build (it's a transient build intermediate). Filter the
-// flag out of the args; everything else is positional.
+// it after a clean build (it's a transient build intermediate). `--help` and
+// `--version` answer and exit; any OTHER dash-leading token is an error —
+// unknown flags used to be taken as the INPUT FILE, compile an empty program,
+// and litter the cwd with junk like `--help.out.c` when clang then choked.
 mu keepc := false
 mu pos:[str] := []
 mu fi := 0
 lp fi < len(av) {
   a := av[fi]
-  if a == "--keep-c" || a == "-k" { keepc = true } el { pos = push(pos, a) }
+  if a == "--keep-c" || a == "-k" {
+    keepc = true
+  } el if a == "--help" || a == "-h" {
+    println(USAGE)
+    exit(0)
+  } el if a == "--version" || a == "-v" {
+    println("ailc " + AILC_VERSION)
+    exit(0)
+  } el if len(a) > 0 && a[0] == 45 {
+    println("error: unknown flag: " + a)
+    println(USAGE)
+    exit(1)
+  } el {
+    pos = push(pos, a)
+  }
   fi += 1
 }
 // Accept `ailc [--keep-c] [compile] <input.ail> [output]`. Tolerate a leading
@@ -47,7 +65,7 @@ lp fi < len(av) {
 mu ai := 0
 if len(pos) > 0 && pos[0] == "compile" { ai = 1 }
 if len(pos) <= ai {
-  println("usage: ailc [--keep-c] [compile] <input.ail> [output-binary]")
+  println(USAGE)
   exit(1)
 }
 input := pos[ai]
@@ -69,6 +87,13 @@ if ob >= 4 && substring(outbin, ob - 4, ob) == ".ail" {
 }
 
 mu src := read_file(input)
+// read_file returns "" for BOTH a missing and an empty file — refuse either
+// BEFORE deriving/writing any output path (a missing input used to "compile"
+// as an empty program and leave a stray .c behind when clang failed).
+if len(src) == 0 {
+  println("error: cannot read input file (missing or empty): " + input)
+  exit(1)
+}
 src = auto_imports(src) + src        // inject `im "std/…"` for referenced std exports
 if has_import(src) {
   mu seen:{str:str} := {}

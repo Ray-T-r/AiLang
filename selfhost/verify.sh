@@ -82,6 +82,20 @@ done
 echo "==> C. type checker catches mistakes (negative tests)"
 AILC="$AILC" bash selfhost/tests/neg/neg.sh || fail=1
 
+echo "==> D. CLI guards (bad flags / missing input never write junk)"
+cli_ok=1
+"$AILC" --help >/dev/null 2>&1 || { echo "    FAIL: --help exited nonzero"; cli_ok=0; }
+"$AILC" --version >/dev/null 2>&1 || { echo "    FAIL: --version exited nonzero"; cli_ok=0; }
+cli_out="$("$AILC" --bogus-flag 2>&1)" && { echo "    FAIL: --bogus-flag exited 0"; cli_ok=0; } || true
+printf '%s' "$cli_out" | grep -q "unknown flag" || { echo "    FAIL: wrong message for an unknown flag"; cli_ok=0; }
+if "$AILC" "/nonexistent_$$.ail" "/tmp/cli_x_$$" >/dev/null 2>&1; then
+  echo "    FAIL: missing input exited 0"; cli_ok=0
+fi
+if ls ./--bogus-flag* ./-bogus* "/tmp/cli_x_$$"* >/dev/null 2>&1; then
+  echo "    FAIL: junk files were created"; cli_ok=0
+fi
+[ "$cli_ok" -eq 1 ] && echo "    ok   CLI guards" || fail=1
+
 rm -f selfhost/ailc
 if [ "$fail" -eq 0 ]; then
   echo "==> ✅ self-hosting verified: $n samples match their fixtures AND the seed is the strict fixpoint of main.ail (no Rust involved)"

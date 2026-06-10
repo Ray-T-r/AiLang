@@ -11100,6 +11100,8 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
 int main(int argc, char** argv){
     GC_INIT();
     g_argc=argc; g_argv=argv;
+    const char* v_AILC_VERSION;
+    const char* v_USAGE;
     arr_str v_av;
     int64_t v_keepc;
     arr_str v_pos;
@@ -11126,6 +11128,8 @@ int main(int argc, char** argv){
     const char* v_shimline;
     int64_t v_si;
     int64_t v_ci2;
+    v_AILC_VERSION = "0.5.0";
+    v_USAGE = "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]";
     v_av = ailang_args();
     v_keepc = (1 != 1);
     v_pos = ({ arr_str __a = arr_str_new(); __a; });
@@ -11135,7 +11139,23 @@ int main(int argc, char** argv){
         if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
             v_keepc = (1 == 1);
         } else {
-            v_pos = arr_str_push(v_pos, v_a);
+            if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
+                printf("%s\n", v_USAGE);
+                exit((int)(0));
+            } else {
+                if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
+                    printf("%s\n", scat("ailc ", v_AILC_VERSION));
+                    exit((int)(0));
+                } else {
+                    if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
+                        printf("%s\n", scat("error: unknown flag: ", v_a));
+                        printf("%s\n", v_USAGE);
+                        exit((int)(1));
+                    } else {
+                        v_pos = arr_str_push(v_pos, v_a);
+                    }
+                }
+            }
         }
         v_fi = (v_fi + 1);
     }
@@ -11144,7 +11164,7 @@ int main(int argc, char** argv){
         v_ai = 1;
     }
     if ((arr_str_len(v_pos) <= v_ai)) {
-        printf("%s\n", "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]");
+        printf("%s\n", v_USAGE);
         exit((int)(1));
     }
     v_input = arr_str_get(v_pos, v_ai);
@@ -11169,6 +11189,10 @@ int main(int argc, char** argv){
         exit((int)(1));
     }
     v_src = read_file_c(v_input);
+    if ((((int64_t)strlen(v_src)) == 0)) {
+        printf("%s\n", scat("error: cannot read input file (missing or empty): ", v_input));
+        exit((int)(1));
+    }
     v_src = scat(f_auto_imports(v_src), v_src);
     if (f_has_import(v_src)) {
         v_seen = map_str_str_new();
