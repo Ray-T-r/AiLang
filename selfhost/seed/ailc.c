@@ -1627,6 +1627,8 @@ const char* f_block_type(s_Syms* v_sy, arr_Stmt v_body);
 const char* f_gen_blk_decl(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 const char* f_gen_blk_stmt(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_blk_tail(s_Syms* v_sy, s_Stmt v_s);
+const char* f_blk_pretype(s_Syms* v_sy, const char* v_name, s_Expr v_e);
+const char* f_hoist_blk_nested(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_block_e(s_Syms* v_sy, arr_Stmt v_body);
 const char* f_gen_if(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb, const char* v_ind);
 const char* f_gen_stmts(s_Syms* v_sy, arr_Stmt v_body, const char* v_ind);
@@ -6914,15 +6916,30 @@ const char* f_gen_blk_tail(s_Syms* v_sy, s_Stmt v_s) {
     return ({ const char* __m; s_Stmt __s = v_s; if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = scat(f_gen_expr(v_sy, v_e), "; "); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = scat(f_gen_expr(v_sy, v_e), "; "); } else if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = scat(f_gen_blk_decl(v_sy, v_name, v_e), "0; "); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_i = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==12){ __m = "break; 0; "; } else if(__s.tag==13){ __m = "continue; 0; "; } __m; });
 }
 
+const char* f_blk_pretype(s_Syms* v_sy, const char* v_name, s_Expr v_e) {
+    f_set_ty(v_sy, v_name, f_type_of_expr(v_sy, v_e));
+    return "";
+}
+
+const char* f_hoist_blk_nested(s_Syms* v_sy, s_Stmt v_s) {
+    return ({ const char* __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = f_blk_pretype(v_sy, v_name, v_e); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = ""; } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_i = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = ""; } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = ""; } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = ""; } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = ""; } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==12){ __m = ""; } else if(__s.tag==13){ __m = ""; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = ""; } __m; });
+}
+
 const char* f_gen_block_e(s_Syms* v_sy, arr_Stmt v_body) {
     int64_t v_n;
     const char* v_out;
+    int64_t v_hi;
     int64_t v_i;
     v_n = arr_Stmt_len(v_body);
     if ((v_n == 0)) {
         return "0";
     }
     v_out = "({ ";
+    v_hi = 0;
+    while ((v_hi < v_n)) {
+        v_out = scat(v_out, f_hoist_blk_nested(v_sy, arr_Stmt_get(v_body, v_hi)));
+        v_hi = (v_hi + 1);
+    }
     v_i = 0;
     while ((v_i < (v_n - 1))) {
         v_out = scat(v_out, f_gen_blk_stmt(v_sy, arr_Stmt_get(v_body, v_i)));
@@ -10965,12 +10982,14 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     const char* v_full;
     const char* v_body;
     const char* v_bdir;
+    const char* v_rfull;
     const char* v_root;
     const char* v_gfull;
     const char* v_gbody;
     const char* v_ed;
     const char* v_efull;
     const char* v_ebody;
+    int64_t v_fresh;
     const char* v_rb;
     if ((f_has_import(v_src) == (1 != 1))) {
         return v_src;
@@ -10993,6 +11012,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                     map_str_str_set(v_seen, v_full, "1");
                     v_body = read_file_c(v_full);
                     v_bdir = f_dirname(v_full);
+                    v_rfull = v_full;
                     if ((((int64_t)strlen(v_body)) == 0)) {
                         v_root = get_env("AILANG_STD");
                         if ((((int64_t)strlen(v_root)) > 0)) {
@@ -11001,6 +11021,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                             if ((((int64_t)strlen(v_gbody)) > 0)) {
                                 v_body = v_gbody;
                                 v_bdir = f_dirname(v_gfull);
+                                v_rfull = v_gfull;
                             }
                         }
                     }
@@ -11012,6 +11033,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                             if ((((int64_t)strlen(v_ebody)) > 0)) {
                                 v_body = v_ebody;
                                 v_bdir = f_dirname(v_efull);
+                                v_rfull = v_efull;
                             }
                         }
                     }
@@ -11019,11 +11041,21 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                         printf("%s\n", scat(scat("error: cannot resolve import \"", v_imp), "\" — not found beside the source, in AILANG_STD, or next to ailc"));
                         exit((int)(1));
                     }
-                    v_rb = f_resolve_imports(v_body, v_bdir, v_seen);
-                    if ((((int64_t)strlen(v_alias)) > 0)) {
-                        v_rb = f_prefix_idents(v_rb, f_module_fn_names(v_body), scat(v_alias, "_"));
+                    v_fresh = (1 == 1);
+                    if ((strcmp(v_rfull, v_full) != 0)) {
+                        if (map_str_str_has(v_seen, v_rfull)) {
+                            v_fresh = (1 != 1);
+                        } else {
+                            map_str_str_set(v_seen, v_rfull, "1");
+                        }
                     }
-                    v_out = scat(scat(v_out, v_rb), "\n");
+                    if (v_fresh) {
+                        v_rb = f_resolve_imports(v_body, v_bdir, v_seen);
+                        if ((((int64_t)strlen(v_alias)) > 0)) {
+                            v_rb = f_prefix_idents(v_rb, f_module_fn_names(v_body), scat(v_alias, "_"));
+                        }
+                        v_out = scat(scat(v_out, v_rb), "\n");
+                    }
                 }
             } else {
                 v_out = scat(scat(v_out, v_line), "\n");

@@ -2582,6 +2582,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
           seen[full] = "1"
           mu body := read_file(full)
           mu bdir := dirname(full)
+          mu rfull := full                     // the path that actually resolves (dedup key)
           if len(body) == 0 {
             // Not found next to the source — fall back to the global library dir
             // ($AILANG_STD, set by the installer) so `im "std/…"` works anywhere,
@@ -2590,7 +2591,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             if len(root) > 0 {
               gfull := root + "/" + imp
               gbody := read_file(gfull)
-              if len(gbody) > 0 { body = gbody; bdir = dirname(gfull) }
+              if len(gbody) > 0 { body = gbody; bdir = dirname(gfull); rfull = gfull }
             }
           }
           if len(body) == 0 {
@@ -2601,7 +2602,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             if len(ed) > 0 {
               efull := ed + "/" + imp
               ebody := read_file(efull)
-              if len(ebody) > 0 { body = ebody; bdir = dirname(efull) }
+              if len(ebody) > 0 { body = ebody; bdir = dirname(efull); rfull = efull }
             }
           }
           if len(body) == 0 {
@@ -2612,9 +2613,20 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
             exit(1)
           }
-          mu rb := resolve_imports(body, bdir, seen)
-          if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
-          out = out + rb + "\n"
+          // Dedup on the RESOLVED path too: the same file reached from different
+          // importer dirs (e.g. auto_imports injecting "std/sock.ail" at the root
+          // while std/http_client.ail imports it via $AILANG_STD) must splice once.
+          // (full itself is already marked above; only a DIFFERENT resolved path
+          // needs the extra check, else every importer-relative hit would skip.)
+          mu fresh := true
+          if rfull != full {
+            if has(seen, rfull) { fresh = false } el { seen[rfull] = "1" }
+          }
+          if fresh {
+            mu rb := resolve_imports(body, bdir, seen)
+            if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
+            out = out + rb + "\n"
+          }
         }
       } el {
         out = out + line + "\n"

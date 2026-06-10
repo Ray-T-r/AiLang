@@ -1261,10 +1261,41 @@ fn gen_blk_tail(sy:*Syms, s:Stmt) -> str {
     SContinue                => "continue; 0; ";
   }
 }
+// Record a top-level block decl's type without emitting text (gen_blk_decl
+// declares it inline) so later nested decls' RHS types resolve at hoist time.
+fn blk_pretype(sy:*Syms, name:str, e:Expr) -> str {
+  set_ty(sy, name, type_of_expr(sy, e))
+  ""
+}
+// The fn-top hoist never descends into a block EXPRESSION's statements, so a
+// local declared inside a nested if/loop body here had no C declaration at all
+// (invalid C — no existing program could rely on it). Pre-declare those at the
+// head of the statement-expr; top-level decls stay inline via gen_blk_decl.
+fn hoist_blk_nested(sy:*Syms, s:Stmt) -> str {
+  mt s {
+    SDecl(name,e)         => blk_pretype(sy, name, e);
+    SDestructure(names,e) => hoist_stmt(sy, s, "");
+    SAssign(name,e)       => "";
+    SIdxAssign(o,i,e)     => "";
+    SFieldAssign(o,f,e)   => "";
+    SReturn(e)            => "";
+    SPrint(e)             => "";
+    SIf(c,b,eb)           => hoist_stmt(sy, s, "");
+    SLoop(c,b)            => hoist_stmt(sy, s, "");
+    SLoopIn(vnm,coll,b)   => hoist_stmt(sy, s, "");
+    SLoopKV(kn,vn,coll,b) => hoist_stmt(sy, s, "");
+    SLoopRange(v,lo,hi,b) => hoist_stmt(sy, s, "");
+    SBreak                => "";
+    SContinue             => "";
+    SExpr(e)              => "";
+  }
+}
 fn gen_block_e(sy:*Syms, body:[Stmt]) -> str {
   n := len(body)
   if n == 0 rt "0"
   mu out := "({ "
+  mu hi := 0
+  lp hi < n { out = out + hoist_blk_nested(sy, body[hi]); hi += 1 }
   mu i := 0
   lp i < n - 1 { out = out + gen_blk_stmt(sy, body[i]); i += 1 }
   out + gen_blk_tail(sy, body[n - 1]) + "})"
