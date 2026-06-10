@@ -1,0 +1,37 @@
+// fs_demo.ail — filesystem builtins (fs_*) + std/fs path helpers. POSIX-only.
+// Self-cleaning under /tmp so re-runs are byte-stable; fs_list_dir output is
+// always sort()ed (readdir order is filesystem-dependent).
+im "std/fs.ail"
+
+base := "/tmp/ail_fs_demo"
+// clean slate from any earlier (possibly failed) run — results ignored
+c1 := fs_unlink(base + "/sub/c.txt")
+c2 := fs_rmdir(base + "/sub")
+c3 := fs_unlink(base + "/b.txt")
+c4 := fs_unlink(base + "/a.txt")
+c5 := fs_rmdir(base)
+
+println(fs_mkdir(base))                              // true
+println(fs_exists(base))                             // true
+println(fs_is_dir(base))                             // true
+w := write_file(base + "/a.txt", "hello fs")
+println(fs_size(base + "/a.txt"))                    // 8
+println(fs_mtime(base + "/a.txt") > 0)               // true
+println(fs_rename(base + "/a.txt", base + "/b.txt")) // true
+println(fs_exists(base + "/a.txt"))                  // false
+println(fs_is_dir(base + "/b.txt"))                  // false — a file, not a dir
+m := fs_mkdir_p(base + "/sub")
+w2 := write_file(base + "/sub/c.txt", "x")
+println(sort(fs_list_dir(base)))                     // ["b.txt", "sub"]
+println(fs_list_dir(base + "/nope"))                 // [] — missing dir, no crash
+
+println(fs_basename("/x/y/z.txt"))                   // z.txt
+println(fs_dirname("/x/y/z.txt"))                    // /x/y
+println(fs_dirname("plain"))                         // .
+println(fs_join("/x/y", "z.txt"))                    // /x/y/z.txt
+println(fs_join("/x/y/", "/z.txt"))                  // /x/y/z.txt
+
+println(fs_unlink(base + "/sub/c.txt"))              // true
+println(fs_rmdir(base + "/sub"))                     // true
+u := fs_unlink(base + "/b.txt")
+println(fs_rmdir(base))                              // true

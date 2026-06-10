@@ -223,9 +223,10 @@ fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
 // the name, no polymorphism), so they share one dispatch arm + grouped type rules
 // instead of ~26 identical per-builtin arms.
 fn is_native_call(fname:str) -> bool {
-  if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" || fname == "hmac_sha256" rt true
+  if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_connect_host" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" || fname == "hmac_sha256" rt true
   if fname == "pg_connect" || fname == "pg_status" || fname == "pg_error" || fname == "pg_close" || fname == "pg_exec" || fname == "pg_ok" || fname == "pg_result_error" || fname == "pg_clear" || fname == "pg_nrows" || fname == "pg_ncols" || fname == "pg_value" || fname == "pg_isnull" || fname == "pg_col_name" || fname == "pg_affected" || fname == "pg_escape" rt true
   if fname == "myq_conn" || fname == "myq_query" || fname == "myq_store" || fname == "myq_nrows" || fname == "myq_nfields" || fname == "myq_fetch" || fname == "myq_field" || fname == "myq_err" || fname == "myq_free" || fname == "myq_close" || fname == "myq_escape" rt true
+  if fname == "fs_mkdir" || fname == "fs_rmdir" || fname == "fs_unlink" || fname == "fs_rename" || fname == "fs_exists" || fname == "fs_is_dir" || fname == "fs_size" || fname == "fs_mtime" || fname == "fs_list_dir" rt true
   false
 }
 
@@ -376,7 +377,9 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" || fname == "myq_err" || fname == "myq_field" || fname == "myq_escape" rt "str"
   if fname == "tls_recv" || fname == "sha1" || fname == "hmac_sha256" rt "bytes"
   if fname == "pg_ok" || fname == "pg_isnull" rt "bool"
-  if is_native_call(fname) rt "i64"        // handles / counts / status (incl. void→i64)
+  if fname == "fs_mkdir" || fname == "fs_rmdir" || fname == "fs_unlink" || fname == "fs_rename" || fname == "fs_exists" || fname == "fs_is_dir" rt "bool"
+  if fname == "fs_list_dir" rt "[str]"
+  if is_native_call(fname) rt "i64"        // handles / counts / status (incl. void→i64; fs_size/fs_mtime)
   if is_ctor(sy, fname) rt fname           // a struct ctor produces that struct
   if is_variant(sy, fname) rt sy.evar[fname]   // a variant ctor produces its enum
   // a closure-typed local called as `f(...)` yields its fn-type's return type

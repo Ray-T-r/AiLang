@@ -21,6 +21,12 @@
 #include <sys/wait.h>
 #endif
 #ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <unistd.h>
+#endif
+#ifndef _WIN32
 #include <regex.h>
 #endif
 #ifndef _WIN32
@@ -128,6 +134,7 @@ static int64_t tls_client_ctx(void){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_ne
 static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }
 static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
 static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
+static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
 static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }
 static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }
 static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)""; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }
@@ -492,6 +499,17 @@ static void print_arr_i64(arr_i64 a){ printf("["); for(int64_t i=0;i<a.len;i++){
 static void print_arr_str(arr_str a){ printf("["); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(", "); putchar(34); printf("%s", a.data[i] ? a.data[i] : ""); putchar(34); } printf("]"); }
 static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }
 static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=""; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }
+#ifndef _WIN32
+static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }
+static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }
+static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }
+static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }
+static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }
+static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }
+static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }
+static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }
+static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:""); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,".")==0||strcmp(e->d_name,"..")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }
+#endif
 static arr_Token arr_Token_new(void){ arr_Token a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_Token arr_Token_push(arr_Token a, s_Token x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; s_Token* nd=(s_Token*)GC_MALLOC(nc*sizeof(s_Token)); if(a.len) memcpy(nd,a.data,a.len*sizeof(s_Token)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
 static s_Token arr_Token_get(arr_Token a, int64_t i){ return a.data[i]; }
@@ -4845,13 +4863,16 @@ const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
 }
 
 int64_t f_is_native_call(const char* v_fname) {
-    if (((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_connect_host") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
         return (1 == 1);
     }
     if ((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return (1 == 1);
     }
     if ((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+        return (1 == 1);
+    }
+    if ((((((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0)) || (strcmp(v_fname, "fs_size") == 0)) || (strcmp(v_fname, "fs_mtime") == 0)) || (strcmp(v_fname, "fs_list_dir") == 0))) {
         return (1 == 1);
     }
     return (1 != 1);
@@ -5128,6 +5149,12 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "pg_ok") == 0) || (strcmp(v_fname, "pg_isnull") == 0))) {
         return "bool";
+    }
+    if (((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0))) {
+        return "bool";
+    }
+    if ((strcmp(v_fname, "fs_list_dir") == 0)) {
+        return "[str]";
     }
     if (f_is_native_call(v_fname)) {
         return "i64";
@@ -9613,6 +9640,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_needs_time;
     int64_t v_needs_sock;
     int64_t v_needs_proc;
+    int64_t v_needs_fs;
     int64_t v_needs_thread;
     int64_t v_needs_regex;
     int64_t v_needs_tls;
@@ -10097,6 +10125,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_needs_time = ((((f_has_sub(v_src, "now_ms") || f_has_sub(v_src, "now_us")) || f_has_sub(v_src, "mono_ms")) || f_has_sub(v_src, "sleep_ms")) || f_has_sub(v_src, "time_iso"));
     v_needs_sock = (((((f_has_sub(v_src, "tcp_listen") || f_has_sub(v_src, "tcp_connect")) || f_has_sub(v_src, "tcp_accept")) || f_has_sub(v_src, "sock_send")) || f_has_sub(v_src, "sock_recv")) || f_has_sub(v_src, "sock_close"));
     v_needs_proc = (((f_has_sub(v_src, "proc_fork") || f_has_sub(v_src, "proc_getpid")) || f_has_sub(v_src, "proc_no_zombies")) || f_has_sub(v_src, "proc_reap"));
+    v_needs_fs = ((((((((f_has_sub(v_src, "fs_mkdir") || f_has_sub(v_src, "fs_rmdir")) || f_has_sub(v_src, "fs_unlink")) || f_has_sub(v_src, "fs_rename")) || f_has_sub(v_src, "fs_exists")) || f_has_sub(v_src, "fs_is_dir")) || f_has_sub(v_src, "fs_size")) || f_has_sub(v_src, "fs_mtime")) || f_has_sub(v_src, "fs_list_dir"));
     v_needs_thread = ((((((((f_has_sub(v_src, "thread_spawn") || f_has_sub(v_src, "thread_join")) || f_has_sub(v_src, "mutex_new")) || f_has_sub(v_src, "mutex_lock")) || f_has_sub(v_src, "mutex_unlock")) || f_has_sub(v_src, "chan_new")) || f_has_sub(v_src, "chan_send")) || f_has_sub(v_src, "chan_recv")) || f_has_sub(v_src, "chan_close"));
     v_needs_regex = (f_has_sub(v_src, "regex_match") || f_has_sub(v_src, "regex_find"));
     v_needs_tls = (f_has_sub(v_src, "tls_") || f_has_sub(v_src, "sha1"));
@@ -10115,6 +10144,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     if (v_needs_proc) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n");
+    }
+    if (v_needs_fs) {
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <sys/stat.h>\n#include <sys/types.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
     }
     if (v_needs_regex) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <regex.h>\n#endif\n");
@@ -10219,6 +10251,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }\n");
         v_out = scat(v_out, "static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
         v_out = scat(v_out, "static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
+        v_out = scat(v_out, "static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
         v_out = scat(v_out, "static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }\n");
         v_out = scat(v_out, "static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }\n");
         v_out = scat(v_out, "static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n");
@@ -10352,6 +10385,19 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_out = scat(v_out, "static void print_arr_str(arr_str a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); putchar(34); printf(\"%s\", a.data[i] ? a.data[i] : \"\"); putchar(34); } printf(\"]\"); }\n");
     v_out = scat(v_out, "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n");
     v_out = scat(v_out, "static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=\"\"; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }\n");
+    if (v_needs_fs) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }\n");
+        v_out = scat(v_out, "static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }\n");
+        v_out = scat(v_out, "static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }\n");
+        v_out = scat(v_out, "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n");
+        v_out = scat(v_out, "#endif\n");
+    }
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {
         v_out = scat(v_out, f_gen_arr_helpers((arr_StructDef_get(v_structs, v_si)).name, scat("s_", (arr_StructDef_get(v_structs, v_si)).name)));

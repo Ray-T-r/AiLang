@@ -1906,6 +1906,9 @@ fn compile_to_c(src:str, dir:str) -> str {
   needs_time := has_sub(src, "now_ms") || has_sub(src, "now_us") || has_sub(src, "mono_ms") || has_sub(src, "sleep_ms") || has_sub(src, "time_iso")
   needs_sock := has_sub(src, "tcp_listen") || has_sub(src, "tcp_connect") || has_sub(src, "tcp_accept") || has_sub(src, "sock_send") || has_sub(src, "sock_recv") || has_sub(src, "sock_close")
   needs_proc := has_sub(src, "proc_fork") || has_sub(src, "proc_getpid") || has_sub(src, "proc_no_zombies") || has_sub(src, "proc_reap")
+  // Filesystem ops (libc/POSIX, no link flag). Full names, not a bare "fs_",
+  // so unrelated identifiers can't pull the section in.
+  needs_fs := has_sub(src, "fs_mkdir") || has_sub(src, "fs_rmdir") || has_sub(src, "fs_unlink") || has_sub(src, "fs_rename") || has_sub(src, "fs_exists") || has_sub(src, "fs_is_dir") || has_sub(src, "fs_size") || has_sub(src, "fs_mtime") || has_sub(src, "fs_list_dir")
   // OS threads + mutex (pthread). Like sockets/proc this is POSIX-only (#ifndef
   // _WIN32), but unlike them it needs the threaded Boehm GC (`#define GC_THREADS`
   // before <gc.h>, so pthread_create→GC_pthread_create scans the new thread's
@@ -1933,6 +1936,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   if needs_time { out = out + "#include <time.h>\n" }
   if needs_sock { out = out + "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n" }
   if needs_proc { out = out + "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n" }
+  if needs_fs { out = out + "#ifndef _WIN32\n#include <sys/stat.h>\n#include <sys/types.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n" }
   if needs_regex { out = out + "#ifndef _WIN32\n#include <regex.h>\n#endif\n" }
   if needs_tls { out = out + "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n" }
   if needs_hmac { out = out + "#ifndef _WIN32\n#include <openssl/hmac.h>\n#include <openssl/evp.h>\n#endif\n" }
@@ -2035,6 +2039,7 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }\n"
     out = out + "static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
     out = out + "static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
+    out = out + "static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
     out = out + "static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }\n"
     out = out + "static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }\n"
     out = out + "static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n"
@@ -2180,6 +2185,21 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n"
   // split(s, sep) → [str]; empty sep → [s]; uses arr_str runtime just emitted.
   out = out + "static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=\"\"; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }\n"
+  // Filesystem helpers live HERE (phase 4), not in the phase-2 prelude:
+  // fs_list_dir returns arr_str, whose typedef + push only exist from phase 4 on.
+  if needs_fs {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }\n"
+    out = out + "static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }\n"
+    out = out + "static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }\n"
+    out = out + "static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }\n"
+    out = out + "static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }\n"
+    out = out + "static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }\n"
+    out = out + "static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }\n"
+    out = out + "static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }\n"
+    out = out + "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n"
+    out = out + "#endif\n"
+  }
   si = 0
   lp si < len(structs) { out = out + gen_arr_helpers(structs[si].name, "s_" + structs[si].name); si += 1 }
   ei = 0
