@@ -1,12 +1,12 @@
 # AiLang — the self-hosted compiler
 
-The AiLang compiler **written in AiLang itself**: a ~7,000-line compiler
+The AiLang compiler **written in AiLang itself**: a ~7,700-line compiler
 (`selfhost/main.ail` + the `selfhost/src/*.ail` modules) that lexes, parses,
 type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 10,698 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 11,276 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -35,12 +35,16 @@ C++ library interop (`csrc` + an `extern "C"` shim — inline in the `.ail` or a
 external `.cpp`, POSIX), variadic externs
 (`ex fn printf(fmt, ...)`), OS-thread concurrency (pthread-backed
 `thread_spawn`/`thread_join`, `mutex_*`, and bounded blocking `chan_*` channels,
-POSIX), and the 16 `std/*` modules — sockets, HTTP, TLS, Postgres, Redis,
-WebSocket, JSON (flat + nested), CSV, time, str, math, threads, `seq`
-(composable `any`/`keep`/`map_to`/`fold`/`sort_by`/`flat_map`/`zip_with`
-combinators), and a backend trio — `web` (Express-style routing: `:id` params,
-middleware, handler closures held in the routes table), `jwt` (HS256 sign/verify,
-real interoperable tokens), and `mysql` (libmysqlclient) — pulled in via `im` (with
+POSIX), `{str:[T]}` map-of-array values (so `group_by` returns real buckets),
+and the 19 `std/*` modules — sockets, HTTP (server **and** client: `http_get`/
+`http_post` with chunked decoding, https via SNI), TLS, the database trio
+(Postgres, MySQL via libmysqlclient, SQLite via libsqlite3 — the native libs
+linked only by programs that use them), Redis, WebSocket, filesystem (`fs_*`
+ops + path helpers), JSON (flat + nested), CSV, time, str, math, threads, `seq`
+(composable `any`/`keep`/`map_to`/`fold`/`sort_by`/`flat_map`/`zip_with`/
+`group_by` combinators), `web` (Express-style routing: `:id` params, middleware,
+`req_header`, handler closures held in the routes table), and `jwt` (HS256
+sign/verify, real interoperable tokens) — pulled in via `im` (with
 optional `im "path" as m` aliasing for a namespaced, collision-free `m.fn()`).
 Whole-stream stdin (`read_stdin`) plus the CSV reader/writer and the recursive JSON
 parser/serializer make read→transform→write pipelines —
@@ -86,12 +90,12 @@ matching `clang -O2`).
 
 | | |
 |---|---|
-| compiler source | ~7,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **10,698 lines, byte-identical** |
-| sample programs | **57**, each output-verified against a frozen fixture |
-| standard library | 16 modules, all compiling |
+| compiler source | ~7,700 lines across `main.ail` + 6 `src/` modules |
+| strict fixpoint | `stage2.c == stage3.c` — **11,276 lines, byte-identical** |
+| sample programs | **65**, each output-verified against a frozen fixture — including loopback runtime tests for sockets/HTTP/WebSocket/web (in-process server thread, deterministic output) |
+| standard library | 19 modules — networked/db modules exercised by loopback samples + compile-and-link checks (`selfhost/tests/compileonly/`) |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **40 negative tests**, all caught |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **43 negative tests**, all caught |
 | Rust in the build | **none** |
 
 ## Layout
@@ -110,10 +114,14 @@ selfhost/
   parser.ail      standalone tree-eval harness (illustrative)
   seed/ailc.c     the bootstrap seed — main.ail self-compiled to C (the fixpoint snapshot)
   bootstrap.sh    rebuild the compiler from the seed, with no Rust
-  verify.sh       prove correctness: sample fidelity + strict fixpoint
+  verify.sh       prove correctness: sample fidelity + compile-only stubs + negative tests + CLI guards + strict fixpoint
+  tests/
+    neg/          negative tests (each must FAIL to compile with the expected message)
+    compileonly/  std-module stubs that must compile AND link, never executed (mysql/pg/redis/tls)
 std/              the standard library (.ail modules the compiler imports via `im`)
 examples-selfhost/
   *.ail           sample programs the compiler builds
+  lib/            helper modules imported by samples (no fixtures — a fixture-less root sample FAILS verify)
   expected/*.out  frozen known-good output (byte-equal to Rust `ailangc` at split time)
 ```
 

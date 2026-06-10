@@ -1,6 +1,6 @@
 ---
 name: ailang
-description: Write, read, and compile AiLang (`.ail`) source with the self-hosted `ailc` compiler. Use whenever the user asks for AiLang code, references AiLang syntax, mentions an `.ail` file, asks about the `ailc` compiler, or works inside an AiLang project. AiLang is a compiled, statically-typed language with a deliberately minimal-token syntax — 2-char keywords (`fn`/`lp`/`mt`/`rt`/`el`/`en`/`st`), optional type annotations (default `i64`), implicit `main`, implicit return. It compiles to C and links via `clang -O2`. Supports structs, classes (single inheritance + virtual methods), enums/recursive ADTs, real generics (generic structs `Box<T>` + enums `Option<T>` + multi-param `<A,B>` + `tr` trait bounds), operator overloading, closures with capture, `!T`/`?` error propagation, string interpolation `"${e}"`, UFCS, module namespacing (`im "…" as m`), C++ library interop via `csrc`, a multi-error type checker with *"did you mean?"* suggestions, and a 16-module stdlib (sockets/HTTP/TLS/Postgres/Redis/WebSocket/JSON/CSV/time/str/math/threads/seq/web/jwt/mysql).
+description: Write, read, and compile AiLang (`.ail`) source with the self-hosted `ailc` compiler. Use whenever the user asks for AiLang code, references AiLang syntax, mentions an `.ail` file, asks about the `ailc` compiler, or works inside an AiLang project. AiLang is a compiled, statically-typed language with a deliberately minimal-token syntax — 2-char keywords (`fn`/`lp`/`mt`/`rt`/`el`/`en`/`st`), optional type annotations (default `i64`), implicit `main`, implicit return. It compiles to C and links via `clang -O2`. Supports structs, classes (single inheritance + virtual methods), enums/recursive ADTs, real generics (generic structs `Box<T>` + enums `Option<T>` + multi-param `<A,B>` + `tr` trait bounds), operator overloading, closures with capture, `!T`/`?` error propagation, string interpolation `"${e}"`, UFCS, module namespacing (`im "…" as m`), C++ library interop via `csrc`, a multi-error type checker with *"did you mean?"* suggestions, and a 19-module stdlib (sockets/HTTP server+client/TLS/Postgres/Redis/WebSocket/JSON/CSV/time/str/math/threads/seq/web/jwt/mysql/sqlite/fs).
 ---
 
 # AiLang Quick Reference (self-hosted `ailc`)
@@ -411,7 +411,7 @@ println(cnt[0])      // 1
 
 ### Socket/net (POSIX only)
 
-`tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1` — baked into codegen, no `ex fn` decl needed. See `std/sock.ail`, `std/http.ail`, `std/tls.ail`, `std/pg.ail` for wrappers.
+`tcp_*`, `sock_*`, `tls_*` (incl. `tls_connect_host(ctx,fd,host)` — SNI for https clients), `pg_*`, `sq_*` (SQLite), `fs_*` (filesystem), `sha1` — baked into codegen, no `ex fn` decl needed. See `std/sock.ail`, `std/http.ail`, `std/tls.ail`, `std/pg.ail`, `std/sqlite.ail`, `std/fs.ail` for wrappers.
 
 ### Process (POSIX only)
 
@@ -433,10 +433,13 @@ println(cnt[0])      // 1
 | `std/redis.ail` | Redis | `redis_connect(host,port)`, `redis_get`/`redis_set`, `redis_incr`, `redis_del`, `redis_ping` |
 | `std/ws.ail`    | WebSocket | `ws_handshake_response(key)`, `ws_send_text(fd,p)`, `ws_recv_text(fd)`, `b64_encode(bytes)` |
 | `std/thread.ail`| OS threads (pthread, POSIX) | Wrappers over builtins: `spawn(f)`/`wait(h)`/`wait_all(hs:[i64])`, `mutex()`/`lock(m)`/`unlock(m)`, `channel(cap)`/`send(ch,v)`/`recv(ch)`/`close(ch)`. Import for the clean names; the builtins (`thread_spawn`, `mutex_new`, `chan_new`, …) work without the import. |
-| `std/seq.ail`   | generic combinators (`\|>`-friendly) | `any`/`all`/`count`/`find_index`/`take`/`drop`/`keep`/`map_to`/`flat_map`/`fold`/`sort_by`/`for_each`/`zip_with` — each takes a passed closure; annotate the lambda param when elements aren't `i64` |
+| `std/seq.ail`   | generic combinators (`\|>`-friendly) | `any`/`all`/`count`/`find_index`/`take`/`drop`/`keep`/`map_to`/`flat_map`/`fold`/`sort_by`/`for_each`/`zip_with`/`group_by(xs, key)->{str:[T]}` — each takes a passed closure; annotate the lambda param when elements aren't `i64`; iterate `sort(keys(g))` for stable group output |
 | `std/web.ail`   | Express-style web framework (POSIX) | `web_new()`, `web_get`/`web_post`/`web_put`/`web_delete(&app, pat, fn(r:Req)->str)`, `web_use(&app, mw)` middleware, `:id` path params via `req_param(r,"id")`, headers via `req_header(r,"Authorization")`, `web_handle(&app, raw)->resp` (socket-free, testable), `web_listen(&app, host, port)` (live server). Handlers are closures in the routes table. |
 | `std/jwt.ail`   | JWT HS256 (POSIX) | `jwt_sign(payload_json, secret)->str`, `jwt_verify(token, secret)->bool`, `jwt_payload(token)->str`, `jwt_claim(token, key)->str`; `b64url_encode`/`b64url_decode_str`. Real interoperable tokens (byte-identical to PyJWT). |
 | `std/mysql.ail` | MySQL/MariaDB (libmysqlclient, POSIX) | `mysql_must_connect(host,user,pass,db,port)`, `mysql_one(c,sql)->str`, `mysql_rows(c,sql)->[MRow]`, `mysql_exec`/`mysql_escape`/`mysql_close`. Opt-in (only programs that use it link `-lmysqlclient`); needs the client lib + a server. (Postgres: `std/pg.ail`.) |
+| `std/sqlite.ail` | SQLite (libsqlite3, POSIX) | `sqlite_must_open(path)` (`":memory:"` works), `sqlite_one(c,sql)->str`, `sqlite_rows(c,sql)->[SqRow]`, `sqlite_exec`/`sqlite_changes`/`sqlite_last_id`/`sqlite_escape` (`'`→`''`)/`sqlite_print_table`/`sqlite_close`. Opt-in `-lsqlite3` (in the macOS SDK; Linux needs libsqlite3-dev). |
+| `std/http_client.ail` | HTTP(S) client (POSIX) | `http_get(url)->HttpResp{status,head,body}`, `http_post(url,ctype,body)`, `http_resp_header(r,name)`, `http_dechunk` (chunked TE), `http_url_parse`. https via SNI (`tls_connect_host`); importing it links OpenSSL; status `-1` on connect/handshake failure; bodies are `str` (NUL truncates). Don't also `im "std/http.ail"` directly. |
+| `std/fs.ail`    | filesystem (POSIX) | builtins (no import needed): `fs_mkdir`/`fs_rmdir`/`fs_unlink`/`fs_rename`/`fs_exists`/`fs_is_dir`->bool, `fs_size`/`fs_mtime`->i64 (-1 missing; mtime whole seconds), `fs_list_dir(p)->[str]` (**order varies — `sort()` it**). Module adds `fs_join`/`fs_basename`/`fs_dirname`/`fs_mkdir_p`. |
 
 `std/math.ail` and `std/sock.ail` are auto-imported. The net/TLS/PG/Redis/thread builtins are baked into codegen, so the modules are thin convenience wrappers.
 
