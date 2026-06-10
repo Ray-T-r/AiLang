@@ -247,6 +247,24 @@ fn eval(x:Expr) -> i64 {
 tuples:       a, b := divmod(17, 5)                     // multi-return + destructure
 ```
 
+## Bytes
+
+`bytes` is a binary buffer distinct from `str` — survives NUL bytes, used for file I/O, network payloads, and raw encoding. Printed as `b"..."` (printable ASCII shown verbatim).
+
+```
+b := str_to_bytes("hello")     // str → bytes
+println(bytes_at(b, 0))        // 104  ('h')  — by index fn
+println(b[1])                  // 101  ('e')  — [] also works
+sl := bytes_slice(b, 1, 4)     // slice [lo, hi)  → bytes
+println(bytes_to_str(sl))      // "ell"
+println(len(b))                // 5
+write_file_bytes("/tmp/x.bin", b)       // write binary file
+got := read_file_bytes("/tmp/x.bin")    // read → bytes (empty on missing)
+println(bytes_to_str(got))              // hello
+```
+
+Text files use `read_file(path) -> str` / `write_file(path, s) -> bool`.
+
 ## Error handling: `!T` + `?`
 
 ```
@@ -297,22 +315,107 @@ ex fn set_new() -> i64
 
 ## Builtins (always in scope — no `im`)
 
-| Name | Notes |
-|------|-------|
-| `print(x)` / `println(x)` | type-dispatched; arrays of scalars and scalar maps print directly; **bools print `true`/`false` in every form** — the `true`/`false` literal, a comparison (`==` `<` …), a logical (`&&` `\|\|` `!`), an overloaded `==`, a bool variable, or a bool-returning call |
-| `len(x)` | str / bytes / `[T]` / `{K:V}` |
-| `has(m, k)` | map membership |
-| `push`/`pop`/`sort`/`reverse`/`slice` | return a fresh array |
-| `keys(m)` / `values(m)` | |
-| `map(arr,f)` / `filter(arr,pred)` / `reduce(arr,init,f)` | pass the lambda **inline** (`map(xs, fn(x) x*2)`) — a stored-in-a-variable lambda is not accepted here |
-| `ok(v)` / `err_i64`/`err_str`/`err_f64`/`err_bool` / `unwrap`/`is_ok`/`is_err`/`err_msg` | `!T` result |
-| `str_to_int`/`int_to_str`/`str_to_float`/`float_to_str` | conversions |
-| `regex_match(pat,s)` / `regex_find(pat,s)` | POSIX extended |
-| `to_str(x)` | used by `${...}` interpolation |
-| time / io: `now_ms()`, `mono_ms()`, `time_iso(ms)`, `sleep_ms(ms)`, `flush()`, `read_line()`, `read_stdin()`, `get_env(name)` | **`time_iso` takes a ms timestamp** — current ISO time is `time_iso(now_ms())`, *not* `time_iso()`. `read_line()` reads one line (returns `""` at EOF *and* for a blank line); `read_stdin()` reads **all** of stdin (use it for multi-line/JSON input). `flush()` flushes stdout: `lp { print(time_iso(now_ms()) + "\r"); flush(); sleep_ms(1000) }` |
-| socket/net builtins: `tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1`, ... | baked into codegen — no extern decls needed; POSIX-only (need WSL on Windows) |
+**Don't name your own functions after a builtin** (`unwrap`, `split`, `len`, `keys`, `to_str`, …) — the builtin wins and yours is silently misrouted.
 
-**Don't name your own functions after a builtin** (e.g. `unwrap`, `split`, `len`, `keys`, `to_str`) — the builtin wins and your fn is silently misrouted. Pick a distinct name (`opt_get`, not `unwrap`).
+### Output & conversion
+
+| Builtin | Notes |
+|---------|-------|
+| `print(x)` / `println(x)` | type-dispatched; arrays of scalars and scalar maps print directly; bools always print `true`/`false` |
+| `to_str(x)` | any → str; used inside `"${expr}"` interpolation |
+| `int_to_str(n)` / `str_to_int(s)` | |
+| `float_to_str(f)` / `str_to_float(s)` | |
+| `str_to_bool(s)` | `"true"` → 1, anything else → 0 |
+| `format(fmt, ...)` | printf-style — `format("%lld and %s", n, "hi")` — types must match |
+
+### String operations
+
+| Builtin | Notes |
+|---------|-------|
+| `len(s)` | byte length |
+| `contains(s, sub)` | substring test → bool |
+| `starts_with(s, pre)` / `ends_with(s, suf)` | |
+| `index_of(s, sub)` | first position or -1 |
+| `substring(s, lo, hi)` | `[lo, hi)` slice of a string |
+| `to_upper(s)` / `to_lower(s)` / `trim(s)` | |
+| `replace(s, old, new)` | replaces ALL occurrences |
+| `repeat(s, n)` | repeat string n times |
+| `pad_left(s, width, ch)` / `pad_right(s, width, ch)` | pad with a 1-char string |
+| `chr(n)` | int → single-char string; `chr(65)` → `"A"` |
+| `ord(s)` | first byte of string → int; `ord("A")` → 65 |
+| `split(s, sep)` → `[str]` | split by separator string |
+| `join(arr, sep)` | join `[str]` or `[i64]` with a separator |
+| `regex_match(pat, s)` / `regex_find(pat, s)` | POSIX extended regex |
+| `cstr(s)` | `str` → C `const char*` handle (for `ex fn` interop) |
+
+### Arrays & collections
+
+| Builtin | Notes |
+|---------|-------|
+| `len(a)` | array / map / bytes / str |
+| `push(a, v)` / `pop(a)` | **return a fresh array** — original unchanged; re-assign: `xs = push(xs, v)` |
+| `sort(a)` | **returns a fresh sorted array** — original unchanged; works for `[i64]` and `[str]` |
+| `reverse(a)` / `slice(a, lo, hi)` | return fresh arrays |
+| `contains(a, v)` | element membership for `[i64]` / `[str]` |
+| `index_of(a, v)` | first index of v, or -1 |
+| `map(arr, f)` / `filter(arr, pred)` / `reduce(arr, init, f)` | pass the lambda **inline** (`map(xs, fn(x) x*2)`) — a stored lambda doesn't work here; use `std/seq.ail` instead |
+| `has(m, k)` / `keys(m)` / `values(m)` | map operations |
+
+### Numeric
+
+| Builtin | Notes |
+|---------|-------|
+| `abs(x)` | works for both `i64` and `f64` |
+| `sign(n)` | -1 / 0 / 1 |
+| `clamp(n, lo, hi)` | `clamp(15, 0, 10)` → 10 |
+
+### I/O & environment
+
+| Builtin | Notes |
+|---------|-------|
+| `read_line()` | one line; returns `""` at EOF **and** for a blank line — can't distinguish them; prefer `read_stdin()` for multi-line input |
+| `read_stdin()` | read **all** of stdin at once |
+| `read_file(path)` → `str` | UTF-8 text (strips BOM, transcodes UTF-16 on Windows) |
+| `write_file(path, s)` → `bool` | write UTF-8 text |
+| `read_file_bytes(path)` → `bytes` | binary read; empty bytes on missing file |
+| `write_file_bytes(path, b)` → `bool` | binary write |
+| `get_env(name)` → `str` | env var or `""` if unset |
+| `exe_dir()` → `str` | directory of the running binary |
+| `args()` → `[str]` | command-line arguments (skips `argv[0]`) |
+| `flush()` | flush stdout — required before `sleep_ms` in a live counter/spinner |
+| `now_ms()` / `mono_ms()` / `now_us()` | wall-clock ms, monotonic ms, wall-clock µs |
+| `time_iso(ms)` → `str` | **takes a ms timestamp**, not zero args — `time_iso(now_ms())` for current ISO time |
+| `sleep_ms(ms)` | |
+
+### Concurrency builtins (POSIX only; `std/thread.ail` wraps these with cleaner names)
+
+| Builtin | std/thread.ail wrapper | Notes |
+|---------|----------------------|-------|
+| `thread_spawn(fn()->i64)` → `i64` | `spawn(f)` | handle is an opaque i64 |
+| `thread_join(h)` → `i64` | `wait(h)` | returns thread's return value |
+| — | `wait_all(hs)` | join array of handles, sum results |
+| `mutex_new()` → `i64` | `mutex()` | |
+| `mutex_lock(m)` / `mutex_unlock(m)` | `lock(m)` / `unlock(m)` | |
+| `chan_new(cap)` → `i64` | `channel(cap)` | bounded blocking ring buffer |
+| `chan_send(ch, v)` / `chan_recv(ch)` | `send(ch,v)` / `recv(ch)` | blocks when full/empty |
+| `chan_close(ch)` | `close(ch)` | unblocks receivers (returns 0 after drain) |
+
+**Shared mutable state across closures:** arrays are reference-typed — a 1-element array is the idiomatic shared mutable cell:
+```
+cnt := [0]           // all closures capturing `cnt` share the same backing store
+m := mutex_new()
+h := thread_spawn(fn() { mutex_lock(m); cnt[0] = cnt[0] + 1; mutex_unlock(m); 0 })
+thread_join(h)
+println(cnt[0])      // 1
+```
+
+### Socket/net (POSIX only)
+
+`tcp_*`, `sock_*`, `tls_*`, `pg_*`, `sha1` — baked into codegen, no `ex fn` decl needed. See `std/sock.ail`, `std/http.ail`, `std/tls.ail`, `std/pg.ail` for wrappers.
+
+### Process (POSIX only)
+
+`proc_fork()`, `proc_getpid()`, `proc_no_zombies()`, `proc_reap()` — raw POSIX process control; rarely needed directly.
 
 ## Standard library (`im "std/<name>.ail"`)
 
@@ -329,9 +432,9 @@ ex fn set_new() -> i64
 | `std/pg.ail`    | Postgres | `pg_must_connect(dsn)`, `pg_one(conn,sql)`, `pg_first_col(conn,sql) -> [str]`, `pg_print_table(res)` |
 | `std/redis.ail` | Redis | `redis_connect(host,port)`, `redis_get`/`redis_set`, `redis_incr`, `redis_del`, `redis_ping` |
 | `std/ws.ail`    | WebSocket | `ws_handshake_response(key)`, `ws_send_text(fd,p)`, `ws_recv_text(fd)`, `b64_encode(bytes)` |
-| `std/thread.ail`| OS threads (pthread, POSIX) | `spawn(fn()->i64)`/`wait(h)`/`wait_all(hs)`, `mutex()`/`lock`/`unlock`, `channel(cap)`/`send`/`recv`/`close` (bounded blocking) |
+| `std/thread.ail`| OS threads (pthread, POSIX) | Wrappers over builtins: `spawn(f)`/`wait(h)`/`wait_all(hs:[i64])`, `mutex()`/`lock(m)`/`unlock(m)`, `channel(cap)`/`send(ch,v)`/`recv(ch)`/`close(ch)`. Import for the clean names; the builtins (`thread_spawn`, `mutex_new`, `chan_new`, …) work without the import. |
 | `std/seq.ail`   | generic combinators (`\|>`-friendly) | `any`/`all`/`count`/`find_index`/`take`/`drop`/`keep`/`map_to`/`flat_map`/`fold`/`sort_by`/`for_each`/`zip_with` — each takes a passed closure; annotate the lambda param when elements aren't `i64` |
-| `std/web.ail`   | Express-style web framework (POSIX) | `web_new()`, `web_get`/`web_post`/`web_put`/`web_delete(&app, pat, fn(r:Req)->str)`, `web_use(&app, mw)` middleware, `:id` path params via `req_param(r,"id")`, `web_handle(&app, raw)->resp` (socket-free, testable), `web_listen(&app, host, port)` (live server). Handlers are closures in the routes table. |
+| `std/web.ail`   | Express-style web framework (POSIX) | `web_new()`, `web_get`/`web_post`/`web_put`/`web_delete(&app, pat, fn(r:Req)->str)`, `web_use(&app, mw)` middleware, `:id` path params via `req_param(r,"id")`, headers via `req_header(r,"Authorization")`, `web_handle(&app, raw)->resp` (socket-free, testable), `web_listen(&app, host, port)` (live server). Handlers are closures in the routes table. |
 | `std/jwt.ail`   | JWT HS256 (POSIX) | `jwt_sign(payload_json, secret)->str`, `jwt_verify(token, secret)->bool`, `jwt_payload(token)->str`, `jwt_claim(token, key)->str`; `b64url_encode`/`b64url_decode_str`. Real interoperable tokens (byte-identical to PyJWT). |
 | `std/mysql.ail` | MySQL/MariaDB (libmysqlclient, POSIX) | `mysql_must_connect(host,user,pass,db,port)`, `mysql_one(c,sql)->str`, `mysql_rows(c,sql)->[MRow]`, `mysql_exec`/`mysql_escape`/`mysql_close`. Opt-in (only programs that use it link `-lmysqlclient`); needs the client lib + a server. (Postgres: `std/pg.ail`.) |
 
@@ -354,6 +457,9 @@ ex fn set_new() -> i64
 9. **Implicit `main`** — don't wrap a top-level script in `fn main`.
 10. **Integer widths are cosmetic** (stored 64-bit). The type checker is conservative but real — it reports confident mistakes at the `.ail` `line:col` (type/`!T` mismatches, `mt` exhaustiveness/variants/arity, call & generic arity, `<T: Trait>` bounds, generic-instance mismatches), **all errors in one run**, with *"did you mean?"* spelling suggestions. It's not a full type system, so some mistakes still surface as C-compiler errors.
 11. **`map`/`filter`/`reduce` need an inline lambda** — `map(xs, fn(x) x*2)`, not a lambda stored in a variable. (`std/seq.ail`'s `keep`/`map_to`/`fold` accept a *passed/stored* closure where the builtins won't.) And a non-generic fn that returns the result of calling a `fn(...)->R` parameter must **annotate its return type** (`-> i64`) or use explicit `rt`.
+12. **`sort` / `push` / `pop` / `reverse` / `slice` return a fresh array — the original is unchanged.** Re-assign: `xs = push(xs, v)`, `ys = sort(xs)`. Forgetting the re-assign is a silent no-op.
+13. **Lambda whose block body ends with an assignment or a loop** compiles correctly and implicitly returns `0`. This is not an error, but: `f := fn() { arr[0] = arr[0] + 1 }` — the lambda returns `i64` (0), so an fn-type annotation like `fn()->i64` is required if you pass it as a typed param.
+14. **`format(fmt, args…)` is printf-style with manual type matching** — `%lld` for i64, `%s` for str, `%g` for f64. Mismatch is a runtime crash, not a compile error. Use string interpolation `"${e}"` instead when types are mixed or unknown.
 
 ## Worked examples
 
@@ -433,3 +539,15 @@ lp {
 ```
 
 When unsure, mimic the shape of programs in `examples-selfhost/*.ail` rather than translating literally from another language.
+
+## Bundled examples (`skill/examples/`)
+
+Focused, runnable `.ail` files covering features not fully shown in the inline snippets above:
+
+| File | What it covers |
+|------|---------------|
+| [`bytes.ail`](examples/bytes.ail) | `bytes` type: `str_to_bytes`, `bytes_at`, `b[i]`, `bytes_slice`, `bytes_to_str`, `read_file_bytes`, `write_file_bytes`, text `read_file`/`write_file` |
+| [`strings.ail`](examples/strings.ail) | Full string builtin set: `contains`, `starts_with`/`ends_with`, `index_of`, `substring`, case/pad/replace/repeat, `chr`/`ord`, `split`/`join`, `format` |
+| [`threads.ail`](examples/threads.ail) | `std/thread.ail` wrappers (`spawn`/`wait`/`wait_all`, `mutex`, `channel`/`send`/`recv`/`close`); 1-element array as shared mutable cell |
+| [`pipeline.ail`](examples/pipeline.ail) | ETL: `std/csv.ail` → `std/seq.ail` combinators → `std/json.ail` output; `\|>` pipe style; lambda param annotations for non-`i64` elements |
+| [`web_jwt.ail`](examples/web_jwt.ail) | `std/web.ail` routes + `:param` + middleware + `std/jwt.ail` Bearer auth; `web_handle` for socket-free testing |
