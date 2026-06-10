@@ -520,6 +520,8 @@ fn subst_multi(sy:*Syms, f:Func, ty:str, args:[Expr]) -> str {
     if ty == "[" + tp + "]" rt "[" + targ_for(sy, f, tp, args) + "]"
     i += 1
   }
+  // a map annotation recurses per side, so `-> {str:[T]}` resolves at call sites
+  if is_map_ann(ty) rt "{" + subst_multi(sy, f, map_ktype(ty), args) + ":" + subst_multi(sy, f, map_vtype(ty), args) + "}"
   ty
 }
 // ----- generic-fn monomorphization: mangle a type to a C-ident fragment, name
@@ -815,7 +817,7 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
     if t == "f64" rt "printf(\"%g\\n\", (double)(" + gen_expr(sy, args[0]) + "))"
     if t == "bool" rt "printf(\"%s\\n\", (" + gen_expr(sy, args[0]) + ") ? \"true\" : \"false\")"
     if t == "bytes" rt "(print_bytes(" + gen_expr(sy, args[0]) + "), putchar(10))"
-    if is_map_ann(t) && is_scalar_ty(map_vtype(t)) rt "(" + map_cty(t) + "_print(" + gen_expr(sy, args[0]) + "), putchar(10))"
+    if is_map_ann(t) && map_printable(t) rt "(" + map_cty(t) + "_print(" + gen_expr(sy, args[0]) + "), putchar(10))"
     rt "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, args[0]) + "))"
   }
   if fname == "int_to_str" && len(args) == 1 {
@@ -1428,7 +1430,7 @@ fn gen_print(sy:*Syms, e:Expr, ind:str) -> str {
       rt ind + "print_arr_" + suf + "(" + gen_expr(sy, e) + "); putchar(10);\n"
     }
   }
-  if is_map_ann(t) && is_scalar_ty(map_vtype(t)) {   // `{K:scalar}` → `{"k": v, …}` like ailangc
+  if is_map_ann(t) && map_printable(t) {   // `{K:scalar}` / `{K:[i64|str]}` → `{"k": v, …}` like ailangc
     rt ind + map_cty(t) + "_print(" + gen_expr(sy, e) + "); putchar(10);\n"
   }
   ind + "printf(\"%lld\\n\", (long long)(" + gen_expr(sy, e) + "));\n"
@@ -1673,12 +1675,30 @@ fn pf_arg(t:str, slot:str) -> str {
   "(long long)(" + slot + ")"
 }
 fn is_scalar_ty(t:str) -> bool { t == "str" || t == "i64" || t == "f64" }
+// A map type println can render: scalar values, or array values whose elements
+// print via print_arr_i64/print_arr_str (i64/str — f64/struct/enum arrays keep
+// the no-op printer, same as struct values).
+fn map_printable(t:str) -> bool {
+  vt := map_vtype(t)
+  if is_scalar_ty(vt) rt true
+  if is_array_ann(vt) {
+    es := arr_suffix(elem_of_ann(vt))
+    rt es == "i64" || es == "str"
+  }
+  false
+}
 fn gen_map_print(nm:str, kt:str, vt:str) -> str {
+  ka := pf_arg(kt, "m->keys[i]")
   if is_scalar_ty(vt) {
     fmt := pf_spec(kt) + ": " + pf_spec(vt)
-    ka := pf_arg(kt, "m->keys[i]")
     va := pf_arg(vt, "m->values[i]")
     rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + fmt + "\", " + ka + ", " + va + "); } printf(\"}\"); }\n"
+  }
+  if is_array_ann(vt) {
+    es := arr_suffix(elem_of_ann(vt))
+    if es == "i64" || es == "str" {
+      rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + pf_spec(kt) + ": \", " + ka + "); print_arr_" + es + "(m->values[i]); } printf(\"}\"); }\n"
+    }
   }
   "static void " + nm + "_print(" + nm + " m){ (void)m; }\n"
 }
@@ -1720,7 +1740,9 @@ fn gen_map_helpers(nm:str, kt:str, vt:str, dflt:str) -> str {
   o = o + "static " + vc + " " + nm + "_get(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return " + dflt + "; if(" + keyeq + ") return m->values[i]; } return " + dflt + "; }\n"
   o = o + "static int64_t " + nm + "_has(" + nm + " m, " + kc + " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=" + nm + "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(" + keyeq + ") return 1; } return 0; }\n"
   o = o + "static arr_" + ksuf + " " + nm + "_keys(" + nm + " m){ arr_" + ksuf + " r=arr_" + ksuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + ksuf + "_push(r,m->keys[i]); return r; }\n"
-  o = o + "static arr_" + vsuf + " " + nm + "_values(" + nm + " m){ arr_" + vsuf + " r=arr_" + vsuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + vsuf + "_push(r,m->values[i]); return r; }\n"
+  if is_array_ann(vt) == false {        // no arr_arr_* runtime — values() is checker-rejected for map-of-array
+    o = o + "static arr_" + vsuf + " " + nm + "_values(" + nm + " m){ arr_" + vsuf + " r=arr_" + vsuf + "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_" + vsuf + "_push(r,m->values[i]); return r; }\n"
+  }
   o = o + "static int64_t " + nm + "_len(" + nm + " m){ return m->len; }\n"
   o = o + gen_map_print(nm, kt, vt)
   o
@@ -1732,6 +1754,7 @@ fn map_dflt(vt:str) -> str {
   if vt == "str" rt "\"\""
   if vt == "i64" rt "0"
   if vt == "f64" rt "0"
+  if is_array_ann(vt) rt "(" + cty(vt) + "){0}"   // empty array: len=0/cap=0/data=NULL — push-able
   "(s_" + vt + "){0}"
 }
 // Emit the whole map runtime as the cross product of scalar keys × values, the

@@ -451,6 +451,32 @@ fn is_empty_maplit(e:Expr) -> bool {
     Bad                => false;
   }
 }
+// The map annotation already stamped on a literal ("" when absent) — an
+// annotated empty `{}` must keep its type, not be re-inferred (the inference
+// can't see e.g. a generic instance's key var and would fall back to i64).
+fn maplit_ann(e:Expr) -> str {
+  mt e {
+    MapLit(ml,mks,mvs) => ml;
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
+    Var(n)             => "";
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Call(f,a)          => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Array(es,et)       => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,pts,b,id)    => "";
+    Bad                => "";
+  }
+}
 // First `m[k]=v` (recursing into nested blocks, typing loop vars en route) →
 // "{type(k):type(v)}", or "" if none.
 fn map_assign_type(sy:*Syms, body:[Stmt], m:str) -> str {
@@ -591,7 +617,7 @@ fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
   ""
 }
 fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr, pos:i64) -> Stmt {
-  if is_empty_maplit(e) {
+  if is_empty_maplit(e) && len(maplit_ann(e)) == 0 {   // unannotated only — an annotation wins over inference
     t := map_assign_type(sy, body, name)
     if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), pos)   // preserve source pos (codegen ignores it; the checker walks stamped bodies and needs it)
   }
@@ -892,9 +918,27 @@ fn chk_array(funcs:[Func], sy:*Syms, elems:[Expr], pos:i64, src:str) -> i64 {
   chk_args(funcs, sy, elems, pos, src)
   0
 }
-fn chk_maplit(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+// Reject (K,V) combos the map runtime universe never emits: map values, nested
+// array values, and array values with a non-str/i64 key (f64 keys have no
+// grouping use; only str/i64 key × [T] runtimes exist).
+fn map_combo_check(sy:*Syms, t:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if is_map_ann(t) == false rt 0
+  kt := map_ktype(t)
+  vt := map_vtype(t)
+  if is_map_ann(vt) { report_chk(sy, src, pos, "unsupported map value type " + vt) rt 0 }
+  if is_array_ann(vt) {
+    ev := elem_of_ann(vt)
+    if is_array_ann(ev) || is_map_ann(ev) { report_chk(sy, src, pos, "unsupported map value type " + vt) rt 0 }
+    if kt != "str" && kt != "i64" && kt != "bool" { report_chk(sy, src, pos, "a map with array values requires a str or i64 key, got " + kt) rt 0 }
+  }
+  if is_array_ann(kt) || is_map_ann(kt) { report_chk(sy, src, pos, "unsupported map key type " + kt) }
+  0
+}
+fn chk_maplit(funcs:[Func], sy:*Syms, mty:str, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
   homog_check(sy, ks, "map literal mixes key types", pos, src)
   homog_check(sy, vs, "map literal mixes value types", pos, src)
+  map_combo_check(sy, maplit_type(sy, mty, ks, vs), pos, src)
   chk_args(funcs, sy, ks, pos, src)
   chk_args(funcs, sy, vs, pos, src)
   0
@@ -1159,7 +1203,19 @@ fn ok_ret_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   }
   0
 }
+// `values(m)` has no runtime for array-valued maps (would need arr_arr_*).
+fn map_values_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if fname == "values" && len(args) == 1 {
+    t := type_confident(sy, args[0])
+    if is_map_ann(t) && is_array_ann(map_vtype(t)) {
+      report_chk(sy, src, pos, "values() on a map with array values is not supported (iterate keys() instead)")
+    }
+  }
+  0
+}
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  map_values_check(sy, fname, args, pos, src)
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
@@ -1186,7 +1242,7 @@ fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     Unary(op,x)         => check_expr(funcs, sy, x, pos, src);
     Addr(x)             => check_expr(funcs, sy, x, pos, src);
     Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
-    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
+    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mty, mks, mvs, pos, src);
     Match(sc,vn,vb,bd,gd)  => chk_match(funcs, sy, sc, vn, vb, bd, gd, pos, src);
     IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
     Try(x)              => chk_try(funcs, sy, x, pos, src);
@@ -2077,7 +2133,16 @@ fn compile_to_c(src:str, dir:str) -> str {
   lp mvs < len(structs) { mapvals = push(mapvals, structs[mvs].name); mvs += 1 }
   mu mve := 0
   lp mve < len(enums) { mapvals = push(mapvals, enums[mve].name); mve += 1 }
+  // Map-of-array universe ({str:[T]}/{i64:[T]} — group_by et al.): str/i64 keys
+  // only (f64 keys have no grouping use), array values over every arr_<T>.
+  mu arrkeys:[str] := ["str", "i64"]
+  mu arrvals:[str] := ["[i64]", "[str]", "[f64]"]
+  mu avs := 0
+  lp avs < len(structs) { arrvals = push(arrvals, "[" + structs[avs].name + "]"); avs += 1 }
+  mu ave := 0
+  lp ave < len(enums) { arrvals = push(arrvals, "[" + enums[ave].name + "]"); ave += 1 }
   out = out + gen_map_fwds_all(mapkeys, mapvals)
+  out = out + gen_map_fwds_all(arrkeys, arrvals)
   out = out + "\n"
 
   // Phase 3: aggregate bodies (now an enum/struct body may embed `arr_<T>` by
@@ -2088,6 +2153,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   lp ei < len(enums) { out = out + gen_enum_body(enums[ei]); ei += 1 }
   // map node bodies (hold the value by value, so they need the aggregates above).
   out = out + gen_map_nodes_all(mapkeys, mapvals)
+  out = out + gen_map_nodes_all(arrkeys, arrvals)
   out = out + "\n"
 
   // vtable types + forward decls for classes with virtual methods (B3). The
@@ -2119,6 +2185,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   ei = 0
   lp ei < len(enums) { out = out + gen_arr_helpers(enums[ei].name, "s_" + enums[ei].name); ei += 1 }
   out = out + gen_map_helpers_all(mapkeys, mapvals)
+  out = out + gen_map_helpers_all(arrkeys, arrvals)   // after print_arr_* (their printers call them)
   // `!T` result runtimes: scalar `res_i64`/`res_str` + one per struct.
   out = out + gen_res("i64", "int64_t")
   out = out + gen_res("str", "const char*")

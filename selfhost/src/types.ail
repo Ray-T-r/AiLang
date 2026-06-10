@@ -94,8 +94,13 @@ fn fkey(sname:str, fname:str) -> str { sname + "." + fname }
 // The C suffix for an element type, used in the monomorphic `arr_<suffix>`
 // helpers. i64/str keep their name; a struct keeps its name (matches its
 // typedef's `s_<name>` only after `cty`, so we use the bare name for the
-// suffix). Array-of-array would nest; not needed yet.
-fn arr_suffix(ety:str) -> str { if ety == "bool" { "i64" } el { ety } }   // bool reuses the i64 array/result runtime
+// suffix). An array type recurses ([i64] → arr_i64) so map-of-array values
+// ({str:[i64]} → map_str_arr_i64) get valid C identifiers.
+fn arr_suffix(ety:str) -> str {
+  if ety == "bool" rt "i64"                                  // bool reuses the i64 array/result runtime
+  if is_array_ann(ety) rt "arr_" + arr_suffix(elem_of_ann(ety))
+  ety
+}
 
 // The C type spelling for a bootstrap type name.
 // A C header type (from `cinc` + `ex fn`, e.g. `div_t`) is encoded "@c:<name>"

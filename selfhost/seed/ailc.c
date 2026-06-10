@@ -282,6 +282,62 @@ typedef struct map_f64_Expr_s map_f64_Expr_s;
 typedef map_f64_Expr_s* map_f64_Expr;
 typedef struct map_f64_Stmt_s map_f64_Stmt_s;
 typedef map_f64_Stmt_s* map_f64_Stmt;
+typedef struct map_str_arr_i64_s map_str_arr_i64_s;
+typedef map_str_arr_i64_s* map_str_arr_i64;
+typedef struct map_str_arr_str_s map_str_arr_str_s;
+typedef map_str_arr_str_s* map_str_arr_str;
+typedef struct map_str_arr_f64_s map_str_arr_f64_s;
+typedef map_str_arr_f64_s* map_str_arr_f64;
+typedef struct map_str_arr_Token_s map_str_arr_Token_s;
+typedef map_str_arr_Token_s* map_str_arr_Token;
+typedef struct map_str_arr_StructDef_s map_str_arr_StructDef_s;
+typedef map_str_arr_StructDef_s* map_str_arr_StructDef;
+typedef struct map_str_arr_EnumDef_s map_str_arr_EnumDef_s;
+typedef map_str_arr_EnumDef_s* map_str_arr_EnumDef;
+typedef struct map_str_arr_Func_s map_str_arr_Func_s;
+typedef map_str_arr_Func_s* map_str_arr_Func;
+typedef struct map_str_arr_ClassDef_s map_str_arr_ClassDef_s;
+typedef map_str_arr_ClassDef_s* map_str_arr_ClassDef;
+typedef struct map_str_arr_TraitDef_s map_str_arr_TraitDef_s;
+typedef map_str_arr_TraitDef_s* map_str_arr_TraitDef;
+typedef struct map_str_arr_P_s map_str_arr_P_s;
+typedef map_str_arr_P_s* map_str_arr_P;
+typedef struct map_str_arr_Binds_s map_str_arr_Binds_s;
+typedef map_str_arr_Binds_s* map_str_arr_Binds;
+typedef struct map_str_arr_Syms_s map_str_arr_Syms_s;
+typedef map_str_arr_Syms_s* map_str_arr_Syms;
+typedef struct map_str_arr_Expr_s map_str_arr_Expr_s;
+typedef map_str_arr_Expr_s* map_str_arr_Expr;
+typedef struct map_str_arr_Stmt_s map_str_arr_Stmt_s;
+typedef map_str_arr_Stmt_s* map_str_arr_Stmt;
+typedef struct map_i64_arr_i64_s map_i64_arr_i64_s;
+typedef map_i64_arr_i64_s* map_i64_arr_i64;
+typedef struct map_i64_arr_str_s map_i64_arr_str_s;
+typedef map_i64_arr_str_s* map_i64_arr_str;
+typedef struct map_i64_arr_f64_s map_i64_arr_f64_s;
+typedef map_i64_arr_f64_s* map_i64_arr_f64;
+typedef struct map_i64_arr_Token_s map_i64_arr_Token_s;
+typedef map_i64_arr_Token_s* map_i64_arr_Token;
+typedef struct map_i64_arr_StructDef_s map_i64_arr_StructDef_s;
+typedef map_i64_arr_StructDef_s* map_i64_arr_StructDef;
+typedef struct map_i64_arr_EnumDef_s map_i64_arr_EnumDef_s;
+typedef map_i64_arr_EnumDef_s* map_i64_arr_EnumDef;
+typedef struct map_i64_arr_Func_s map_i64_arr_Func_s;
+typedef map_i64_arr_Func_s* map_i64_arr_Func;
+typedef struct map_i64_arr_ClassDef_s map_i64_arr_ClassDef_s;
+typedef map_i64_arr_ClassDef_s* map_i64_arr_ClassDef;
+typedef struct map_i64_arr_TraitDef_s map_i64_arr_TraitDef_s;
+typedef map_i64_arr_TraitDef_s* map_i64_arr_TraitDef;
+typedef struct map_i64_arr_P_s map_i64_arr_P_s;
+typedef map_i64_arr_P_s* map_i64_arr_P;
+typedef struct map_i64_arr_Binds_s map_i64_arr_Binds_s;
+typedef map_i64_arr_Binds_s* map_i64_arr_Binds;
+typedef struct map_i64_arr_Syms_s map_i64_arr_Syms_s;
+typedef map_i64_arr_Syms_s* map_i64_arr_Syms;
+typedef struct map_i64_arr_Expr_s map_i64_arr_Expr_s;
+typedef map_i64_arr_Expr_s* map_i64_arr_Expr;
+typedef struct map_i64_arr_Stmt_s map_i64_arr_Stmt_s;
+typedef map_i64_arr_Stmt_s* map_i64_arr_Stmt;
 
 struct s_Token { int64_t kind; const char* text; int64_t pos; };
 struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; arr_str tparams; };
@@ -372,6 +428,34 @@ struct map_f64_Binds_s { int64_t cap; int64_t len; double* keys; s_Binds* values
 struct map_f64_Syms_s { int64_t cap; int64_t len; double* keys; s_Syms* values; unsigned char* occupied; };
 struct map_f64_Expr_s { int64_t cap; int64_t len; double* keys; s_Expr* values; unsigned char* occupied; };
 struct map_f64_Stmt_s { int64_t cap; int64_t len; double* keys; s_Stmt* values; unsigned char* occupied; };
+struct map_str_arr_i64_s { int64_t cap; int64_t len; const char** keys; arr_i64* values; unsigned char* occupied; };
+struct map_str_arr_str_s { int64_t cap; int64_t len; const char** keys; arr_str* values; unsigned char* occupied; };
+struct map_str_arr_f64_s { int64_t cap; int64_t len; const char** keys; arr_f64* values; unsigned char* occupied; };
+struct map_str_arr_Token_s { int64_t cap; int64_t len; const char** keys; arr_Token* values; unsigned char* occupied; };
+struct map_str_arr_StructDef_s { int64_t cap; int64_t len; const char** keys; arr_StructDef* values; unsigned char* occupied; };
+struct map_str_arr_EnumDef_s { int64_t cap; int64_t len; const char** keys; arr_EnumDef* values; unsigned char* occupied; };
+struct map_str_arr_Func_s { int64_t cap; int64_t len; const char** keys; arr_Func* values; unsigned char* occupied; };
+struct map_str_arr_ClassDef_s { int64_t cap; int64_t len; const char** keys; arr_ClassDef* values; unsigned char* occupied; };
+struct map_str_arr_TraitDef_s { int64_t cap; int64_t len; const char** keys; arr_TraitDef* values; unsigned char* occupied; };
+struct map_str_arr_P_s { int64_t cap; int64_t len; const char** keys; arr_P* values; unsigned char* occupied; };
+struct map_str_arr_Binds_s { int64_t cap; int64_t len; const char** keys; arr_Binds* values; unsigned char* occupied; };
+struct map_str_arr_Syms_s { int64_t cap; int64_t len; const char** keys; arr_Syms* values; unsigned char* occupied; };
+struct map_str_arr_Expr_s { int64_t cap; int64_t len; const char** keys; arr_Expr* values; unsigned char* occupied; };
+struct map_str_arr_Stmt_s { int64_t cap; int64_t len; const char** keys; arr_Stmt* values; unsigned char* occupied; };
+struct map_i64_arr_i64_s { int64_t cap; int64_t len; int64_t* keys; arr_i64* values; unsigned char* occupied; };
+struct map_i64_arr_str_s { int64_t cap; int64_t len; int64_t* keys; arr_str* values; unsigned char* occupied; };
+struct map_i64_arr_f64_s { int64_t cap; int64_t len; int64_t* keys; arr_f64* values; unsigned char* occupied; };
+struct map_i64_arr_Token_s { int64_t cap; int64_t len; int64_t* keys; arr_Token* values; unsigned char* occupied; };
+struct map_i64_arr_StructDef_s { int64_t cap; int64_t len; int64_t* keys; arr_StructDef* values; unsigned char* occupied; };
+struct map_i64_arr_EnumDef_s { int64_t cap; int64_t len; int64_t* keys; arr_EnumDef* values; unsigned char* occupied; };
+struct map_i64_arr_Func_s { int64_t cap; int64_t len; int64_t* keys; arr_Func* values; unsigned char* occupied; };
+struct map_i64_arr_ClassDef_s { int64_t cap; int64_t len; int64_t* keys; arr_ClassDef* values; unsigned char* occupied; };
+struct map_i64_arr_TraitDef_s { int64_t cap; int64_t len; int64_t* keys; arr_TraitDef* values; unsigned char* occupied; };
+struct map_i64_arr_P_s { int64_t cap; int64_t len; int64_t* keys; arr_P* values; unsigned char* occupied; };
+struct map_i64_arr_Binds_s { int64_t cap; int64_t len; int64_t* keys; arr_Binds* values; unsigned char* occupied; };
+struct map_i64_arr_Syms_s { int64_t cap; int64_t len; int64_t* keys; arr_Syms* values; unsigned char* occupied; };
+struct map_i64_arr_Expr_s { int64_t cap; int64_t len; int64_t* keys; arr_Expr* values; unsigned char* occupied; };
+struct map_i64_arr_Stmt_s { int64_t cap; int64_t len; int64_t* keys; arr_Stmt* values; unsigned char* occupied; };
 
 static arr_i64 arr_i64_new(void){ arr_i64 a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_i64 arr_i64_push(arr_i64 a, int64_t x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; int64_t* nd=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); if(a.len) memcpy(nd,a.data,a.len*sizeof(int64_t)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
@@ -905,6 +989,258 @@ static arr_f64 map_f64_Stmt_keys(map_f64_Stmt m){ arr_f64 r=arr_f64_new(); for(i
 static arr_Stmt map_f64_Stmt_values(map_f64_Stmt m){ arr_Stmt r=arr_Stmt_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_Stmt_push(r,m->values[i]); return r; }
 static int64_t map_f64_Stmt_len(map_f64_Stmt m){ return m->len; }
 static void map_f64_Stmt_print(map_f64_Stmt m){ (void)m; }
+static uint64_t map_str_arr_i64_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_i64 map_str_arr_i64_new(void){ map_str_arr_i64 m=(map_str_arr_i64)GC_MALLOC(sizeof(map_str_arr_i64_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_i64*)GC_MALLOC(8*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_i64_grow(map_str_arr_i64 m){ int64_t oc=m->cap; const char** ok=m->keys; arr_i64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_i64*)GC_MALLOC(nc*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_i64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_i64_set(map_str_arr_i64 m, const char* k, arr_i64 val){ if(m->len*10>=m->cap*7) map_str_arr_i64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_i64 map_str_arr_i64_get(map_str_arr_i64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_i64){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_i64){0}; }
+static int64_t map_str_arr_i64_has(map_str_arr_i64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_i64_keys(map_str_arr_i64 m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_i64_len(map_str_arr_i64 m){ return m->len; }
+static void map_str_arr_i64_print(map_str_arr_i64 m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("\"%s\": ", (m->keys[i] ? m->keys[i] : "")); print_arr_i64(m->values[i]); } printf("}"); }
+static uint64_t map_str_arr_str_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_str map_str_arr_str_new(void){ map_str_arr_str m=(map_str_arr_str)GC_MALLOC(sizeof(map_str_arr_str_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_str*)GC_MALLOC(8*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_str_grow(map_str_arr_str m){ int64_t oc=m->cap; const char** ok=m->keys; arr_str* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_str*)GC_MALLOC(nc*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_str_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_str_set(map_str_arr_str m, const char* k, arr_str val){ if(m->len*10>=m->cap*7) map_str_arr_str_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_str map_str_arr_str_get(map_str_arr_str m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_str){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_str){0}; }
+static int64_t map_str_arr_str_has(map_str_arr_str m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_str_keys(map_str_arr_str m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_str_len(map_str_arr_str m){ return m->len; }
+static void map_str_arr_str_print(map_str_arr_str m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("\"%s\": ", (m->keys[i] ? m->keys[i] : "")); print_arr_str(m->values[i]); } printf("}"); }
+static uint64_t map_str_arr_f64_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_f64 map_str_arr_f64_new(void){ map_str_arr_f64 m=(map_str_arr_f64)GC_MALLOC(sizeof(map_str_arr_f64_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_f64*)GC_MALLOC(8*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_f64_grow(map_str_arr_f64 m){ int64_t oc=m->cap; const char** ok=m->keys; arr_f64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_f64*)GC_MALLOC(nc*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_f64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_f64_set(map_str_arr_f64 m, const char* k, arr_f64 val){ if(m->len*10>=m->cap*7) map_str_arr_f64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_f64 map_str_arr_f64_get(map_str_arr_f64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_f64){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_f64){0}; }
+static int64_t map_str_arr_f64_has(map_str_arr_f64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_f64_keys(map_str_arr_f64 m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_f64_len(map_str_arr_f64 m){ return m->len; }
+static void map_str_arr_f64_print(map_str_arr_f64 m){ (void)m; }
+static uint64_t map_str_arr_Token_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Token map_str_arr_Token_new(void){ map_str_arr_Token m=(map_str_arr_Token)GC_MALLOC(sizeof(map_str_arr_Token_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Token*)GC_MALLOC(8*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Token_grow(map_str_arr_Token m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Token* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Token*)GC_MALLOC(nc*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Token_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Token_set(map_str_arr_Token m, const char* k, arr_Token val){ if(m->len*10>=m->cap*7) map_str_arr_Token_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Token map_str_arr_Token_get(map_str_arr_Token m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Token){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Token){0}; }
+static int64_t map_str_arr_Token_has(map_str_arr_Token m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Token_keys(map_str_arr_Token m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Token_len(map_str_arr_Token m){ return m->len; }
+static void map_str_arr_Token_print(map_str_arr_Token m){ (void)m; }
+static uint64_t map_str_arr_StructDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_StructDef map_str_arr_StructDef_new(void){ map_str_arr_StructDef m=(map_str_arr_StructDef)GC_MALLOC(sizeof(map_str_arr_StructDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_StructDef*)GC_MALLOC(8*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_StructDef_grow(map_str_arr_StructDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_StructDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_StructDef*)GC_MALLOC(nc*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_StructDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_StructDef_set(map_str_arr_StructDef m, const char* k, arr_StructDef val){ if(m->len*10>=m->cap*7) map_str_arr_StructDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_StructDef map_str_arr_StructDef_get(map_str_arr_StructDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_StructDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_StructDef){0}; }
+static int64_t map_str_arr_StructDef_has(map_str_arr_StructDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_StructDef_keys(map_str_arr_StructDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_StructDef_len(map_str_arr_StructDef m){ return m->len; }
+static void map_str_arr_StructDef_print(map_str_arr_StructDef m){ (void)m; }
+static uint64_t map_str_arr_EnumDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_EnumDef map_str_arr_EnumDef_new(void){ map_str_arr_EnumDef m=(map_str_arr_EnumDef)GC_MALLOC(sizeof(map_str_arr_EnumDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_EnumDef*)GC_MALLOC(8*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_EnumDef_grow(map_str_arr_EnumDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_EnumDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_EnumDef*)GC_MALLOC(nc*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_EnumDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_EnumDef_set(map_str_arr_EnumDef m, const char* k, arr_EnumDef val){ if(m->len*10>=m->cap*7) map_str_arr_EnumDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_EnumDef map_str_arr_EnumDef_get(map_str_arr_EnumDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_EnumDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_EnumDef){0}; }
+static int64_t map_str_arr_EnumDef_has(map_str_arr_EnumDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_EnumDef_keys(map_str_arr_EnumDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_EnumDef_len(map_str_arr_EnumDef m){ return m->len; }
+static void map_str_arr_EnumDef_print(map_str_arr_EnumDef m){ (void)m; }
+static uint64_t map_str_arr_Func_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Func map_str_arr_Func_new(void){ map_str_arr_Func m=(map_str_arr_Func)GC_MALLOC(sizeof(map_str_arr_Func_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Func*)GC_MALLOC(8*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Func_grow(map_str_arr_Func m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Func* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Func*)GC_MALLOC(nc*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Func_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Func_set(map_str_arr_Func m, const char* k, arr_Func val){ if(m->len*10>=m->cap*7) map_str_arr_Func_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Func map_str_arr_Func_get(map_str_arr_Func m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Func){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Func){0}; }
+static int64_t map_str_arr_Func_has(map_str_arr_Func m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Func_keys(map_str_arr_Func m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Func_len(map_str_arr_Func m){ return m->len; }
+static void map_str_arr_Func_print(map_str_arr_Func m){ (void)m; }
+static uint64_t map_str_arr_ClassDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_ClassDef map_str_arr_ClassDef_new(void){ map_str_arr_ClassDef m=(map_str_arr_ClassDef)GC_MALLOC(sizeof(map_str_arr_ClassDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_ClassDef*)GC_MALLOC(8*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_ClassDef_grow(map_str_arr_ClassDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_ClassDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_ClassDef*)GC_MALLOC(nc*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_ClassDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_ClassDef_set(map_str_arr_ClassDef m, const char* k, arr_ClassDef val){ if(m->len*10>=m->cap*7) map_str_arr_ClassDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_ClassDef map_str_arr_ClassDef_get(map_str_arr_ClassDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_ClassDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_ClassDef){0}; }
+static int64_t map_str_arr_ClassDef_has(map_str_arr_ClassDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_ClassDef_keys(map_str_arr_ClassDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_ClassDef_len(map_str_arr_ClassDef m){ return m->len; }
+static void map_str_arr_ClassDef_print(map_str_arr_ClassDef m){ (void)m; }
+static uint64_t map_str_arr_TraitDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_TraitDef map_str_arr_TraitDef_new(void){ map_str_arr_TraitDef m=(map_str_arr_TraitDef)GC_MALLOC(sizeof(map_str_arr_TraitDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_TraitDef*)GC_MALLOC(8*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_TraitDef_grow(map_str_arr_TraitDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_TraitDef*)GC_MALLOC(nc*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_TraitDef_set(map_str_arr_TraitDef m, const char* k, arr_TraitDef val){ if(m->len*10>=m->cap*7) map_str_arr_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_TraitDef map_str_arr_TraitDef_get(map_str_arr_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_TraitDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_TraitDef){0}; }
+static int64_t map_str_arr_TraitDef_has(map_str_arr_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_TraitDef_keys(map_str_arr_TraitDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_TraitDef_len(map_str_arr_TraitDef m){ return m->len; }
+static void map_str_arr_TraitDef_print(map_str_arr_TraitDef m){ (void)m; }
+static uint64_t map_str_arr_P_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_P map_str_arr_P_new(void){ map_str_arr_P m=(map_str_arr_P)GC_MALLOC(sizeof(map_str_arr_P_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_P*)GC_MALLOC(8*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_P_grow(map_str_arr_P m){ int64_t oc=m->cap; const char** ok=m->keys; arr_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_P*)GC_MALLOC(nc*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_P_set(map_str_arr_P m, const char* k, arr_P val){ if(m->len*10>=m->cap*7) map_str_arr_P_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_P map_str_arr_P_get(map_str_arr_P m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_P){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_P){0}; }
+static int64_t map_str_arr_P_has(map_str_arr_P m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_P_keys(map_str_arr_P m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_P_len(map_str_arr_P m){ return m->len; }
+static void map_str_arr_P_print(map_str_arr_P m){ (void)m; }
+static uint64_t map_str_arr_Binds_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Binds map_str_arr_Binds_new(void){ map_str_arr_Binds m=(map_str_arr_Binds)GC_MALLOC(sizeof(map_str_arr_Binds_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Binds*)GC_MALLOC(8*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Binds_grow(map_str_arr_Binds m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Binds* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Binds*)GC_MALLOC(nc*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Binds_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Binds_set(map_str_arr_Binds m, const char* k, arr_Binds val){ if(m->len*10>=m->cap*7) map_str_arr_Binds_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Binds map_str_arr_Binds_get(map_str_arr_Binds m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Binds){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Binds){0}; }
+static int64_t map_str_arr_Binds_has(map_str_arr_Binds m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Binds_keys(map_str_arr_Binds m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Binds_len(map_str_arr_Binds m){ return m->len; }
+static void map_str_arr_Binds_print(map_str_arr_Binds m){ (void)m; }
+static uint64_t map_str_arr_Syms_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Syms map_str_arr_Syms_new(void){ map_str_arr_Syms m=(map_str_arr_Syms)GC_MALLOC(sizeof(map_str_arr_Syms_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Syms*)GC_MALLOC(8*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Syms_grow(map_str_arr_Syms m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Syms* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Syms*)GC_MALLOC(nc*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Syms_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Syms_set(map_str_arr_Syms m, const char* k, arr_Syms val){ if(m->len*10>=m->cap*7) map_str_arr_Syms_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Syms map_str_arr_Syms_get(map_str_arr_Syms m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Syms){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Syms){0}; }
+static int64_t map_str_arr_Syms_has(map_str_arr_Syms m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Syms_keys(map_str_arr_Syms m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Syms_len(map_str_arr_Syms m){ return m->len; }
+static void map_str_arr_Syms_print(map_str_arr_Syms m){ (void)m; }
+static uint64_t map_str_arr_Expr_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Expr map_str_arr_Expr_new(void){ map_str_arr_Expr m=(map_str_arr_Expr)GC_MALLOC(sizeof(map_str_arr_Expr_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Expr*)GC_MALLOC(8*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Expr_grow(map_str_arr_Expr m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Expr* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Expr*)GC_MALLOC(nc*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Expr_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Expr_set(map_str_arr_Expr m, const char* k, arr_Expr val){ if(m->len*10>=m->cap*7) map_str_arr_Expr_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Expr map_str_arr_Expr_get(map_str_arr_Expr m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Expr){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Expr){0}; }
+static int64_t map_str_arr_Expr_has(map_str_arr_Expr m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Expr_keys(map_str_arr_Expr m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Expr_len(map_str_arr_Expr m){ return m->len; }
+static void map_str_arr_Expr_print(map_str_arr_Expr m){ (void)m; }
+static uint64_t map_str_arr_Stmt_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Stmt map_str_arr_Stmt_new(void){ map_str_arr_Stmt m=(map_str_arr_Stmt)GC_MALLOC(sizeof(map_str_arr_Stmt_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Stmt*)GC_MALLOC(8*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Stmt_grow(map_str_arr_Stmt m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Stmt* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Stmt*)GC_MALLOC(nc*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Stmt_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Stmt_set(map_str_arr_Stmt m, const char* k, arr_Stmt val){ if(m->len*10>=m->cap*7) map_str_arr_Stmt_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Stmt map_str_arr_Stmt_get(map_str_arr_Stmt m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Stmt){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Stmt){0}; }
+static int64_t map_str_arr_Stmt_has(map_str_arr_Stmt m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Stmt_keys(map_str_arr_Stmt m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Stmt_len(map_str_arr_Stmt m){ return m->len; }
+static void map_str_arr_Stmt_print(map_str_arr_Stmt m){ (void)m; }
+static uint64_t map_i64_arr_i64_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_i64 map_i64_arr_i64_new(void){ map_i64_arr_i64 m=(map_i64_arr_i64)GC_MALLOC(sizeof(map_i64_arr_i64_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_i64*)GC_MALLOC(8*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_i64_grow(map_i64_arr_i64 m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_i64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_i64*)GC_MALLOC(nc*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_i64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_i64_set(map_i64_arr_i64 m, int64_t k, arr_i64 val){ if(m->len*10>=m->cap*7) map_i64_arr_i64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_i64 map_i64_arr_i64_get(map_i64_arr_i64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_i64){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_i64){0}; }
+static int64_t map_i64_arr_i64_has(map_i64_arr_i64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_i64_keys(map_i64_arr_i64 m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_i64_len(map_i64_arr_i64 m){ return m->len; }
+static void map_i64_arr_i64_print(map_i64_arr_i64 m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("%lld: ", (long long)(m->keys[i])); print_arr_i64(m->values[i]); } printf("}"); }
+static uint64_t map_i64_arr_str_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_str map_i64_arr_str_new(void){ map_i64_arr_str m=(map_i64_arr_str)GC_MALLOC(sizeof(map_i64_arr_str_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_str*)GC_MALLOC(8*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_str_grow(map_i64_arr_str m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_str* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_str*)GC_MALLOC(nc*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_str_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_str_set(map_i64_arr_str m, int64_t k, arr_str val){ if(m->len*10>=m->cap*7) map_i64_arr_str_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_str map_i64_arr_str_get(map_i64_arr_str m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_str){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_str){0}; }
+static int64_t map_i64_arr_str_has(map_i64_arr_str m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_str_keys(map_i64_arr_str m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_str_len(map_i64_arr_str m){ return m->len; }
+static void map_i64_arr_str_print(map_i64_arr_str m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("%lld: ", (long long)(m->keys[i])); print_arr_str(m->values[i]); } printf("}"); }
+static uint64_t map_i64_arr_f64_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_f64 map_i64_arr_f64_new(void){ map_i64_arr_f64 m=(map_i64_arr_f64)GC_MALLOC(sizeof(map_i64_arr_f64_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_f64*)GC_MALLOC(8*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_f64_grow(map_i64_arr_f64 m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_f64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_f64*)GC_MALLOC(nc*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_f64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_f64_set(map_i64_arr_f64 m, int64_t k, arr_f64 val){ if(m->len*10>=m->cap*7) map_i64_arr_f64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_f64 map_i64_arr_f64_get(map_i64_arr_f64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_f64){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_f64){0}; }
+static int64_t map_i64_arr_f64_has(map_i64_arr_f64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_f64_keys(map_i64_arr_f64 m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_f64_len(map_i64_arr_f64 m){ return m->len; }
+static void map_i64_arr_f64_print(map_i64_arr_f64 m){ (void)m; }
+static uint64_t map_i64_arr_Token_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Token map_i64_arr_Token_new(void){ map_i64_arr_Token m=(map_i64_arr_Token)GC_MALLOC(sizeof(map_i64_arr_Token_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Token*)GC_MALLOC(8*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Token_grow(map_i64_arr_Token m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Token* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Token*)GC_MALLOC(nc*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Token_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Token_set(map_i64_arr_Token m, int64_t k, arr_Token val){ if(m->len*10>=m->cap*7) map_i64_arr_Token_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Token map_i64_arr_Token_get(map_i64_arr_Token m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Token){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Token){0}; }
+static int64_t map_i64_arr_Token_has(map_i64_arr_Token m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Token_keys(map_i64_arr_Token m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Token_len(map_i64_arr_Token m){ return m->len; }
+static void map_i64_arr_Token_print(map_i64_arr_Token m){ (void)m; }
+static uint64_t map_i64_arr_StructDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_StructDef map_i64_arr_StructDef_new(void){ map_i64_arr_StructDef m=(map_i64_arr_StructDef)GC_MALLOC(sizeof(map_i64_arr_StructDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_StructDef*)GC_MALLOC(8*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_StructDef_grow(map_i64_arr_StructDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_StructDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_StructDef*)GC_MALLOC(nc*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_StructDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_StructDef_set(map_i64_arr_StructDef m, int64_t k, arr_StructDef val){ if(m->len*10>=m->cap*7) map_i64_arr_StructDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_StructDef map_i64_arr_StructDef_get(map_i64_arr_StructDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_StructDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_StructDef){0}; }
+static int64_t map_i64_arr_StructDef_has(map_i64_arr_StructDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_StructDef_keys(map_i64_arr_StructDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_StructDef_len(map_i64_arr_StructDef m){ return m->len; }
+static void map_i64_arr_StructDef_print(map_i64_arr_StructDef m){ (void)m; }
+static uint64_t map_i64_arr_EnumDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_EnumDef map_i64_arr_EnumDef_new(void){ map_i64_arr_EnumDef m=(map_i64_arr_EnumDef)GC_MALLOC(sizeof(map_i64_arr_EnumDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_EnumDef*)GC_MALLOC(8*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_EnumDef_grow(map_i64_arr_EnumDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_EnumDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_EnumDef*)GC_MALLOC(nc*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_EnumDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_EnumDef_set(map_i64_arr_EnumDef m, int64_t k, arr_EnumDef val){ if(m->len*10>=m->cap*7) map_i64_arr_EnumDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_EnumDef map_i64_arr_EnumDef_get(map_i64_arr_EnumDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_EnumDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_EnumDef){0}; }
+static int64_t map_i64_arr_EnumDef_has(map_i64_arr_EnumDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_EnumDef_keys(map_i64_arr_EnumDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_EnumDef_len(map_i64_arr_EnumDef m){ return m->len; }
+static void map_i64_arr_EnumDef_print(map_i64_arr_EnumDef m){ (void)m; }
+static uint64_t map_i64_arr_Func_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Func map_i64_arr_Func_new(void){ map_i64_arr_Func m=(map_i64_arr_Func)GC_MALLOC(sizeof(map_i64_arr_Func_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Func*)GC_MALLOC(8*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Func_grow(map_i64_arr_Func m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Func* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Func*)GC_MALLOC(nc*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Func_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Func_set(map_i64_arr_Func m, int64_t k, arr_Func val){ if(m->len*10>=m->cap*7) map_i64_arr_Func_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Func map_i64_arr_Func_get(map_i64_arr_Func m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Func){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Func){0}; }
+static int64_t map_i64_arr_Func_has(map_i64_arr_Func m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Func_keys(map_i64_arr_Func m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Func_len(map_i64_arr_Func m){ return m->len; }
+static void map_i64_arr_Func_print(map_i64_arr_Func m){ (void)m; }
+static uint64_t map_i64_arr_ClassDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_ClassDef map_i64_arr_ClassDef_new(void){ map_i64_arr_ClassDef m=(map_i64_arr_ClassDef)GC_MALLOC(sizeof(map_i64_arr_ClassDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_ClassDef*)GC_MALLOC(8*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_ClassDef_grow(map_i64_arr_ClassDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_ClassDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_ClassDef*)GC_MALLOC(nc*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_ClassDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_ClassDef_set(map_i64_arr_ClassDef m, int64_t k, arr_ClassDef val){ if(m->len*10>=m->cap*7) map_i64_arr_ClassDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_ClassDef map_i64_arr_ClassDef_get(map_i64_arr_ClassDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_ClassDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_ClassDef){0}; }
+static int64_t map_i64_arr_ClassDef_has(map_i64_arr_ClassDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_ClassDef_keys(map_i64_arr_ClassDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_ClassDef_len(map_i64_arr_ClassDef m){ return m->len; }
+static void map_i64_arr_ClassDef_print(map_i64_arr_ClassDef m){ (void)m; }
+static uint64_t map_i64_arr_TraitDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_TraitDef map_i64_arr_TraitDef_new(void){ map_i64_arr_TraitDef m=(map_i64_arr_TraitDef)GC_MALLOC(sizeof(map_i64_arr_TraitDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_TraitDef*)GC_MALLOC(8*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_TraitDef_grow(map_i64_arr_TraitDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_TraitDef*)GC_MALLOC(nc*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_TraitDef_set(map_i64_arr_TraitDef m, int64_t k, arr_TraitDef val){ if(m->len*10>=m->cap*7) map_i64_arr_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_TraitDef map_i64_arr_TraitDef_get(map_i64_arr_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_TraitDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_TraitDef){0}; }
+static int64_t map_i64_arr_TraitDef_has(map_i64_arr_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_TraitDef_keys(map_i64_arr_TraitDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_TraitDef_len(map_i64_arr_TraitDef m){ return m->len; }
+static void map_i64_arr_TraitDef_print(map_i64_arr_TraitDef m){ (void)m; }
+static uint64_t map_i64_arr_P_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_P map_i64_arr_P_new(void){ map_i64_arr_P m=(map_i64_arr_P)GC_MALLOC(sizeof(map_i64_arr_P_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_P*)GC_MALLOC(8*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_P_grow(map_i64_arr_P m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_P*)GC_MALLOC(nc*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_P_set(map_i64_arr_P m, int64_t k, arr_P val){ if(m->len*10>=m->cap*7) map_i64_arr_P_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_P map_i64_arr_P_get(map_i64_arr_P m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_P){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_P){0}; }
+static int64_t map_i64_arr_P_has(map_i64_arr_P m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_P_keys(map_i64_arr_P m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_P_len(map_i64_arr_P m){ return m->len; }
+static void map_i64_arr_P_print(map_i64_arr_P m){ (void)m; }
+static uint64_t map_i64_arr_Binds_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Binds map_i64_arr_Binds_new(void){ map_i64_arr_Binds m=(map_i64_arr_Binds)GC_MALLOC(sizeof(map_i64_arr_Binds_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Binds*)GC_MALLOC(8*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Binds_grow(map_i64_arr_Binds m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Binds* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Binds*)GC_MALLOC(nc*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Binds_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Binds_set(map_i64_arr_Binds m, int64_t k, arr_Binds val){ if(m->len*10>=m->cap*7) map_i64_arr_Binds_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Binds map_i64_arr_Binds_get(map_i64_arr_Binds m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Binds){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Binds){0}; }
+static int64_t map_i64_arr_Binds_has(map_i64_arr_Binds m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Binds_keys(map_i64_arr_Binds m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Binds_len(map_i64_arr_Binds m){ return m->len; }
+static void map_i64_arr_Binds_print(map_i64_arr_Binds m){ (void)m; }
+static uint64_t map_i64_arr_Syms_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Syms map_i64_arr_Syms_new(void){ map_i64_arr_Syms m=(map_i64_arr_Syms)GC_MALLOC(sizeof(map_i64_arr_Syms_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Syms*)GC_MALLOC(8*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Syms_grow(map_i64_arr_Syms m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Syms* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Syms*)GC_MALLOC(nc*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Syms_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Syms_set(map_i64_arr_Syms m, int64_t k, arr_Syms val){ if(m->len*10>=m->cap*7) map_i64_arr_Syms_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Syms map_i64_arr_Syms_get(map_i64_arr_Syms m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Syms){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Syms){0}; }
+static int64_t map_i64_arr_Syms_has(map_i64_arr_Syms m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Syms_keys(map_i64_arr_Syms m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Syms_len(map_i64_arr_Syms m){ return m->len; }
+static void map_i64_arr_Syms_print(map_i64_arr_Syms m){ (void)m; }
+static uint64_t map_i64_arr_Expr_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Expr map_i64_arr_Expr_new(void){ map_i64_arr_Expr m=(map_i64_arr_Expr)GC_MALLOC(sizeof(map_i64_arr_Expr_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Expr*)GC_MALLOC(8*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Expr_grow(map_i64_arr_Expr m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Expr* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Expr*)GC_MALLOC(nc*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Expr_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Expr_set(map_i64_arr_Expr m, int64_t k, arr_Expr val){ if(m->len*10>=m->cap*7) map_i64_arr_Expr_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Expr map_i64_arr_Expr_get(map_i64_arr_Expr m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Expr){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Expr){0}; }
+static int64_t map_i64_arr_Expr_has(map_i64_arr_Expr m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Expr_keys(map_i64_arr_Expr m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Expr_len(map_i64_arr_Expr m){ return m->len; }
+static void map_i64_arr_Expr_print(map_i64_arr_Expr m){ (void)m; }
+static uint64_t map_i64_arr_Stmt_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Stmt map_i64_arr_Stmt_new(void){ map_i64_arr_Stmt m=(map_i64_arr_Stmt)GC_MALLOC(sizeof(map_i64_arr_Stmt_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Stmt*)GC_MALLOC(8*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Stmt_grow(map_i64_arr_Stmt m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Stmt* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Stmt*)GC_MALLOC(nc*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Stmt_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Stmt_set(map_i64_arr_Stmt m, int64_t k, arr_Stmt val){ if(m->len*10>=m->cap*7) map_i64_arr_Stmt_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Stmt map_i64_arr_Stmt_get(map_i64_arr_Stmt m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Stmt){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Stmt){0}; }
+static int64_t map_i64_arr_Stmt_has(map_i64_arr_Stmt m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Stmt_keys(map_i64_arr_Stmt m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Stmt_len(map_i64_arr_Stmt m){ return m->len; }
+static void map_i64_arr_Stmt_print(map_i64_arr_Stmt m){ (void)m; }
 typedef struct { int tag; int64_t ok; const char* err; } res_i64;
 static res_i64 mk_ok_i64(int64_t v){ res_i64 r; r.tag=0; r.ok=v; r.err=""; return r; }
 static res_i64 mk_err_i64(const char* m){ res_i64 r; r.tag=1; r.err=m; return r; }
@@ -1304,6 +1640,7 @@ const char* f_gen_arr_helpers(const char* v_suf, const char* v_et);
 const char* f_pf_spec(const char* v_t);
 const char* f_pf_arg(const char* v_t, const char* v_slot);
 int64_t f_is_scalar_ty(const char* v_t);
+int64_t f_map_printable(const char* v_t);
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt);
 const char* f_gen_map_fwd(const char* v_nm);
 const char* f_gen_map_node(const char* v_nm, const char* v_kt, const char* v_vt);
@@ -1393,6 +1730,7 @@ s_EnumDef f_gen_enum_instance(s_EnumDef v_gt, arr_str v_args);
 arr_EnumDef f_collect_enum_inst(arr_EnumDef v_enums, arr_EnumDef v_genums, const char* v_ty);
 const char* f_var_name(s_Expr v_e);
 int64_t f_is_empty_maplit(s_Expr v_e);
+const char* f_maplit_ann(s_Expr v_e);
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m);
 const char* f_scan_loopin(s_Syms* v_sy, const char* v_vnm, s_Expr v_coll, arr_Stmt v_b, const char* v_m);
 const char* f_scan_loopkv(s_Syms* v_sy, const char* v_kn, const char* v_vn, s_Expr v_coll, arr_Stmt v_b, const char* v_m);
@@ -1434,7 +1772,8 @@ int64_t f_chk_kv(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, i
 int64_t f_chk_try(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_x, int64_t v_pos, const char* v_src);
 int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t v_pos, const char* v_src);
 int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_pos, const char* v_src);
-int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
+int64_t f_map_combo_check(s_Syms* v_sy, const char* v_t, int64_t v_pos, const char* v_src);
+int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, const char* v_mty, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
 int64_t f_vn_has(arr_str v_vnames, const char* v_v);
 int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v);
 int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src);
@@ -1448,6 +1787,7 @@ const char* f_concrete_of_tparam(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr
 arr_str f_class_methods(s_Syms* v_sy, const char* v_cls);
 int64_t f_generic_bound_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_map_values_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
 int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, int64_t v_pos, const char* v_src);
@@ -4346,9 +4686,11 @@ const char* f_fkey(const char* v_sname, const char* v_fname) {
 const char* f_arr_suffix(const char* v_ety) {
     if ((strcmp(v_ety, "bool") == 0)) {
         return "i64";
-    } else {
-        return v_ety;
     }
+    if (f_is_array_ann(v_ety)) {
+        return scat("arr_", f_arr_suffix(f_elem_of_ann(v_ety)));
+    }
+    return v_ety;
 }
 
 int64_t f_is_c_type_ann(const char* v_ty) {
@@ -5631,6 +5973,9 @@ const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v
         }
         v_i = (v_i + 1);
     }
+    if (f_is_map_ann(v_ty)) {
+        return scat(scat(scat(scat("{", f_subst_multi(v_sy, v_f, f_map_ktype(v_ty), v_args)), ":"), f_subst_multi(v_sy, v_f, f_map_vtype(v_ty), v_args)), "}");
+    }
     return v_ty;
 }
 
@@ -6036,7 +6381,7 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
         if ((strcmp(v_t, "bytes") == 0)) {
             return scat(scat("(print_bytes(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), putchar(10))");
         }
-        if ((f_is_map_ann(v_t) && f_is_scalar_ty(f_map_vtype(v_t)))) {
+        if ((f_is_map_ann(v_t) && f_map_printable(v_t))) {
             return scat(scat(scat(scat("(", f_map_cty(v_t)), "_print("), f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), putchar(10))");
         }
         return scat(scat("printf(\"%lld\\n\", (long long)(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "))");
@@ -6677,7 +7022,7 @@ const char* f_gen_print(s_Syms* v_sy, s_Expr v_e, const char* v_ind) {
             return scat(scat(scat(scat(scat(v_ind, "print_arr_"), v_suf), "("), f_gen_expr(v_sy, v_e)), "); putchar(10);\n");
         }
     }
-    if ((f_is_map_ann(v_t) && f_is_scalar_ty(f_map_vtype(v_t)))) {
+    if ((f_is_map_ann(v_t) && f_map_printable(v_t))) {
         return scat(scat(scat(scat(v_ind, f_map_cty(v_t)), "_print("), f_gen_expr(v_sy, v_e)), "); putchar(10);\n");
     }
     return scat(scat(scat(v_ind, "printf(\"%lld\\n\", (long long)("), f_gen_expr(v_sy, v_e)), "));\n");
@@ -6934,15 +7279,36 @@ int64_t f_is_scalar_ty(const char* v_t) {
     return (((strcmp(v_t, "str") == 0) || (strcmp(v_t, "i64") == 0)) || (strcmp(v_t, "f64") == 0));
 }
 
+int64_t f_map_printable(const char* v_t) {
+    const char* v_vt;
+    const char* v_es;
+    v_vt = f_map_vtype(v_t);
+    if (f_is_scalar_ty(v_vt)) {
+        return (1 == 1);
+    }
+    if (f_is_array_ann(v_vt)) {
+        v_es = f_arr_suffix(f_elem_of_ann(v_vt));
+        return ((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0));
+    }
+    return (1 != 1);
+}
+
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt) {
-    const char* v_fmt;
     const char* v_ka;
+    const char* v_fmt;
     const char* v_va;
+    const char* v_es;
+    v_ka = f_pf_arg(v_kt, "m->keys[i]");
     if (f_is_scalar_ty(v_vt)) {
         v_fmt = scat(scat(f_pf_spec(v_kt), ": "), f_pf_spec(v_vt));
-        v_ka = f_pf_arg(v_kt, "m->keys[i]");
         v_va = f_pf_arg(v_vt, "m->values[i]");
         return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), v_fmt), "\", "), v_ka), ", "), v_va), "); } printf(\"}\"); }\n");
+    }
+    if (f_is_array_ann(v_vt)) {
+        v_es = f_arr_suffix(f_elem_of_ann(v_vt));
+        if (((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0))) {
+            return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), f_pf_spec(v_kt)), ": \", "), v_ka), "); print_arr_"), v_es), "(m->values[i]); } printf(\"}\"); }\n");
+        }
     }
     return scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ (void)m; }\n");
 }
@@ -6982,7 +7348,9 @@ const char* f_gen_map_helpers(const char* v_nm, const char* v_kt, const char* v_
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static "), v_vc), " "), v_nm), "_get("), v_nm), " m, "), v_kc), " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h="), v_nm), "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return "), v_dflt), "; if("), v_keyeq), ") return m->values[i]; } return "), v_dflt), "; }\n");
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static int64_t "), v_nm), "_has("), v_nm), " m, "), v_kc), " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h="), v_nm), "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if("), v_keyeq), ") return 1; } return 0; }\n");
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_ksuf), " "), v_nm), "_keys("), v_nm), " m){ arr_"), v_ksuf), " r=arr_"), v_ksuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_ksuf), "_push(r,m->keys[i]); return r; }\n");
-    v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_vsuf), " "), v_nm), "_values("), v_nm), " m){ arr_"), v_vsuf), " r=arr_"), v_vsuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_vsuf), "_push(r,m->values[i]); return r; }\n");
+    if ((f_is_array_ann(v_vt) == (1 != 1))) {
+        v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_vsuf), " "), v_nm), "_values("), v_nm), " m){ arr_"), v_vsuf), " r=arr_"), v_vsuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_vsuf), "_push(r,m->values[i]); return r; }\n");
+    }
     v_o = scat(scat(scat(scat(scat(v_o, "static int64_t "), v_nm), "_len("), v_nm), " m){ return m->len; }\n");
     v_o = scat(v_o, f_gen_map_print(v_nm, v_kt, v_vt));
     return v_o;
@@ -6997,6 +7365,9 @@ const char* f_map_dflt(const char* v_vt) {
     }
     if ((strcmp(v_vt, "f64") == 0)) {
         return "0";
+    }
+    if (f_is_array_ann(v_vt)) {
+        return scat(scat("(", f_cty(v_vt)), "){0}");
     }
     return scat(scat("(s_", v_vt), "){0}");
 }
@@ -8022,6 +8393,10 @@ int64_t f_is_empty_maplit(s_Expr v_e) {
     return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = (arr_Expr_len(v_mks) == 0); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = (1 != 1); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = (1 != 1); } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = (1 != 1); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = (1 != 1); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = (1 != 1); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = (1 != 1); } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = (1 != 1); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = (1 != 1); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = (1 != 1); } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = (1 != 1); } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = (1 != 1); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = (1 != 1); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = (1 != 1); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = (1 != 1); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = (1 != 1); } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = (1 != 1); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = (1 != 1); } else if(__s.tag==18){ __m = (1 != 1); } __m; });
 }
 
+const char* f_maplit_ann(s_Expr v_e) {
+    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = v_ml; } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = ""; } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = ""; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = ""; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
+}
+
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m) {
     int64_t v_i;
     const char* v_t;
@@ -8117,7 +8492,7 @@ const char* f_array_elem_from_push(s_Syms* v_sy, arr_Stmt v_body, const char* v_
 s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e, int64_t v_pos) {
     const char* v_t;
     const char* v_et;
-    if (f_is_empty_maplit(v_e)) {
+    if ((f_is_empty_maplit(v_e) && (((int64_t)strlen(f_maplit_ann(v_e))) == 0))) {
         v_t = f_map_assign_type(v_sy, v_body, v_name);
         if ((((int64_t)strlen(v_t)) > 0)) {
             return mkv_SDecl(v_name, mkv_MapLit(v_t, f_no_exprs(), f_no_exprs()), v_pos);
@@ -8507,9 +8882,43 @@ int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_
     return 0;
 }
 
-int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src) {
+int64_t f_map_combo_check(s_Syms* v_sy, const char* v_t, int64_t v_pos, const char* v_src) {
+    const char* v_kt;
+    const char* v_vt;
+    const char* v_ev;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((f_is_map_ann(v_t) == (1 != 1))) {
+        return 0;
+    }
+    v_kt = f_map_ktype(v_t);
+    v_vt = f_map_vtype(v_t);
+    if (f_is_map_ann(v_vt)) {
+        f_report_chk(v_sy, v_src, v_pos, scat("unsupported map value type ", v_vt));
+        return 0;
+    }
+    if (f_is_array_ann(v_vt)) {
+        v_ev = f_elem_of_ann(v_vt);
+        if ((f_is_array_ann(v_ev) || f_is_map_ann(v_ev))) {
+            f_report_chk(v_sy, v_src, v_pos, scat("unsupported map value type ", v_vt));
+            return 0;
+        }
+        if ((((strcmp(v_kt, "str") != 0) && (strcmp(v_kt, "i64") != 0)) && (strcmp(v_kt, "bool") != 0))) {
+            f_report_chk(v_sy, v_src, v_pos, scat("a map with array values requires a str or i64 key, got ", v_kt));
+            return 0;
+        }
+    }
+    if ((f_is_array_ann(v_kt) || f_is_map_ann(v_kt))) {
+        f_report_chk(v_sy, v_src, v_pos, scat("unsupported map key type ", v_kt));
+    }
+    return 0;
+}
+
+int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, const char* v_mty, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src) {
     f_homog_check(v_sy, v_ks, "map literal mixes key types", v_pos, v_src);
     f_homog_check(v_sy, v_vs, "map literal mixes value types", v_pos, v_src);
+    f_map_combo_check(v_sy, f_maplit_type(v_sy, v_mty, v_ks, v_vs), v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_ks, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_vs, v_pos, v_src);
     return 0;
@@ -8811,7 +9220,22 @@ int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64
     return 0;
 }
 
+int64_t f_map_values_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    const char* v_t;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if (((strcmp(v_fname, "values") == 0) && (arr_Expr_len(v_args) == 1))) {
+        v_t = f_type_confident(v_sy, arr_Expr_get(v_args, 0));
+        if ((f_is_map_ann(v_t) && f_is_array_ann(f_map_vtype(v_t)))) {
+            f_report_chk(v_sy, v_src, v_pos, "values() on a map with array values is not supported (iterate keys() instead)");
+        }
+    }
+    return 0;
+}
+
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    f_map_values_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
@@ -8837,7 +9261,7 @@ int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, 
 }
 
 int64_t f_check_expr(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src) {
-    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_gd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mty, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_gd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
 }
 
 int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr v_e, int64_t v_pos, const char* v_src) {
@@ -9200,6 +9624,10 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     arr_str v_mapvals;
     int64_t v_mvs;
     int64_t v_mve;
+    arr_str v_arrkeys;
+    arr_str v_arrvals;
+    int64_t v_avs;
+    int64_t v_ave;
     int64_t v_vt1;
     arr_str v_tup_seen;
     const char* v_rt2;
@@ -9881,7 +10309,20 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mapvals = arr_str_push(v_mapvals, (arr_EnumDef_get(v_enums, v_mve)).name);
         v_mve = (v_mve + 1);
     }
+    v_arrkeys = ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, "str"); __a = arr_str_push(__a, "i64"); __a; });
+    v_arrvals = ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, "[i64]"); __a = arr_str_push(__a, "[str]"); __a = arr_str_push(__a, "[f64]"); __a; });
+    v_avs = 0;
+    while ((v_avs < arr_StructDef_len(v_structs))) {
+        v_arrvals = arr_str_push(v_arrvals, scat(scat("[", (arr_StructDef_get(v_structs, v_avs)).name), "]"));
+        v_avs = (v_avs + 1);
+    }
+    v_ave = 0;
+    while ((v_ave < arr_EnumDef_len(v_enums))) {
+        v_arrvals = arr_str_push(v_arrvals, scat(scat("[", (arr_EnumDef_get(v_enums, v_ave)).name), "]"));
+        v_ave = (v_ave + 1);
+    }
     v_out = scat(v_out, f_gen_map_fwds_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_fwds_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, "\n");
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {
@@ -9894,6 +10335,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_ei = (v_ei + 1);
     }
     v_out = scat(v_out, f_gen_map_nodes_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_nodes_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, "\n");
     v_vt1 = 0;
     while ((v_vt1 < arr_ClassDef_len(v_classes))) {
@@ -9921,6 +10363,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_ei = (v_ei + 1);
     }
     v_out = scat(v_out, f_gen_map_helpers_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_helpers_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, f_gen_res("i64", "int64_t"));
     v_out = scat(v_out, f_gen_res("str", "const char*"));
     v_si = 0;
