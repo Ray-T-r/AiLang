@@ -91,6 +91,17 @@ fn web_handle(app:*App, raw:str) -> str {
   http_json(404, "{\"error\":\"not found\"}")
 }
 
+// Serve exactly one connection on an already-listening fd (accept → recv →
+// route → respond → close), then return. web_listen loops forever — this is
+// the testable single-shot building block.
+fn web_serve_one(app:*App, fd:i64) -> i64 {
+  cli := tcp_accept(fd)
+  if cli < 0 rt -1
+  raw := http_recv_request(cli)
+  if len(raw) > 0 { s := sock_send_str_all(cli, web_handle(app, raw)) }
+  sock_close(cli)
+}
+
 // The live server: accept → recv → route → respond → close. POSIX sockets.
 fn web_listen(app:*App, host:str, port:i64) -> i64 {
   fd := must_listen(host, port, "web: listening on " + host + ":" + int_to_str(port))

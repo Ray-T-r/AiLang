@@ -26,6 +26,11 @@ ROOT="$PWD"
 # not affect the bootstrap or the fixpoint.
 export AILANG_STD="$ROOT"
 
+# Loopback samples (sock_echo/http_loopback/ws_echo/web_loopback) bind
+# 127.0.0.1 on this base port + a small per-sample offset; PID-derived so
+# concurrent verify runs don't collide. Samples never print the port.
+export AILANG_TEST_PORT=$(( 20000 + ($$ % 20000) ))
+
 echo "==> building ./ailc from the seed + checking the fixpoint (bootstrap.sh)"
 bash selfhost/bootstrap.sh
 AILC="$ROOT/selfhost/ailc"
@@ -39,7 +44,7 @@ fail=0; n=0
 for src in examples-selfhost/*.ail; do
   name="$(basename "$src" .ail)"
   exp="examples-selfhost/expected/$name.out"
-  [ -f "$exp" ] || { echo "    skip $name (no fixture)"; continue; }
+  [ -f "$exp" ] || { echo "    FAIL $name (missing fixture expected/$name.out — helper modules belong in examples-selfhost/lib/)"; fail=1; continue; }
   guard 30 "$AILC" "$src" "/tmp/vf_$name" >/dev/null 2>&1 || true
   # A committed examples-selfhost/<name>.in, when present, is fed as stdin —
   # lets samples that read stdin (read_stdin/read_line) be deterministic.
@@ -54,6 +59,24 @@ for src in examples-selfhost/*.ail; do
     echo "    FAIL $name"; diff "$exp" "/tmp/vf_$name.out" 2>&1 | head -6; fail=1
   fi
   rm -f "/tmp/vf_$name" "/tmp/vf_$name.out" "/tmp/vf_$name.c"
+done
+
+echo "==> B. compile-only std-module stubs (compile + link, never executed)"
+have_mysql=0
+pkg-config --exists mysqlclient 2>/dev/null && have_mysql=1
+pkg-config --exists libmariadb 2>/dev/null && have_mysql=1
+[ -d "$(brew --prefix mysql-client 2>/dev/null || true)" ] && have_mysql=1
+for src in selfhost/tests/compileonly/*.ail; do
+  name="$(basename "$src" .ail)"
+  if [ "$name" = "mysql" ] && [ "$have_mysql" -eq 0 ]; then
+    echo "    skip mysql (libmysqlclient not installed)"; continue
+  fi
+  if guard 60 "$AILC" "$src" "/tmp/co_$name" >/dev/null 2>&1; then
+    echo "    ok   $name (compiles + links)"
+  else
+    echo "    FAIL $name (did not compile)"; fail=1
+  fi
+  rm -f "/tmp/co_$name" "/tmp/co_$name.c"
 done
 
 echo "==> C. type checker catches mistakes (negative tests)"

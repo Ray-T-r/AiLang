@@ -1,0 +1,24 @@
+// compile-only: std/tls must compile AND link against OpenSSL (the seed itself
+// links it). Exercises server-ctx + client SNI paths. Never executed.
+im "std/tls.ail"
+im "std/sock.ail"
+
+ctx := tls_server_ctx("cert.pem", "key.pem")
+if ctx > 0 {
+  cli := tcp_accept(-1)
+  ssl := tls_accept(ctx, cli)
+  if ssl > 0 {
+    s := tls_send_str_all(ssl, "hi")
+    b := tls_recv(ssl, 64)
+    tls_close(ssl)
+  }
+  tls_free_ctx(ctx)
+}
+cctx := tls_client_ctx()
+if cctx > 0 {
+  fd := tcp_connect("127.0.0.1", 1)
+  ssl2 := tls_connect_host(cctx, fd, "localhost")
+  if ssl2 > 0 { tls_close(ssl2) }
+  tls_free_ctx(cctx)
+}
+println("compiled")

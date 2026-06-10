@@ -2,6 +2,6 @@
 // it. The module's own functions are renamed under the alias (m_fn), so they're
 // isolated — two modules can define the same name without colliding, and the
 // imported names don't leak unqualified.
-im "nsmod.ail" as geo
+im "lib/nsmod.ail" as geo
 println(geo.rect(4, 5))
 println(geo.tri(6, 4))

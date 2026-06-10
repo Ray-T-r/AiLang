@@ -1,0 +1,12 @@
+// compile-only: std/redis must compile AND link (pure AiLang over sockets —
+// no native lib). Never executed.
+im "std/redis.ail"
+
+fd := redis_connect("127.0.0.1", 6379)
+if fd >= 0 {
+  println(redis_ping(fd))
+  s := redis_set(fd, "k", "v")
+  println(redis_get(fd, "k"))
+  x := redis_close(fd)
+}
+println("compiled")

@@ -1,0 +1,14 @@
+// compile-only: std/mysql must compile AND link (exercises the @uses.mysql
+// usage gate end-to-end: split-placeholder prelude fill, // @links: marker,
+// pkg-config/brew -I/-L discovery). Never executed by verify.sh.
+im "std/mysql.ail"
+
+c := mysql_connect("127.0.0.1", "u", "p", "db", 3306)
+if c != 0 {
+  one := mysql_one(c, "SELECT 1")
+  rows := mysql_rows(c, "SELECT 1")
+  println(len(rows))
+  println(mysql_escape(c, "o'brien"))
+  x := mysql_close(c)
+}
+println("compiled")
