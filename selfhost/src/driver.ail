@@ -2076,6 +2076,8 @@ fn compile_to_c(src:str, dir:str) -> str {
   // marker is split ("/*@MY"+"SQL@*/") so the contiguous token never appears in the
   // compiler's own string data (else the replace below would corrupt it).
   out = out + "/*@MY" + "SQL@*/"
+  // SQLite prelude slot — same opt-in mold as mysql (split marker, filled below).
+  out = out + "/*@SQ" + "LITE@*/"
   out = out + "static int g_argc=0; static char** g_argv=0;\n"
   // Closure value type — only when the program actually has first-class lambdas,
   // so the existing samples + main.ail emit byte-identical C (fixpoint safe).
@@ -2326,6 +2328,30 @@ fn compile_to_c(src:str, dir:str) -> str {
     mlib = mlib + " mysqlclient"
   } el {
     out = replace(out, pat, "")
+  }
+  // SQLite is opt-in exactly like mysql: fill the slot only when a real sq_ call
+  // set @uses.sqlite. The compiler never calls sq_, so its self-compile stays
+  // sqlite-free and builds with NO libsqlite3.
+  spat := "/*@SQ" + "LITE@*/"
+  if has(base.evar, "@uses.sqlite") {
+    mu sqp := "#ifndef _WIN32\n#include <sqlite3.h>\n"
+    sqp = sqp + "static int64_t sq_open(const char* path){ sqlite3* db=0; if(sqlite3_open(path?path:\":memory:\",&db)!=SQLITE_OK){ if(db) sqlite3_close(db); return 0; } return (int64_t)(intptr_t)db; }\n"
+    sqp = sqp + "static int64_t sq_close(int64_t c){ if(c!=0) sqlite3_close((sqlite3*)(intptr_t)c); return 0; }\n"
+    sqp = sqp + "static const char* sq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=sqlite3_errmsg((sqlite3*)(intptr_t)c); if(!e) return \"\"; size_t n=strlen(e); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e,n+1); return o; }\n"
+    sqp = sqp + "static int64_t sq_exec(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)sqlite3_exec((sqlite3*)(intptr_t)c,sql,0,0,0); }\n"
+    sqp = sqp + "static int64_t sq_prepare(int64_t c, const char* sql){ if(c==0||!sql) return 0; sqlite3_stmt* st=0; if(sqlite3_prepare_v2((sqlite3*)(intptr_t)c,sql,-1,&st,0)!=SQLITE_OK) return 0; return (int64_t)(intptr_t)st; }\n"
+    sqp = sqp + "static int64_t sq_step(int64_t st){ if(st==0) return -1; int rc=sqlite3_step((sqlite3_stmt*)(intptr_t)st); if(rc==SQLITE_ROW) return 1; if(rc==SQLITE_DONE) return 0; return -1; }\n"
+    sqp = sqp + "static int64_t sq_ncols(int64_t st){ if(st==0) return 0; return (int64_t)sqlite3_column_count((sqlite3_stmt*)(intptr_t)st); }\n"
+    sqp = sqp + "static const char* sq_col(int64_t st, int64_t i){ if(st==0) return \"\"; const unsigned char* v=sqlite3_column_text((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen((const char*)v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,(const char*)v,n+1); return o; }\n"
+    sqp = sqp + "static const char* sq_col_name(int64_t st, int64_t i){ if(st==0) return \"\"; const char* v=sqlite3_column_name((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n"
+    sqp = sqp + "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n"
+    sqp = sqp + "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n"
+    sqp = sqp + "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n"
+    sqp = sqp + "#endif\n"
+    out = replace(out, spat, sqp)
+    mlib = mlib + " sqlite3"
+  } el {
+    out = replace(out, spat, "")
   }
   if len(mlib) > 0 { out = "// @links:" + mlib + "\n" + out }
   out

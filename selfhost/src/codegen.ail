@@ -1018,6 +1018,7 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   // Phase 3 TLS/PG native builtins → same-named C helper (gated into the prelude).
   if is_native_call(fname) {
     if has_sub(fname, "myq_") { sy.evar["@uses.mysql"] = "1" }   // record real MySQL use → gate its prelude+link (not a src self-match)
+    if has_sub(fname, "sq_") { sy.evar["@uses.sqlite"] = "1" }   // record real SQLite use — same opt-in gate as mysql
     rt fname + "(" + gen_args(sy, args) + ")"
   }
   if is_gstruct(sy, fname) {                                  // generic-struct ctor → its monomorphic mk_Box_i64

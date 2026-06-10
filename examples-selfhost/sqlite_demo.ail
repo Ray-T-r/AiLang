@@ -1,0 +1,26 @@
+// sqlite_demo.ail — std/sqlite against an in-memory database: no file, no
+// server, no cleanup; ORDER BY everywhere keeps the output deterministic.
+im "std/sqlite.ail"
+
+c := sqlite_must_open(":memory:")
+x1 := sqlite_exec(c, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)")
+println(x1)                                            // 0 — OK
+x2 := sqlite_exec(c, "INSERT INTO t(name) VALUES ('ada'),('grace'),('alan')")
+println(sqlite_last_id(c))                             // 3
+println(sqlite_one(c, "SELECT count(*) FROM t"))       // 3
+println(sqlite_one(c, "SELECT name FROM t WHERE id=2"))// grace
+
+rows := sqlite_rows(c, "SELECT id, name FROM t WHERE name LIKE 'a%' ORDER BY id")
+lp r in rows { println(join(r.cells, " | ")) }          // 1 | ada \n 3 | alan
+
+esc := sqlite_escape("o'brien")
+x3 := sqlite_exec(c, "UPDATE t SET name='" + esc + "' WHERE id=2")
+println(sqlite_changes(c))                             // 1
+println(sqlite_one(c, "SELECT name FROM t WHERE id=2"))// o'brien
+
+x4 := sqlite_exec(c, "SELEC bogus")                    // syntax error → nonzero rc
+println(x4 != 0)                                       // true
+println(len(sqlite_error(c)) > 0)                      // true
+
+t := sqlite_print_table(c, "SELECT id, name FROM t ORDER BY id")
+println(sqlite_close(c))                               // 0

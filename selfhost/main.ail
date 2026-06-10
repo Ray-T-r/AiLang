@@ -121,6 +121,9 @@ if win {
   // → pull libmysqlclient's -I/-L via pkg-config/brew (the -l comes from link_flags).
   mu lf := link_flags(cprog)
   if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
+  // SQLite ships in the macOS SDK (-lsqlite3 + <sqlite3.h> work bare); pkg-config
+  // only adds -I/-L on Linux prefixes — hence `|| echo` with no brew fallback.
+  if has_sub(lf, "lsqlite3") { extra = extra + " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)" }
   extra = extra + lf + " -lm"
 
   if len(shims) == 0 {

@@ -4877,6 +4877,9 @@ int64_t f_is_native_call(const char* v_fname) {
     if ((((((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0)) || (strcmp(v_fname, "fs_size") == 0)) || (strcmp(v_fname, "fs_mtime") == 0)) || (strcmp(v_fname, "fs_list_dir") == 0))) {
         return (1 == 1);
     }
+    if (((((((((((((strcmp(v_fname, "sq_open") == 0) || (strcmp(v_fname, "sq_close") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_exec") == 0)) || (strcmp(v_fname, "sq_prepare") == 0)) || (strcmp(v_fname, "sq_step") == 0)) || (strcmp(v_fname, "sq_ncols") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0)) || (strcmp(v_fname, "sq_finalize") == 0)) || (strcmp(v_fname, "sq_changes") == 0)) || (strcmp(v_fname, "sq_last_id") == 0))) {
+        return (1 == 1);
+    }
     return (1 != 1);
 }
 
@@ -5143,7 +5146,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "pop") == 0) && (arr_Expr_len(v_args) > 0))) {
         return f_type_of_expr(v_sy, arr_Expr_get(v_args, 0));
     }
-    if ((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+    if (((((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0))) {
         return "str";
     }
     if ((((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
@@ -6719,6 +6722,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (f_is_native_call(v_fname)) {
         if (f_has_sub(v_fname, "myq_")) {
             map_str_str_set((v_sy)->evar, "@uses.mysql", "1");
+        }
+        if (f_has_sub(v_fname, "sq_")) {
+            map_str_str_set((v_sy)->evar, "@uses.sqlite", "1");
         }
         return scat(scat(scat(v_fname, "("), f_gen_args(v_sy, v_args)), ")");
     }
@@ -9694,6 +9700,8 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_pat;
     const char* v_mlib;
     const char* v_mp;
+    const char* v_spat;
+    const char* v_sqp;
     v_toks = f_lex(v_src);
     v_p = mk_P(v_toks, 0, v_src);
     v_structs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
@@ -10302,6 +10310,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(scat(v_out, "/*@MY"), "SQL@*/");
+    v_out = scat(scat(v_out, "/*@SQ"), "LITE@*/");
     v_out = scat(v_out, "static int g_argc=0; static char** g_argv=0;\n");
     if (((arr_Func_len((v_base).lams) > 0) || v_needs_thread)) {
         v_out = scat(v_out, "typedef struct { void* fn; void* env; } closure_t;\n");
@@ -10566,6 +10575,27 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mlib = scat(v_mlib, " mysqlclient");
     } else {
         v_out = str_replace(v_out, v_pat, "");
+    }
+    v_spat = scat("/*@SQ", "LITE@*/");
+    if (map_str_str_has((v_base).evar, "@uses.sqlite")) {
+        v_sqp = "#ifndef _WIN32\n#include <sqlite3.h>\n";
+        v_sqp = scat(v_sqp, "static int64_t sq_open(const char* path){ sqlite3* db=0; if(sqlite3_open(path?path:\":memory:\",&db)!=SQLITE_OK){ if(db) sqlite3_close(db); return 0; } return (int64_t)(intptr_t)db; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_close(int64_t c){ if(c!=0) sqlite3_close((sqlite3*)(intptr_t)c); return 0; }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=sqlite3_errmsg((sqlite3*)(intptr_t)c); if(!e) return \"\"; size_t n=strlen(e); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_exec(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)sqlite3_exec((sqlite3*)(intptr_t)c,sql,0,0,0); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_prepare(int64_t c, const char* sql){ if(c==0||!sql) return 0; sqlite3_stmt* st=0; if(sqlite3_prepare_v2((sqlite3*)(intptr_t)c,sql,-1,&st,0)!=SQLITE_OK) return 0; return (int64_t)(intptr_t)st; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_step(int64_t st){ if(st==0) return -1; int rc=sqlite3_step((sqlite3_stmt*)(intptr_t)st); if(rc==SQLITE_ROW) return 1; if(rc==SQLITE_DONE) return 0; return -1; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_ncols(int64_t st){ if(st==0) return 0; return (int64_t)sqlite3_column_count((sqlite3_stmt*)(intptr_t)st); }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_col(int64_t st, int64_t i){ if(st==0) return \"\"; const unsigned char* v=sqlite3_column_text((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen((const char*)v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,(const char*)v,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_col_name(int64_t st, int64_t i){ if(st==0) return \"\"; const char* v=sqlite3_column_name((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n");
+        v_sqp = scat(v_sqp, "#endif\n");
+        v_out = str_replace(v_out, v_spat, v_sqp);
+        v_mlib = scat(v_mlib, " sqlite3");
+    } else {
+        v_out = str_replace(v_out, v_spat, "");
     }
     if ((((int64_t)strlen(v_mlib)) > 0)) {
         v_out = scat(scat(scat("// @links:", v_mlib), "\n"), v_out);
@@ -11180,6 +11210,9 @@ int main(int argc, char** argv){
         v_lf = f_link_flags(v_cprog);
         if (f_has_sub(v_lf, "lmysqlclient")) {
             v_extra = scat(v_extra, " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)");
+        }
+        if (f_has_sub(v_lf, "lsqlite3")) {
+            v_extra = scat(v_extra, " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)");
         }
         v_extra = scat(scat(v_extra, v_lf), " -lm");
         if ((arr_str_len(v_shims) == 0)) {
