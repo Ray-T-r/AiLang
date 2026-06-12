@@ -1660,6 +1660,7 @@ const char* f_gen_arr_helpers(const char* v_suf, const char* v_et);
 const char* f_pf_spec(const char* v_t);
 const char* f_pf_arg(const char* v_t, const char* v_slot);
 int64_t f_is_scalar_ty(const char* v_t);
+int64_t f_arr_elem_printable(const char* v_vt);
 int64_t f_map_printable(const char* v_t);
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt);
 const char* f_gen_map_fwd(const char* v_nm);
@@ -7329,18 +7330,22 @@ int64_t f_is_scalar_ty(const char* v_t) {
     return (((strcmp(v_t, "str") == 0) || (strcmp(v_t, "i64") == 0)) || (strcmp(v_t, "f64") == 0));
 }
 
+int64_t f_arr_elem_printable(const char* v_vt) {
+    const char* v_es;
+    if ((f_is_array_ann(v_vt) == (1 != 1))) {
+        return (1 != 1);
+    }
+    v_es = f_arr_suffix(f_elem_of_ann(v_vt));
+    return ((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0));
+}
+
 int64_t f_map_printable(const char* v_t) {
     const char* v_vt;
-    const char* v_es;
     v_vt = f_map_vtype(v_t);
     if (f_is_scalar_ty(v_vt)) {
         return (1 == 1);
     }
-    if (f_is_array_ann(v_vt)) {
-        v_es = f_arr_suffix(f_elem_of_ann(v_vt));
-        return ((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0));
-    }
-    return (1 != 1);
+    return f_arr_elem_printable(v_vt);
 }
 
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt) {
@@ -7354,11 +7359,9 @@ const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt
         v_va = f_pf_arg(v_vt, "m->values[i]");
         return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), v_fmt), "\", "), v_ka), ", "), v_va), "); } printf(\"}\"); }\n");
     }
-    if (f_is_array_ann(v_vt)) {
+    if (f_arr_elem_printable(v_vt)) {
         v_es = f_arr_suffix(f_elem_of_ann(v_vt));
-        if (((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0))) {
-            return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), f_pf_spec(v_kt)), ": \", "), v_ka), "); print_arr_"), v_es), "(m->values[i]); } printf(\"}\"); }\n");
-        }
+        return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), f_pf_spec(v_kt)), ": \", "), v_ka), "); print_arr_"), v_es), "(m->values[i]); } printf(\"}\"); }\n");
     }
     return scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ (void)m; }\n");
 }

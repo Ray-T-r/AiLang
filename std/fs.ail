@@ -39,12 +39,11 @@ fn fs_dirname(p:str) -> str {
 
 fn last_index_of_slash(p:str) -> i64 {
   mu i := len(p) - 1
-  mu found := -1
   lp i >= 0 {
-    if found < 0 && p[i] == 47 { found = i }
+    if p[i] == 47 rt i
     i = i - 1
   }
-  found
+  -1
 }
 
 // mkdir -p: create every missing prefix; true if the full path is a dir after.

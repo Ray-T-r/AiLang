@@ -1707,17 +1707,20 @@ fn pf_arg(t:str, slot:str) -> str {
   "(long long)(" + slot + ")"
 }
 fn is_scalar_ty(t:str) -> bool { t == "str" || t == "i64" || t == "f64" }
-// A map type println can render: scalar values, or array values whose elements
-// print via print_arr_i64/print_arr_str (i64/str — f64/struct/enum arrays keep
-// the no-op printer, same as struct values).
+// An array value type whose elements have a print_arr_<suf> runtime printer
+// (i64/str — f64/struct/enum element arrays keep the no-op printer, same as
+// struct values). The ONE place the printable element set is defined; both
+// map_printable (dispatch) and gen_map_print (emission) consult it.
+fn arr_elem_printable(vt:str) -> bool {
+  if is_array_ann(vt) == false rt false
+  es := arr_suffix(elem_of_ann(vt))
+  es == "i64" || es == "str"
+}
+// A map type println can render: scalar values, or printable-element arrays.
 fn map_printable(t:str) -> bool {
   vt := map_vtype(t)
   if is_scalar_ty(vt) rt true
-  if is_array_ann(vt) {
-    es := arr_suffix(elem_of_ann(vt))
-    rt es == "i64" || es == "str"
-  }
-  false
+  arr_elem_printable(vt)
 }
 fn gen_map_print(nm:str, kt:str, vt:str) -> str {
   ka := pf_arg(kt, "m->keys[i]")
@@ -1726,11 +1729,9 @@ fn gen_map_print(nm:str, kt:str, vt:str) -> str {
     va := pf_arg(vt, "m->values[i]")
     rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + fmt + "\", " + ka + ", " + va + "); } printf(\"}\"); }\n"
   }
-  if is_array_ann(vt) {
+  if arr_elem_printable(vt) {
     es := arr_suffix(elem_of_ann(vt))
-    if es == "i64" || es == "str" {
-      rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + pf_spec(kt) + ": \", " + ka + "); print_arr_" + es + "(m->values[i]); } printf(\"}\"); }\n"
-    }
+    rt "static void " + nm + "_print(" + nm + " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\"" + pf_spec(kt) + ": \", " + ka + "); print_arr_" + es + "(m->values[i]); } printf(\"}\"); }\n"
   }
   "static void " + nm + "_print(" + nm + " m){ (void)m; }\n"
 }

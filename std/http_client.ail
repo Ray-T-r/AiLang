@@ -143,10 +143,12 @@ fn http_request(method:str, url:str, content_type:str, body:str) -> HttpResp {
   sp := index_of(head, " ")
   if sp >= 0 { status = str_to_int(trim(substring(head, sp + 1, sp + 4))) }
   // chunked → decode; else honor a shorter Content-Length
-  if contains(to_lower(http_header(head + "\r\n\r\n", "Transfer-Encoding")), "chunked") {
+  // (http_header handles a head without the trailing blank line — same call
+  // shape as http_resp_header on r.head)
+  if contains(to_lower(http_header(head, "Transfer-Encoding")), "chunked") {
     rbody = http_dechunk(rbody)
   } el {
-    clv := http_header(head + "\r\n\r\n", "Content-Length")
+    clv := http_header(head, "Content-Length")
     if len(clv) > 0 {
       cl := str_to_int(clv)
       if cl >= 0 && cl < len(rbody) { rbody = substring(rbody, 0, cl) }
