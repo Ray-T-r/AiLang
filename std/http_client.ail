@@ -1,0 +1,161 @@
+// std/http_client.ail — a small HTTP(S)/1.1 client over std/sock + std/tls.
+//
+//   r := http_get("https://example.com/")            // SNI via tls_connect_host
+//   println(r.status)  println(r.body)
+//   r2 := http_post("http://api.local/things", "application/json", "{\"a\":1}")
+//   println(http_resp_header(r2, "Content-Type"))
+//
+// Notes:
+//   - importing this module mentions `tls_` → every importer links OpenSSL,
+//     even if it only ever speaks plain http (the prelude gate is textual);
+//   - do NOT also `im "std/http.ail"` from your program — imports dedup by
+//     path, and a second path to the same file would splice it twice;
+//   - bodies are `str`: a binary response with NUL bytes truncates (v1 limit);
+//   - certificate verification is out of scope (no CA validation);
+//   - POSIX-only (sockets). On failure every call returns status -1.
+
+im "std/sock.ail"
+im "std/tls.ail"
+im "std/http.ail"
+
+st HttpUrl  { scheme:str  host:str  port:i64  path:str }
+st HttpResp { status:i64  head:str  body:str }   // head = status line + raw headers
+
+// "http(s)://host[:port][/path]" → parts. Defaults: scheme http, port 80/443, path "/".
+fn http_url_parse(url:str) -> HttpUrl {
+  mu scheme := "http"
+  mu rest := url
+  ss := index_of(url, "://")
+  if ss >= 0 {
+    scheme = to_lower(substring(url, 0, ss))
+    rest = substring(url, ss + 3, len(url))
+  }
+  mu hostport := rest
+  mu path := "/"
+  sl := index_of(rest, "/")
+  if sl >= 0 {
+    hostport = substring(rest, 0, sl)
+    path = substring(rest, sl, len(rest))
+  }
+  mu host := hostport
+  mu port := 80
+  if scheme == "https" { port = 443 }
+  ci := index_of(hostport, ":")
+  if ci >= 0 {
+    host = substring(hostport, 0, ci)
+    port = str_to_int(substring(hostport, ci + 1, len(hostport)))
+  }
+  HttpUrl(scheme, host, port, path)
+}
+
+// Response-header lookup (case-insensitive); "" if missing.
+fn http_resp_header(r:HttpResp, name:str) -> str { http_header(r.head, name) }
+
+// Decode a chunked transfer-encoding body (hex size lines, terminated by "0").
+fn http_dechunk(s:str) -> str {
+  mu out := ""
+  mu rest := s
+  mu going := true
+  lp going {
+    nl := index_of(rest, "\r\n")
+    if nl < 0 { going = false } el {
+      size := hex_to_int(trim(substring(rest, 0, nl)))
+      if size <= 0 { going = false } el {
+        chunk_start := nl + 2
+        out = out + substring(rest, chunk_start, chunk_start + size)
+        rest = substring(rest, chunk_start + size + 2, len(rest))   // skip the chunk's trailing \r\n
+      }
+    }
+  }
+  out
+}
+
+fn hex_to_int(h:str) -> i64 {
+  mu v := 0
+  mu i := 0
+  lp i < len(h) {
+    c := h[i]
+    mu d := -1
+    if c >= 48 && c <= 57 { d = c - 48 }            // 0-9
+    if c >= 97 && c <= 102 { d = c - 87 }           // a-f
+    if c >= 65 && c <= 70 { d = c - 55 }            // A-F
+    if d < 0 rt v                                    // stop at the first non-hex (chunk extensions)
+    v = v * 16 + d
+    i = i + 1
+  }
+  v
+}
+
+// The core: one request, Connection: close, read to EOF, split head/body.
+fn http_request(method:str, url:str, content_type:str, body:str) -> HttpResp {
+  u := http_url_parse(url)
+  fd := tcp_connect(u.host, u.port)
+  if fd < 0 rt HttpResp(0 - 1, "", "")
+  mu hostline := u.host
+  if u.scheme == "http" && u.port != 80 { hostline = u.host + ":" + int_to_str(u.port) }
+  if u.scheme == "https" && u.port != 443 { hostline = u.host + ":" + int_to_str(u.port) }
+  mu req := method + " " + u.path + " HTTP/1.1\r\nHost: " + hostline + "\r\nConnection: close\r\nUser-Agent: ailang\r\n"
+  if len(body) > 0 || method == "POST" || method == "PUT" {
+    if len(content_type) > 0 { req = req + "Content-Type: " + content_type + "\r\n" }
+    req = req + "Content-Length: " + int_to_str(len(body)) + "\r\n"
+  }
+  req = req + "\r\n" + body
+
+  mu raw := ""
+  if u.scheme == "https" {
+    ctx := tls_client_ctx()
+    if ctx <= 0 { x := sock_close(fd)  rt HttpResp(0 - 1, "", "") }
+    ssl := tls_connect_host(ctx, fd, u.host)
+    if ssl <= 0 {
+      x := sock_close(fd)
+      tls_free_ctx(ctx)                              // void helpers — call, don't bind
+      rt HttpResp(0 - 1, "", "")
+    }
+    s := tls_send_str_all(ssl, req)
+    mu more := true
+    lp more {
+      chunk := tls_recv(ssl, 65536)
+      if len(chunk) == 0 { more = false } el { raw = raw + bytes_to_str(chunk) }
+    }
+    tls_close(ssl)
+    tls_free_ctx(ctx)
+    s2 := sock_close(fd)
+  } el {
+    s := sock_send_str_all(fd, req)
+    mu more := true
+    lp more {
+      chunk := sock_recv(fd, 65536)
+      if len(chunk) == 0 { more = false } el { raw = raw + bytes_to_str(chunk) }
+    }
+    s2 := sock_close(fd)
+  }
+  if len(raw) == 0 rt HttpResp(0 - 1, "", "")
+
+  sep := index_of(raw, "\r\n\r\n")
+  mu head := raw
+  mu rbody := ""
+  if sep >= 0 {
+    head = substring(raw, 0, sep)
+    rbody = substring(raw, sep + 4, len(raw))
+  }
+  // status = the token after the first space of the status line
+  mu status := 0 - 1
+  sp := index_of(head, " ")
+  if sp >= 0 { status = str_to_int(trim(substring(head, sp + 1, sp + 4))) }
+  // chunked → decode; else honor a shorter Content-Length
+  // (http_header handles a head without the trailing blank line — same call
+  // shape as http_resp_header on r.head)
+  if contains(to_lower(http_header(head, "Transfer-Encoding")), "chunked") {
+    rbody = http_dechunk(rbody)
+  } el {
+    clv := http_header(head, "Content-Length")
+    if len(clv) > 0 {
+      cl := str_to_int(clv)
+      if cl >= 0 && cl < len(rbody) { rbody = substring(rbody, 0, cl) }
+    }
+  }
+  HttpResp(status, head, rbody)
+}
+
+fn http_get(url:str) -> HttpResp { http_request("GET", url, "", "") }
+fn http_post(url:str, content_type:str, body:str) -> HttpResp { http_request("POST", url, content_type, body) }

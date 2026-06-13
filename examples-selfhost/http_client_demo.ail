@@ -1,0 +1,48 @@
+// http_client_demo.ail — std/http_client against an in-process loopback server.
+// Deterministic: binds 127.0.0.1 on the main thread (backlog absorbs the connect
+// race), scans a small port range to dodge collisions, never prints the port.
+// The https path is covered by compilation (links OpenSSL); chunked decoding by
+// the pure http_dechunk call at the end.
+im "std/http_client.ail"
+im "std/thread.ail"
+
+mu srv := -1
+mu port := 0
+base := env_int("AILANG_TEST_PORT", 18742) + 1
+lp p in base..base + 5 {
+  if srv < 0 {
+    f := tcp_listen("127.0.0.1", p)
+    if f >= 0 { srv = f  port = p }
+  }
+}
+
+h := spawn(fn() {
+  lp k in 0..2 {
+    c := tcp_accept(srv)
+    req := http_recv_request(c)
+    if http_method(req) == "POST" {
+      x := sock_send_str_all(c, http_json(200, http_body(req)))
+    } el {
+      x := sock_send_str_all(c, http_text(200, "hello from " + http_path(req)))
+    }
+    y := sock_close(c)
+  }
+  0
+})
+
+u := "http://127.0.0.1:" + int_to_str(port)
+r := http_get(u + "/greet")
+println(r.status)                                  // 200
+println(r.body)                                    // hello from /greet
+println(http_resp_header(r, "Content-Type"))       // text/plain; charset=utf-8
+
+r2 := http_post(u + "/echo", "application/json", "{\"a\":1}")
+println(r2.status)                                 // 200
+println(r2.body)                                   // {"a":1}
+
+w := wait(h)
+sc := sock_close(srv)
+
+println(http_dechunk("5\r\nhello\r\n5\r\n ail!\r\n0\r\n\r\n"))   // hello ail!
+u2 := http_url_parse("https://api.example.com:8443/v1/things")
+println(u2.scheme + " " + u2.host + " " + int_to_str(u2.port) + " " + u2.path)

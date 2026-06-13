@@ -1,0 +1,11 @@
+// std/sqlite.ail prepared statements — bound parameters defeat SQL injection:
+// a value full of SQL metacharacters is stored/matched verbatim, never executed.
+im "std/sqlite.ail"
+c := sqlite_must_open(":memory:")
+sqlite_exec(c, "CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
+sqlite_run(c, "INSERT INTO users(name) VALUES(?)", ["alice"])
+sqlite_run(c, "INSERT INTO users(name) VALUES(?)", ["bob'); DROP TABLE users;--"])   // injection attempt
+println(sqlite_one(c, "SELECT count(*) FROM users"))                      // 2  — table NOT dropped
+println(sqlite_query_one(c, "SELECT name FROM users WHERE id=?", ["2"]))   // the literal string, intact
+lp r in sqlite_rows(c, "SELECT id, name FROM users ORDER BY id") { println(join(r.cells, " | ")) }
+sqlite_close(c)

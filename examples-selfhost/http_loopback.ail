@@ -1,0 +1,38 @@
+// http_loopback.ail — std/http request parsing + response formatting over a real
+// loopback socket (server thread accepts one connection), plus socket-free parse
+// coverage on a literal request. Port = AILANG_TEST_PORT (+11), never printed.
+im "std/http.ail"
+im "std/sock.ail"
+im "std/thread.ail"
+
+port := env_int("AILANG_TEST_PORT", 24701) + 11
+fd := must_listen("127.0.0.1", port, "")
+
+h := spawn(fn() {
+  cli := tcp_accept(fd)
+  req := http_recv_request(cli)
+  s := sock_send_str_all(cli, http_text(200, "hello " + http_path(req)))
+  x := sock_close(cli)
+  0
+})
+
+c := tcp_connect("127.0.0.1", port)
+s1 := sock_send_str_all(c, "GET /greet HTTP/1.1\r\nHost: t\r\nX-Tag: q7\r\nConnection: close\r\n\r\n")
+mu resp := ""
+mu more := true
+lp more {
+  chunk := sock_recv(c, 4096)
+  if len(chunk) == 0 { more = false } el { resp = resp + bytes_to_str(chunk) }
+}
+x := sock_close(c)
+w := wait(h)
+y := sock_close(fd)
+println(http_body(resp))                       // hello /greet
+
+// socket-free parsing of a literal request string
+req := "POST /things?id=9 HTTP/1.1\r\nHost: t\r\nX-Tag: q7\r\nContent-Length: 7\r\n\r\npayload"
+println(http_method(req))                      // POST
+println(http_path(req))                        // /things?id=9
+println(http_header(req, "x-tag"))             // q7 — case-insensitive
+println(http_content_length(req))              // 7
+println(http_body(req))                        // payload

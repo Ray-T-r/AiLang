@@ -1,0 +1,7 @@
+200
+hello from /greet
+text/plain; charset=utf-8
+200
+{"a":1}
+hello ail!
+https api.example.com 8443 /v1/things

@@ -28,16 +28,43 @@ im "src/parser.ail"
 im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
+AILC_VERSION := "0.5.0"
+USAGE := "usage: ailc [--keep-c] [--json] [run|check|test|compile] <input.ail> [output-binary] [-- prog-args]"
 av := args()
 // `--keep-c` / `-k`: keep the generated C next to the binary. Default: delete
-// it after a clean build (it's a transient build intermediate). Filter the
-// flag out of the args; everything else is positional.
+// it after a clean build (it's a transient build intermediate). `--help` and
+// `--version` answer and exit; any OTHER dash-leading token is an error —
+// unknown flags used to be taken as the INPUT FILE, compile an empty program,
+// and litter the cwd with junk like `--help.out.c` when clang then choked.
 mu keepc := false
+mu jsonmode := false        // --json: emit machine-readable diagnostics (see print_diag)
 mu pos:[str] := []
+mu runargs:[str] := []      // tokens after `--`, forwarded to the program in `run` mode
+mu afterdd := false
 mu fi := 0
 lp fi < len(av) {
   a := av[fi]
-  if a == "--keep-c" || a == "-k" { keepc = true } el { pos = push(pos, a) }
+  if afterdd {
+    runargs = push(runargs, a)
+  } el if a == "--" {
+    afterdd = true
+  } el if a == "--keep-c" || a == "-k" {
+    keepc = true
+  } el if a == "--json" {
+    jsonmode = true
+  } el if a == "--help" || a == "-h" {
+    println(USAGE)
+    exit(0)
+  } el if a == "--version" || a == "-v" {
+    println("ailc " + AILC_VERSION)
+    exit(0)
+  } el if len(a) > 0 && a[0] == 45 {
+    println("error: unknown flag: " + a)
+    println(USAGE)
+    exit(1)
+  } el {
+    pos = push(pos, a)
+  }
   fi += 1
 }
 // Accept `ailc [--keep-c] [compile] <input.ail> [output]`. Tolerate a leading
@@ -45,115 +72,100 @@ lp fi < len(av) {
 // `.ail`, and NEVER write the binary over a `.ail` source — the footgun `ailc
 // compile foo.ail` used to hit, taking `foo.ail` as OUTPUT and clobbering it.
 mu ai := 0
-if len(pos) > 0 && pos[0] == "compile" { ai = 1 }
+mu mode := "build"     // build | run | check | test  (`compile` is a legacy no-op alias)
+if len(pos) > 0 {
+  if pos[0] == "compile" { ai = 1 }
+  el if pos[0] == "run" { mode = "run"; ai = 1 }
+  el if pos[0] == "check" { mode = "check"; ai = 1 }
+  el if pos[0] == "test" { mode = "test"; ai = 1 }
+}
 if len(pos) <= ai {
-  println("usage: ailc [--keep-c] [compile] <input.ail> [output-binary]")
+  println(USAGE)
   exit(1)
 }
 input := pos[ai]
+
+// ── test: compile + run each given file, report pass/fail by its exit code ──
+// Test files are passed explicitly (a POSIX shell expands `tests/*_test.ail`);
+// we deliberately avoid fs_list_dir, which is #ifndef _WIN32'd out of the prelude
+// and would break the native Windows compiler build. `assert(cond,msg)` in a
+// test aborts nonzero on failure → that file reports FAIL. The whole run exits
+// nonzero if any test failed.
+if mode == "test" {
+  win := get_env("OS") == "Windows_NT"
+  mu tdir := "/tmp"
+  if win { tdir = get_env("TEMP") }
+  mu npass := 0
+  mu nfail := 0
+  mu ti := ai
+  lp ti < len(pos) {
+    tf := pos[ti]
+    tout := tdir + "/ailc_test_" + int_to_str(now_us())
+    if build_one(tf, tout, false, true) != 0 {
+      println("FAIL " + tf + " (build error)"); nfail += 1
+    } el {
+      mu texe := tout
+      if win { texe = tout + ".exe" }
+      erc := system(texe)
+      if win { system("del /f /q \"" + texe + "\"") } el { system("rm -f " + texe) }
+      if erc == 0 { println("PASS " + tf); npass += 1 } el { println("FAIL " + tf); nfail += 1 }
+    }
+    ti += 1
+  }
+  println("tests: " + int_to_str(npass) + " passed, " + int_to_str(nfail) + " failed")
+  if nfail > 0 { exit(1) }
+  exit(0)
+}
+
+// ── check: parse + type-check only, no clang link — the agent's fast inner loop.
+// build_one(link=false) runs the checker (which prints diagnostics and exit(1)s
+// on any error); returning here means the program is clean.
+if mode == "check" {
+  build_one(input, "", false, false)
+  if jsonmode { println("{\"severity\":\"ok\"}") } el { println("ok") }
+  exit(0)
+}
+
+// ── build / run: derive the output path. `run` uses a throwaway temp binary
+// (now_us() is the prelude's non-POSIX-gated clock, Windows-safe); build never
+// writes the binary over a `.ail` source.
 mu outbin := ""
-if len(pos) > ai + 1 {
-  outbin = pos[ai + 1]
+if mode == "run" {
+  mu tdir := "/tmp"
+  if get_env("OS") == "Windows_NT" { tdir = get_env("TEMP") }
+  outbin = tdir + "/ailc_run_" + int_to_str(now_us())
 } el {
-  ni := len(input)
-  if ni >= 4 && substring(input, ni - 4, ni) == ".ail" { outbin = substring(input, 0, ni - 4) } el { outbin = input + ".out" }
-}
-if outbin == input {
-  println("error: output would overwrite the input file: " + input)
-  exit(1)
-}
-ob := len(outbin)
-if ob >= 4 && substring(outbin, ob - 4, ob) == ".ail" {
-  println("error: refusing to write the compiled binary over a .ail source file: " + outbin)
-  exit(1)
-}
-
-mu src := read_file(input)
-src = auto_imports(src) + src        // inject `im "std/…"` for referenced std exports
-if has_import(src) {
-  mu seen:{str:str} := {}
-  src = resolve_imports(src, dirname(input), seen)
-}
-cprog := compile_to_c(src, dirname(input))
-
-cpath := outbin + ".c"
-write_file(cpath, cprog)
-
-// The clang line is host-specific. Native Windows runs it through cmd.exe (no
-// $(...) / backticks / `rm`), can't link the POSIX-only stdlib (sockets/regex/
-// TLS/pg are #ifndef _WIN32'd out of the prelude), and wants a self-contained
-// .exe — so we statically link Boehm GC (-DGC_NOT_DLL -static). POSIX hosts keep
-// pkg-config/brew discovery plus the OpenSSL/libpq sections.
-win := get_env("OS") == "Windows_NT"
-mu outexe := outbin
-
-// C++ shims declared via `csrc "..."` (paths are relative to the input .ail, so
-// resolve each against its dirname). Absent for virtually every program —
-// including main.ail's own self-compile — which then take the unchanged
-// single-clang path below, keeping the build (and the fixpoint) untouched.
-shims0 := csrc_list(cprog)
-mu shims:[str] := []
-mu ri := 0
-lp ri < len(shims0) { shims = push(shims, dirname(input) + shims0[ri]); ri += 1 }
-
-mu rc := 0
-if win {
-  outexe = outbin + ".exe"
-  if len(shims) == 0 {
-    cmd := "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outexe + "\""
-    rc = system(cmd)
+  if len(pos) > ai + 1 {
+    outbin = pos[ai + 1]
   } el {
-    // Static libc++/libstdc++ + static GC + unwinding tables is unreliable on the
-    // cmd.exe/`-static` Windows path — gate C++ interop off in this release.
-    println("error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux")
+    ni := len(input)
+    if ni >= 4 && substring(input, ni - 4, ni) == ".ail" { outbin = substring(input, 0, ni - 4) } el { outbin = input + ".out" }
+  }
+  if outbin == input {
+    println("error: output would overwrite the input file: " + input)
     exit(1)
   }
-} el {
-  // Discovery tail — identical substrings to the legacy single command: GC via
-  // pkg-config (fallback -lgc), OpenSSL/libpq when referenced, then `ex "lib"`
-  // link flags and -lm. Hoisted so the no-shim command is byte-identical to before.
-  mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
-  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
-  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
-  if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }   // threads (the threaded GC pulled by pkg-config may add it too — redundant is safe)
-  // MySQL is opt-in via the head `// @links:` marker (read offset-anchored, so the
-  // compiler's own string data never self-triggers it). A "mysqlclient" token there
-  // → pull libmysqlclient's -I/-L via pkg-config/brew (the -l comes from link_flags).
-  mu lf := link_flags(cprog)
-  if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
-  extra = extra + lf + " -lm"
+  ob := len(outbin)
+  if ob >= 4 && substring(outbin, ob - 4, ob) == ".ail" {
+    println("error: refusing to write the compiled binary over a .ail source file: " + outbin)
+    exit(1)
+  }
+}
 
-  if len(shims) == 0 {
-    // Unchanged single-clang command, byte-identical to the legacy path
-    // (`" -lm" + " -o "` == `" -lm -o "`).
-    cmd := "clang -O2 " + cpath + extra + " -o " + outbin
-    rc = system(cmd)
-  } el {
-    // C++ interop: one clang++ invocation. `-x c` keeps the AiLang TU in C
-    // semantics; `-x c++` compiles the shims as C++. The clang++ driver links the
-    // C++ runtime (libc++ on macOS / libstdc++ on Linux) automatically — more
-    // portable than hardcoding -lc++ vs -lstdc++. The shims expose `extern "C"`
-    // symbols, so the AiLang TU's C prototypes bind with no name mangling.
-    mu shimline := ""
-    mu si := 0
-    lp si < len(shims) { shimline = shimline + " " + shims[si]; si += 1 }
-    cmd := "clang++ -O2 -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
-    rc = system(cmd)
-  }
+if build_one(input, outbin, keepc, true) != 0 { exit(1) }   // build_one printed the error
+win := get_env("OS") == "Windows_NT"
+mu outexe := outbin
+if win { outexe = outbin + ".exe" }
+if mode == "run" {
+  // Forward the post-`--` args (quoted for spaces) and exec. system() returns a
+  // wait-encoded status, not the raw exit code, so we propagate only pass/fail:
+  // a nonzero child → exit 1. Then remove the throwaway binary.
+  mu runcmd := outexe
+  mu rj := 0
+  lp rj < len(runargs) { runcmd = runcmd + " \"" + runargs[rj] + "\""; rj += 1 }
+  rrc := system(runcmd)
+  if win { system("del /f /q \"" + outexe + "\"") } el { system("rm -f " + outexe) }
+  if rrc != 0 { exit(1) }
+} el {
+  println("compiled " + input + " -> " + outexe)
 }
-if rc != 0 {
-  println("clang failed")
-  exit(1)
-}
-// The generated C is a build intermediate — delete it unless `--keep-c`. On a
-// clang failure we already exited above, leaving it for inspection.
-if keepc == false {
-  if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
-  // also remove inline-C++ temp shims extracted from `csrc \`…\`` (POSIX-only path)
-  mu ci2 := 0
-  lp ci2 < len(shims) {
-    if has_sub(shims[ci2], "__ailinline_") { system("rm -f " + shims[ci2]) }
-    ci2 += 1
-  }
-}
-println("compiled " + input + " -> " + outexe)

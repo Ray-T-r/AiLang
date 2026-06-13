@@ -1,0 +1,5 @@
+// EXPECT: values() on a map with array values
+// values() would need an arr_arr_* runtime — checker-rejected; iterate keys().
+m := {"a": [1, 2]}
+v := values(m)
+println(len(v))

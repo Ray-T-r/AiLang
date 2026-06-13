@@ -1,0 +1,54 @@
+// ws_echo.ail — std/ws: the RFC 6455 sample handshake key (deterministic sha1 +
+// base64 coverage), then a real loopback handshake + masked-frame echo.
+// Gotchas encoded here: the client reads the FULL 101 response before sending
+// its frame (else the server's http_recv_request could swallow frame bytes),
+// and mask bytes are 1,1,1,1 — a chr(0) mask byte would NUL-truncate the str.
+// Port = AILANG_TEST_PORT (+12), never printed.
+im "std/ws.ail"
+im "std/http.ail"
+im "std/sock.ail"
+im "std/thread.ail"
+
+// RFC 6455 §1.3 sample value — pure, no socket
+println(ws_accept_key("dGhlIHNhbXBsZSBub25jZQ=="))   // s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+
+port := env_int("AILANG_TEST_PORT", 24701) + 12
+fd := must_listen("127.0.0.1", port, "")
+
+h := spawn(fn() {
+  cli := tcp_accept(fd)
+  req := http_recv_request(cli)
+  key := http_header(req, "Sec-WebSocket-Key")
+  s := sock_send_str_all(cli, ws_handshake_response(key))
+  msg := ws_recv_text(cli)
+  w := ws_send_text(cli, "echo: " + msg)
+  x := sock_close(cli)
+  0
+})
+
+c := tcp_connect("127.0.0.1", port)
+s1 := sock_send_str_all(c, "GET /chat HTTP/1.1\r\nHost: t\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
+
+// read the complete 101 response (headers end at \r\n\r\n) BEFORE sending a frame
+mu hs := ""
+lp contains(hs, "\r\n\r\n") == false {
+  chunk := sock_recv(c, 1024)
+  if len(chunk) == 0 { br }
+  hs = hs + bytes_to_str(chunk)
+}
+println(contains(hs, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="))   // true — correct accept key
+
+// client-masked text frame for "hi": FIN+text, MASK bit + len 2, mask 1,1,1,1,
+// payload bytes XOR 1 ('h'^1=105→'i', 'i'^1=104→'h')
+frame := chr(129) + chr(130) + chr(1) + chr(1) + chr(1) + chr(1) + chr(105) + chr(104)
+s2 := sock_send_str_all(c, frame)
+
+// server reply is unmasked: 2-byte header, then payload-length bytes of text
+hdr := sock_recv(c, 2)
+plen := bytes_at(hdr, 1)
+println(bytes_to_str(sock_recv(c, plen)))               // echo: hi
+
+x := sock_close(c)
+w := wait(h)
+y := sock_close(fd)
+println("done")

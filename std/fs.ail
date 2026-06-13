@@ -1,0 +1,63 @@
+// std/fs.ail — filesystem operations (POSIX-only, like sockets).
+//
+// The 9 fs_* builtins are native (no import needed, listed here for reference):
+//   fs_mkdir(path) -> bool      fs_rmdir(path) -> bool      fs_unlink(path) -> bool
+//   fs_rename(old, new) -> bool fs_exists(path) -> bool     fs_is_dir(path) -> bool
+//   fs_size(path) -> i64        (-1 if missing)
+//   fs_mtime(path) -> i64       (epoch SECONDS, -1 if missing)
+//   fs_list_dir(path) -> [str]  (skips "."/".."; ORDER IS FILESYSTEM-DEPENDENT — sort() it)
+//
+// This module adds the pure path helpers below. read_file/write_file (+ _bytes)
+// are core builtins and work everywhere including Windows.
+
+// Join two path segments with exactly one '/'.
+fn fs_join(a:str, b:str) -> str {
+  if len(a) == 0 rt b
+  if len(b) == 0 rt a
+  if ends_with(a, "/") {
+    if starts_with(b, "/") rt a + substring(b, 1, len(b))
+    rt a + b
+  }
+  if starts_with(b, "/") rt a + b
+  a + "/" + b
+}
+
+// The final path component ("z.txt" from "/x/y/z.txt"; "" for a trailing '/').
+fn fs_basename(p:str) -> str {
+  i := last_index_of_slash(p)
+  if i < 0 rt p
+  substring(p, i + 1, len(p))
+}
+
+// The directory part ("/x/y" from "/x/y/z.txt"; "." when there is no '/').
+fn fs_dirname(p:str) -> str {
+  i := last_index_of_slash(p)
+  if i < 0 rt "."
+  if i == 0 rt "/"
+  substring(p, 0, i)
+}
+
+fn last_index_of_slash(p:str) -> i64 {
+  mu i := len(p) - 1
+  lp i >= 0 {
+    if p[i] == 47 rt i
+    i = i - 1
+  }
+  -1
+}
+
+// mkdir -p: create every missing prefix; true if the full path is a dir after.
+fn fs_mkdir_p(p:str) -> bool {
+  if len(p) == 0 rt false
+  parts := split(p, "/")
+  mu cur := ""
+  mu i := 0
+  lp i < len(parts) {
+    if len(parts[i]) > 0 {
+      if len(cur) == 0 && starts_with(p, "/") == false { cur = parts[i] } el { cur = cur + "/" + parts[i] }
+      if fs_is_dir(cur) == false { x := fs_mkdir(cur) }
+    }
+    i = i + 1
+  }
+  fs_is_dir(p)
+}

@@ -14,7 +14,7 @@
 im "std/sock.ail"
 im "std/http.ail"
 
-st Req   { method:str  path:str  body:str  pkeys:[str]  pvals:[str] }
+st Req   { method:str  path:str  body:str  pkeys:[str]  pvals:[str]  raw:str }
 st Route { method:str  pat:str  handler:fn(Req)->str }
 st Mw    { h:fn(Req)->str }
 st App   { routes:[Route]  befores:[Mw] }
@@ -31,6 +31,9 @@ fn web_post(app:*App, pat:str, h:fn(Req)->str)   { app.routes = push(app.routes,
 fn web_put(app:*App, pat:str, h:fn(Req)->str)    { app.routes = push(app.routes, Route("PUT", pat, h)) }
 fn web_delete(app:*App, pat:str, h:fn(Req)->str) { app.routes = push(app.routes, Route("DELETE", pat, h)) }
 fn web_use(app:*App, h:fn(Req)->str)             { app.befores = push(app.befores, Mw(h)) }
+
+// A request header value (case-insensitive name), or "" if absent.
+fn req_header(r:Req, name:str) -> str { http_header(r.raw, name) }
 
 // A captured path param, or "" if absent.
 fn req_param(r:Req, name:str) -> str {
@@ -71,7 +74,7 @@ fn web_handle(app:*App, raw:str) -> str {
   mu mi := 0
   lp mi < len(app.befores) {
     mw := app.befores[mi]
-    res := mw.h(Req(method, path, body, _w_estr(), _w_estr()))
+    res := mw.h(Req(method, path, body, _w_estr(), _w_estr(), raw))
     if len(res) > 0 rt res
     mi = mi + 1
   }
@@ -81,11 +84,22 @@ fn web_handle(app:*App, raw:str) -> str {
     rte := app.routes[i]
     if rte.method == method {
       mr := web_match(rte.pat, path)
-      if mr.ok == 1 rt rte.handler(Req(method, path, body, mr.pkeys, mr.pvals))
+      if mr.ok == 1 rt rte.handler(Req(method, path, body, mr.pkeys, mr.pvals, raw))
     }
     i = i + 1
   }
   http_json(404, "{\"error\":\"not found\"}")
+}
+
+// Serve exactly one connection on an already-listening fd (accept → recv →
+// route → respond → close), then return. web_listen loops forever — this is
+// the testable single-shot building block.
+fn web_serve_one(app:*App, fd:i64) -> i64 {
+  cli := tcp_accept(fd)
+  if cli < 0 rt -1
+  raw := http_recv_request(cli)
+  if len(raw) > 0 { s := sock_send_str_all(cli, web_handle(app, raw)) }
+  sock_close(cli)
 }
 
 // The live server: accept → recv → route → respond → close. POSIX sockets.

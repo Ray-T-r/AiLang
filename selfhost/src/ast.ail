@@ -117,6 +117,65 @@ fn tok_name(k:i64) -> str {
   if k == TK_GT() rt "'>'"
   "the expected token"
 }
+// `--json` machine-readable diagnostics, for agent/LLM consumers that parse
+// errors instead of scraping human text. Detected straight from args() (no
+// set_env builtin, no globals) — scanning stops at `--` so a program's own
+// `--json` arg in `ailc run … -- --json` can't flip compiler output. The
+// compiler's own self-compile never passes --json, so print_diag's human branch
+// stays byte-identical and the fixpoint holds.
+fn want_json() -> bool {
+  av := args()
+  mu i := 0
+  lp i < len(av) {
+    if av[i] == "--" rt false
+    if av[i] == "--json" rt true
+    i += 1
+  }
+  false
+}
+// Stable-ish diagnostic codes for --json consumers, classified by message
+// substring (pragmatic, NOT per-call-site). The human message stays
+// authoritative; codes group errors so an agent can branch on a category.
+fn diag_code(msg:str) -> str {
+  if contains(msg, "non-exhaustive match") rt "AIL2001"
+  if contains(msg, "unknown variant") rt "AIL2002"
+  if contains(msg, "match on non-enum") rt "AIL2003"
+  if contains(msg, "guard cannot be combined") rt "AIL2004"
+  if contains(msg, "field(s)") rt "AIL2005"
+  if contains(msg, "does not satisfy bound") rt "AIL3001"
+  if contains(msg, "missing method") rt "AIL3002"
+  if contains(msg, "operator ") rt "AIL3003"
+  if contains(msg, "used outside a function returning") rt "AIL4001"
+  if contains(msg, "but function returns") rt "AIL4002"
+  if contains(msg, "must be an inline lambda") rt "AIL1006"
+  if contains(msg, "callback takes") rt "AIL1002"
+  if contains(msg, "arguments, got") rt "AIL1002"
+  if contains(msg, "expects") rt "AIL1003"
+  if contains(msg, "cannot index") rt "AIL1004"
+  if contains(msg, "map value") rt "AIL5002"
+  if contains(msg, "values() on a map") rt "AIL5003"
+  if contains(msg, "key") rt "AIL5001"
+  if contains(msg, "did you mean") rt "AIL6001"
+  if contains(msg, "cannot assign") rt "AIL1001"
+  if contains(msg, "type mismatch") rt "AIL1001"
+  "AIL0000"
+}
+// Escape a string for embedding in a JSON double-quoted value.
+fn json_escape(s:str) -> str {
+  mu o := ""
+  mu i := 0
+  lp i < len(s) {
+    c := s[i]
+    if c == 34 { o = o + "\\\"" }
+    el if c == 92 { o = o + "\\\\" }
+    el if c == 10 { o = o + "\\n" }
+    el if c == 13 { o = o + "\\r" }
+    el if c == 9 { o = o + "\\t" }
+    el { o = o + chr(c) }
+    i += 1
+  }
+  o
+}
 // Print one source-located error (line, source line, caret) — NO exit. Shared by
 // the fatal `report_at` (parser) and the accumulating `report_chk` (checker).
 fn print_diag(src:str, pos:i64, msg:str) {
@@ -129,12 +188,17 @@ fn print_diag(src:str, pos:i64, msg:str) {
   }
   mu lend := lstart
   lp lend < len(src) { if src[lend] == 10 { br } lend += 1 }
-  println("error " + int_to_str(line) + ":" + int_to_str(pos - lstart + 1) + ": " + msg)
-  println("  " + substring(src, lstart, lend))
-  mu caret := "  "
-  mu k := lstart
-  lp k < pos { caret = caret + " "; k += 1 }
-  println(caret + "^")
+  col := pos - lstart + 1
+  if want_json() {
+    println("{\"severity\":\"error\",\"code\":\"" + diag_code(msg) + "\",\"line\":" + int_to_str(line) + ",\"col\":" + int_to_str(col) + ",\"message\":\"" + json_escape(msg) + "\",\"source\":\"" + json_escape(substring(src, lstart, lend)) + "\"}")
+  } el {
+    println("error " + int_to_str(line) + ":" + int_to_str(col) + ": " + msg)
+    println("  " + substring(src, lstart, lend))
+    mu caret := "  "
+    mu k := lstart
+    lp k < pos { caret = caret + " "; k += 1 }
+    println(caret + "^")
+  }
 }
 // Fatal diagnostic — print then bail. Used by the parser (a broken parse state
 // can't recover) and any other unrecoverable spot.

@@ -21,6 +21,12 @@
 #include <sys/wait.h>
 #endif
 #ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <unistd.h>
+#endif
+#ifndef _WIN32
 #include <regex.h>
 #endif
 #ifndef _WIN32
@@ -81,6 +87,7 @@ static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALL
 static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }
 static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:""; }
 static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:"",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }
+static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, "assertion failed: %s\n", m?m:""); exit(1); } return 0; }
 static const char* exe_dir(void){ char buf[4096]; buf[0]=0;
 #ifdef _WIN32
  unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return "";
@@ -128,6 +135,7 @@ static int64_t tls_client_ctx(void){ ailang_tls_init_(); SSL_CTX* ctx=SSL_CTX_ne
 static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }
 static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
 static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
+static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }
 static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }
 static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }
 static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)""; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }
@@ -282,6 +290,62 @@ typedef struct map_f64_Expr_s map_f64_Expr_s;
 typedef map_f64_Expr_s* map_f64_Expr;
 typedef struct map_f64_Stmt_s map_f64_Stmt_s;
 typedef map_f64_Stmt_s* map_f64_Stmt;
+typedef struct map_str_arr_i64_s map_str_arr_i64_s;
+typedef map_str_arr_i64_s* map_str_arr_i64;
+typedef struct map_str_arr_str_s map_str_arr_str_s;
+typedef map_str_arr_str_s* map_str_arr_str;
+typedef struct map_str_arr_f64_s map_str_arr_f64_s;
+typedef map_str_arr_f64_s* map_str_arr_f64;
+typedef struct map_str_arr_Token_s map_str_arr_Token_s;
+typedef map_str_arr_Token_s* map_str_arr_Token;
+typedef struct map_str_arr_StructDef_s map_str_arr_StructDef_s;
+typedef map_str_arr_StructDef_s* map_str_arr_StructDef;
+typedef struct map_str_arr_EnumDef_s map_str_arr_EnumDef_s;
+typedef map_str_arr_EnumDef_s* map_str_arr_EnumDef;
+typedef struct map_str_arr_Func_s map_str_arr_Func_s;
+typedef map_str_arr_Func_s* map_str_arr_Func;
+typedef struct map_str_arr_ClassDef_s map_str_arr_ClassDef_s;
+typedef map_str_arr_ClassDef_s* map_str_arr_ClassDef;
+typedef struct map_str_arr_TraitDef_s map_str_arr_TraitDef_s;
+typedef map_str_arr_TraitDef_s* map_str_arr_TraitDef;
+typedef struct map_str_arr_P_s map_str_arr_P_s;
+typedef map_str_arr_P_s* map_str_arr_P;
+typedef struct map_str_arr_Binds_s map_str_arr_Binds_s;
+typedef map_str_arr_Binds_s* map_str_arr_Binds;
+typedef struct map_str_arr_Syms_s map_str_arr_Syms_s;
+typedef map_str_arr_Syms_s* map_str_arr_Syms;
+typedef struct map_str_arr_Expr_s map_str_arr_Expr_s;
+typedef map_str_arr_Expr_s* map_str_arr_Expr;
+typedef struct map_str_arr_Stmt_s map_str_arr_Stmt_s;
+typedef map_str_arr_Stmt_s* map_str_arr_Stmt;
+typedef struct map_i64_arr_i64_s map_i64_arr_i64_s;
+typedef map_i64_arr_i64_s* map_i64_arr_i64;
+typedef struct map_i64_arr_str_s map_i64_arr_str_s;
+typedef map_i64_arr_str_s* map_i64_arr_str;
+typedef struct map_i64_arr_f64_s map_i64_arr_f64_s;
+typedef map_i64_arr_f64_s* map_i64_arr_f64;
+typedef struct map_i64_arr_Token_s map_i64_arr_Token_s;
+typedef map_i64_arr_Token_s* map_i64_arr_Token;
+typedef struct map_i64_arr_StructDef_s map_i64_arr_StructDef_s;
+typedef map_i64_arr_StructDef_s* map_i64_arr_StructDef;
+typedef struct map_i64_arr_EnumDef_s map_i64_arr_EnumDef_s;
+typedef map_i64_arr_EnumDef_s* map_i64_arr_EnumDef;
+typedef struct map_i64_arr_Func_s map_i64_arr_Func_s;
+typedef map_i64_arr_Func_s* map_i64_arr_Func;
+typedef struct map_i64_arr_ClassDef_s map_i64_arr_ClassDef_s;
+typedef map_i64_arr_ClassDef_s* map_i64_arr_ClassDef;
+typedef struct map_i64_arr_TraitDef_s map_i64_arr_TraitDef_s;
+typedef map_i64_arr_TraitDef_s* map_i64_arr_TraitDef;
+typedef struct map_i64_arr_P_s map_i64_arr_P_s;
+typedef map_i64_arr_P_s* map_i64_arr_P;
+typedef struct map_i64_arr_Binds_s map_i64_arr_Binds_s;
+typedef map_i64_arr_Binds_s* map_i64_arr_Binds;
+typedef struct map_i64_arr_Syms_s map_i64_arr_Syms_s;
+typedef map_i64_arr_Syms_s* map_i64_arr_Syms;
+typedef struct map_i64_arr_Expr_s map_i64_arr_Expr_s;
+typedef map_i64_arr_Expr_s* map_i64_arr_Expr;
+typedef struct map_i64_arr_Stmt_s map_i64_arr_Stmt_s;
+typedef map_i64_arr_Stmt_s* map_i64_arr_Stmt;
 
 struct s_Token { int64_t kind; const char* text; int64_t pos; };
 struct s_StructDef { const char* name; arr_str fnames; arr_str ftypes; arr_str tparams; };
@@ -372,6 +436,34 @@ struct map_f64_Binds_s { int64_t cap; int64_t len; double* keys; s_Binds* values
 struct map_f64_Syms_s { int64_t cap; int64_t len; double* keys; s_Syms* values; unsigned char* occupied; };
 struct map_f64_Expr_s { int64_t cap; int64_t len; double* keys; s_Expr* values; unsigned char* occupied; };
 struct map_f64_Stmt_s { int64_t cap; int64_t len; double* keys; s_Stmt* values; unsigned char* occupied; };
+struct map_str_arr_i64_s { int64_t cap; int64_t len; const char** keys; arr_i64* values; unsigned char* occupied; };
+struct map_str_arr_str_s { int64_t cap; int64_t len; const char** keys; arr_str* values; unsigned char* occupied; };
+struct map_str_arr_f64_s { int64_t cap; int64_t len; const char** keys; arr_f64* values; unsigned char* occupied; };
+struct map_str_arr_Token_s { int64_t cap; int64_t len; const char** keys; arr_Token* values; unsigned char* occupied; };
+struct map_str_arr_StructDef_s { int64_t cap; int64_t len; const char** keys; arr_StructDef* values; unsigned char* occupied; };
+struct map_str_arr_EnumDef_s { int64_t cap; int64_t len; const char** keys; arr_EnumDef* values; unsigned char* occupied; };
+struct map_str_arr_Func_s { int64_t cap; int64_t len; const char** keys; arr_Func* values; unsigned char* occupied; };
+struct map_str_arr_ClassDef_s { int64_t cap; int64_t len; const char** keys; arr_ClassDef* values; unsigned char* occupied; };
+struct map_str_arr_TraitDef_s { int64_t cap; int64_t len; const char** keys; arr_TraitDef* values; unsigned char* occupied; };
+struct map_str_arr_P_s { int64_t cap; int64_t len; const char** keys; arr_P* values; unsigned char* occupied; };
+struct map_str_arr_Binds_s { int64_t cap; int64_t len; const char** keys; arr_Binds* values; unsigned char* occupied; };
+struct map_str_arr_Syms_s { int64_t cap; int64_t len; const char** keys; arr_Syms* values; unsigned char* occupied; };
+struct map_str_arr_Expr_s { int64_t cap; int64_t len; const char** keys; arr_Expr* values; unsigned char* occupied; };
+struct map_str_arr_Stmt_s { int64_t cap; int64_t len; const char** keys; arr_Stmt* values; unsigned char* occupied; };
+struct map_i64_arr_i64_s { int64_t cap; int64_t len; int64_t* keys; arr_i64* values; unsigned char* occupied; };
+struct map_i64_arr_str_s { int64_t cap; int64_t len; int64_t* keys; arr_str* values; unsigned char* occupied; };
+struct map_i64_arr_f64_s { int64_t cap; int64_t len; int64_t* keys; arr_f64* values; unsigned char* occupied; };
+struct map_i64_arr_Token_s { int64_t cap; int64_t len; int64_t* keys; arr_Token* values; unsigned char* occupied; };
+struct map_i64_arr_StructDef_s { int64_t cap; int64_t len; int64_t* keys; arr_StructDef* values; unsigned char* occupied; };
+struct map_i64_arr_EnumDef_s { int64_t cap; int64_t len; int64_t* keys; arr_EnumDef* values; unsigned char* occupied; };
+struct map_i64_arr_Func_s { int64_t cap; int64_t len; int64_t* keys; arr_Func* values; unsigned char* occupied; };
+struct map_i64_arr_ClassDef_s { int64_t cap; int64_t len; int64_t* keys; arr_ClassDef* values; unsigned char* occupied; };
+struct map_i64_arr_TraitDef_s { int64_t cap; int64_t len; int64_t* keys; arr_TraitDef* values; unsigned char* occupied; };
+struct map_i64_arr_P_s { int64_t cap; int64_t len; int64_t* keys; arr_P* values; unsigned char* occupied; };
+struct map_i64_arr_Binds_s { int64_t cap; int64_t len; int64_t* keys; arr_Binds* values; unsigned char* occupied; };
+struct map_i64_arr_Syms_s { int64_t cap; int64_t len; int64_t* keys; arr_Syms* values; unsigned char* occupied; };
+struct map_i64_arr_Expr_s { int64_t cap; int64_t len; int64_t* keys; arr_Expr* values; unsigned char* occupied; };
+struct map_i64_arr_Stmt_s { int64_t cap; int64_t len; int64_t* keys; arr_Stmt* values; unsigned char* occupied; };
 
 static arr_i64 arr_i64_new(void){ arr_i64 a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_i64 arr_i64_push(arr_i64 a, int64_t x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; int64_t* nd=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); if(a.len) memcpy(nd,a.data,a.len*sizeof(int64_t)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
@@ -408,6 +500,20 @@ static void print_arr_i64(arr_i64 a){ printf("["); for(int64_t i=0;i<a.len;i++){
 static void print_arr_str(arr_str a){ printf("["); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(", "); putchar(34); printf("%s", a.data[i] ? a.data[i] : ""); putchar(34); } printf("]"); }
 static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }
 static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=""; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }
+#ifndef _WIN32
+static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }
+static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }
+static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }
+static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }
+static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }
+static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }
+static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }
+static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }
+static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:""); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,".")==0||strcmp(e->d_name,"..")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }
+#endif
+#ifndef _WIN32
+static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:""; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }
+#endif
 static arr_Token arr_Token_new(void){ arr_Token a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_Token arr_Token_push(arr_Token a, s_Token x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; s_Token* nd=(s_Token*)GC_MALLOC(nc*sizeof(s_Token)); if(a.len) memcpy(nd,a.data,a.len*sizeof(s_Token)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
 static s_Token arr_Token_get(arr_Token a, int64_t i){ return a.data[i]; }
@@ -905,6 +1011,258 @@ static arr_f64 map_f64_Stmt_keys(map_f64_Stmt m){ arr_f64 r=arr_f64_new(); for(i
 static arr_Stmt map_f64_Stmt_values(map_f64_Stmt m){ arr_Stmt r=arr_Stmt_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_Stmt_push(r,m->values[i]); return r; }
 static int64_t map_f64_Stmt_len(map_f64_Stmt m){ return m->len; }
 static void map_f64_Stmt_print(map_f64_Stmt m){ (void)m; }
+static uint64_t map_str_arr_i64_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_i64 map_str_arr_i64_new(void){ map_str_arr_i64 m=(map_str_arr_i64)GC_MALLOC(sizeof(map_str_arr_i64_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_i64*)GC_MALLOC(8*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_i64_grow(map_str_arr_i64 m){ int64_t oc=m->cap; const char** ok=m->keys; arr_i64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_i64*)GC_MALLOC(nc*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_i64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_i64_set(map_str_arr_i64 m, const char* k, arr_i64 val){ if(m->len*10>=m->cap*7) map_str_arr_i64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_i64 map_str_arr_i64_get(map_str_arr_i64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_i64){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_i64){0}; }
+static int64_t map_str_arr_i64_has(map_str_arr_i64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_i64_keys(map_str_arr_i64 m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_i64_len(map_str_arr_i64 m){ return m->len; }
+static void map_str_arr_i64_print(map_str_arr_i64 m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("\"%s\": ", (m->keys[i] ? m->keys[i] : "")); print_arr_i64(m->values[i]); } printf("}"); }
+static uint64_t map_str_arr_str_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_str map_str_arr_str_new(void){ map_str_arr_str m=(map_str_arr_str)GC_MALLOC(sizeof(map_str_arr_str_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_str*)GC_MALLOC(8*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_str_grow(map_str_arr_str m){ int64_t oc=m->cap; const char** ok=m->keys; arr_str* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_str*)GC_MALLOC(nc*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_str_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_str_set(map_str_arr_str m, const char* k, arr_str val){ if(m->len*10>=m->cap*7) map_str_arr_str_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_str map_str_arr_str_get(map_str_arr_str m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_str){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_str){0}; }
+static int64_t map_str_arr_str_has(map_str_arr_str m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_str_keys(map_str_arr_str m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_str_len(map_str_arr_str m){ return m->len; }
+static void map_str_arr_str_print(map_str_arr_str m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("\"%s\": ", (m->keys[i] ? m->keys[i] : "")); print_arr_str(m->values[i]); } printf("}"); }
+static uint64_t map_str_arr_f64_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_f64 map_str_arr_f64_new(void){ map_str_arr_f64 m=(map_str_arr_f64)GC_MALLOC(sizeof(map_str_arr_f64_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_f64*)GC_MALLOC(8*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_f64_grow(map_str_arr_f64 m){ int64_t oc=m->cap; const char** ok=m->keys; arr_f64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_f64*)GC_MALLOC(nc*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_f64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_f64_set(map_str_arr_f64 m, const char* k, arr_f64 val){ if(m->len*10>=m->cap*7) map_str_arr_f64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_f64 map_str_arr_f64_get(map_str_arr_f64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_f64){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_f64){0}; }
+static int64_t map_str_arr_f64_has(map_str_arr_f64 m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_f64_keys(map_str_arr_f64 m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_f64_len(map_str_arr_f64 m){ return m->len; }
+static void map_str_arr_f64_print(map_str_arr_f64 m){ (void)m; }
+static uint64_t map_str_arr_Token_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Token map_str_arr_Token_new(void){ map_str_arr_Token m=(map_str_arr_Token)GC_MALLOC(sizeof(map_str_arr_Token_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Token*)GC_MALLOC(8*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Token_grow(map_str_arr_Token m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Token* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Token*)GC_MALLOC(nc*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Token_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Token_set(map_str_arr_Token m, const char* k, arr_Token val){ if(m->len*10>=m->cap*7) map_str_arr_Token_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Token map_str_arr_Token_get(map_str_arr_Token m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Token){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Token){0}; }
+static int64_t map_str_arr_Token_has(map_str_arr_Token m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Token_keys(map_str_arr_Token m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Token_len(map_str_arr_Token m){ return m->len; }
+static void map_str_arr_Token_print(map_str_arr_Token m){ (void)m; }
+static uint64_t map_str_arr_StructDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_StructDef map_str_arr_StructDef_new(void){ map_str_arr_StructDef m=(map_str_arr_StructDef)GC_MALLOC(sizeof(map_str_arr_StructDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_StructDef*)GC_MALLOC(8*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_StructDef_grow(map_str_arr_StructDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_StructDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_StructDef*)GC_MALLOC(nc*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_StructDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_StructDef_set(map_str_arr_StructDef m, const char* k, arr_StructDef val){ if(m->len*10>=m->cap*7) map_str_arr_StructDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_StructDef map_str_arr_StructDef_get(map_str_arr_StructDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_StructDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_StructDef){0}; }
+static int64_t map_str_arr_StructDef_has(map_str_arr_StructDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_StructDef_keys(map_str_arr_StructDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_StructDef_len(map_str_arr_StructDef m){ return m->len; }
+static void map_str_arr_StructDef_print(map_str_arr_StructDef m){ (void)m; }
+static uint64_t map_str_arr_EnumDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_EnumDef map_str_arr_EnumDef_new(void){ map_str_arr_EnumDef m=(map_str_arr_EnumDef)GC_MALLOC(sizeof(map_str_arr_EnumDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_EnumDef*)GC_MALLOC(8*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_EnumDef_grow(map_str_arr_EnumDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_EnumDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_EnumDef*)GC_MALLOC(nc*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_EnumDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_EnumDef_set(map_str_arr_EnumDef m, const char* k, arr_EnumDef val){ if(m->len*10>=m->cap*7) map_str_arr_EnumDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_EnumDef map_str_arr_EnumDef_get(map_str_arr_EnumDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_EnumDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_EnumDef){0}; }
+static int64_t map_str_arr_EnumDef_has(map_str_arr_EnumDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_EnumDef_keys(map_str_arr_EnumDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_EnumDef_len(map_str_arr_EnumDef m){ return m->len; }
+static void map_str_arr_EnumDef_print(map_str_arr_EnumDef m){ (void)m; }
+static uint64_t map_str_arr_Func_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Func map_str_arr_Func_new(void){ map_str_arr_Func m=(map_str_arr_Func)GC_MALLOC(sizeof(map_str_arr_Func_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Func*)GC_MALLOC(8*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Func_grow(map_str_arr_Func m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Func* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Func*)GC_MALLOC(nc*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Func_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Func_set(map_str_arr_Func m, const char* k, arr_Func val){ if(m->len*10>=m->cap*7) map_str_arr_Func_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Func map_str_arr_Func_get(map_str_arr_Func m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Func){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Func){0}; }
+static int64_t map_str_arr_Func_has(map_str_arr_Func m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Func_keys(map_str_arr_Func m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Func_len(map_str_arr_Func m){ return m->len; }
+static void map_str_arr_Func_print(map_str_arr_Func m){ (void)m; }
+static uint64_t map_str_arr_ClassDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_ClassDef map_str_arr_ClassDef_new(void){ map_str_arr_ClassDef m=(map_str_arr_ClassDef)GC_MALLOC(sizeof(map_str_arr_ClassDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_ClassDef*)GC_MALLOC(8*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_ClassDef_grow(map_str_arr_ClassDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_ClassDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_ClassDef*)GC_MALLOC(nc*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_ClassDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_ClassDef_set(map_str_arr_ClassDef m, const char* k, arr_ClassDef val){ if(m->len*10>=m->cap*7) map_str_arr_ClassDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_ClassDef map_str_arr_ClassDef_get(map_str_arr_ClassDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_ClassDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_ClassDef){0}; }
+static int64_t map_str_arr_ClassDef_has(map_str_arr_ClassDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_ClassDef_keys(map_str_arr_ClassDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_ClassDef_len(map_str_arr_ClassDef m){ return m->len; }
+static void map_str_arr_ClassDef_print(map_str_arr_ClassDef m){ (void)m; }
+static uint64_t map_str_arr_TraitDef_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_TraitDef map_str_arr_TraitDef_new(void){ map_str_arr_TraitDef m=(map_str_arr_TraitDef)GC_MALLOC(sizeof(map_str_arr_TraitDef_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_TraitDef*)GC_MALLOC(8*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_TraitDef_grow(map_str_arr_TraitDef m){ int64_t oc=m->cap; const char** ok=m->keys; arr_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_TraitDef*)GC_MALLOC(nc*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_TraitDef_set(map_str_arr_TraitDef m, const char* k, arr_TraitDef val){ if(m->len*10>=m->cap*7) map_str_arr_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_TraitDef map_str_arr_TraitDef_get(map_str_arr_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_TraitDef){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_TraitDef){0}; }
+static int64_t map_str_arr_TraitDef_has(map_str_arr_TraitDef m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_TraitDef_keys(map_str_arr_TraitDef m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_TraitDef_len(map_str_arr_TraitDef m){ return m->len; }
+static void map_str_arr_TraitDef_print(map_str_arr_TraitDef m){ (void)m; }
+static uint64_t map_str_arr_P_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_P map_str_arr_P_new(void){ map_str_arr_P m=(map_str_arr_P)GC_MALLOC(sizeof(map_str_arr_P_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_P*)GC_MALLOC(8*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_P_grow(map_str_arr_P m){ int64_t oc=m->cap; const char** ok=m->keys; arr_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_P*)GC_MALLOC(nc*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_P_set(map_str_arr_P m, const char* k, arr_P val){ if(m->len*10>=m->cap*7) map_str_arr_P_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_P map_str_arr_P_get(map_str_arr_P m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_P){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_P){0}; }
+static int64_t map_str_arr_P_has(map_str_arr_P m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_P_keys(map_str_arr_P m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_P_len(map_str_arr_P m){ return m->len; }
+static void map_str_arr_P_print(map_str_arr_P m){ (void)m; }
+static uint64_t map_str_arr_Binds_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Binds map_str_arr_Binds_new(void){ map_str_arr_Binds m=(map_str_arr_Binds)GC_MALLOC(sizeof(map_str_arr_Binds_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Binds*)GC_MALLOC(8*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Binds_grow(map_str_arr_Binds m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Binds* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Binds*)GC_MALLOC(nc*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Binds_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Binds_set(map_str_arr_Binds m, const char* k, arr_Binds val){ if(m->len*10>=m->cap*7) map_str_arr_Binds_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Binds map_str_arr_Binds_get(map_str_arr_Binds m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Binds){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Binds){0}; }
+static int64_t map_str_arr_Binds_has(map_str_arr_Binds m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Binds_keys(map_str_arr_Binds m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Binds_len(map_str_arr_Binds m){ return m->len; }
+static void map_str_arr_Binds_print(map_str_arr_Binds m){ (void)m; }
+static uint64_t map_str_arr_Syms_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Syms map_str_arr_Syms_new(void){ map_str_arr_Syms m=(map_str_arr_Syms)GC_MALLOC(sizeof(map_str_arr_Syms_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Syms*)GC_MALLOC(8*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Syms_grow(map_str_arr_Syms m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Syms* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Syms*)GC_MALLOC(nc*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Syms_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Syms_set(map_str_arr_Syms m, const char* k, arr_Syms val){ if(m->len*10>=m->cap*7) map_str_arr_Syms_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Syms map_str_arr_Syms_get(map_str_arr_Syms m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Syms){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Syms){0}; }
+static int64_t map_str_arr_Syms_has(map_str_arr_Syms m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Syms_keys(map_str_arr_Syms m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Syms_len(map_str_arr_Syms m){ return m->len; }
+static void map_str_arr_Syms_print(map_str_arr_Syms m){ (void)m; }
+static uint64_t map_str_arr_Expr_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Expr map_str_arr_Expr_new(void){ map_str_arr_Expr m=(map_str_arr_Expr)GC_MALLOC(sizeof(map_str_arr_Expr_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Expr*)GC_MALLOC(8*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Expr_grow(map_str_arr_Expr m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Expr* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Expr*)GC_MALLOC(nc*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Expr_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Expr_set(map_str_arr_Expr m, const char* k, arr_Expr val){ if(m->len*10>=m->cap*7) map_str_arr_Expr_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Expr map_str_arr_Expr_get(map_str_arr_Expr m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Expr){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Expr){0}; }
+static int64_t map_str_arr_Expr_has(map_str_arr_Expr m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Expr_keys(map_str_arr_Expr m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Expr_len(map_str_arr_Expr m){ return m->len; }
+static void map_str_arr_Expr_print(map_str_arr_Expr m){ (void)m; }
+static uint64_t map_str_arr_Stmt_hash(const char* s){ uint64_t h=0xcbf29ce484222325ULL; if(!s) return h; while(*s){ h^=(uint64_t)(unsigned char)*s++; h*=0x100000001b3ULL; } return h; }
+static map_str_arr_Stmt map_str_arr_Stmt_new(void){ map_str_arr_Stmt m=(map_str_arr_Stmt)GC_MALLOC(sizeof(map_str_arr_Stmt_s)); m->cap=8; m->len=0; m->keys=(const char**)GC_MALLOC(8*sizeof(const char*)); m->values=(arr_Stmt*)GC_MALLOC(8*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_str_arr_Stmt_grow(map_str_arr_Stmt m){ int64_t oc=m->cap; const char** ok=m->keys; arr_Stmt* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(const char**)GC_MALLOC(nc*sizeof(const char*)); m->values=(arr_Stmt*)GC_MALLOC(nc*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_str_arr_Stmt_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_str_arr_Stmt_set(map_str_arr_Stmt m, const char* k, arr_Stmt val){ if(m->len*10>=m->cap*7) map_str_arr_Stmt_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(strcmp(m->keys[i],k)==0){ m->values[i]=val; return; } } }
+static arr_Stmt map_str_arr_Stmt_get(map_str_arr_Stmt m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Stmt){0}; if(strcmp(m->keys[i],k)==0) return m->values[i]; } return (arr_Stmt){0}; }
+static int64_t map_str_arr_Stmt_has(map_str_arr_Stmt m, const char* k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_str_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(strcmp(m->keys[i],k)==0) return 1; } return 0; }
+static arr_str map_str_arr_Stmt_keys(map_str_arr_Stmt m){ arr_str r=arr_str_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_str_push(r,m->keys[i]); return r; }
+static int64_t map_str_arr_Stmt_len(map_str_arr_Stmt m){ return m->len; }
+static void map_str_arr_Stmt_print(map_str_arr_Stmt m){ (void)m; }
+static uint64_t map_i64_arr_i64_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_i64 map_i64_arr_i64_new(void){ map_i64_arr_i64 m=(map_i64_arr_i64)GC_MALLOC(sizeof(map_i64_arr_i64_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_i64*)GC_MALLOC(8*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_i64_grow(map_i64_arr_i64 m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_i64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_i64*)GC_MALLOC(nc*sizeof(arr_i64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_i64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_i64_set(map_i64_arr_i64 m, int64_t k, arr_i64 val){ if(m->len*10>=m->cap*7) map_i64_arr_i64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_i64 map_i64_arr_i64_get(map_i64_arr_i64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_i64){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_i64){0}; }
+static int64_t map_i64_arr_i64_has(map_i64_arr_i64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_i64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_i64_keys(map_i64_arr_i64 m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_i64_len(map_i64_arr_i64 m){ return m->len; }
+static void map_i64_arr_i64_print(map_i64_arr_i64 m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("%lld: ", (long long)(m->keys[i])); print_arr_i64(m->values[i]); } printf("}"); }
+static uint64_t map_i64_arr_str_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_str map_i64_arr_str_new(void){ map_i64_arr_str m=(map_i64_arr_str)GC_MALLOC(sizeof(map_i64_arr_str_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_str*)GC_MALLOC(8*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_str_grow(map_i64_arr_str m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_str* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_str*)GC_MALLOC(nc*sizeof(arr_str)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_str_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_str_set(map_i64_arr_str m, int64_t k, arr_str val){ if(m->len*10>=m->cap*7) map_i64_arr_str_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_str map_i64_arr_str_get(map_i64_arr_str m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_str){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_str){0}; }
+static int64_t map_i64_arr_str_has(map_i64_arr_str m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_str_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_str_keys(map_i64_arr_str m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_str_len(map_i64_arr_str m){ return m->len; }
+static void map_i64_arr_str_print(map_i64_arr_str m){ printf("{"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(", "); __f=0; printf("%lld: ", (long long)(m->keys[i])); print_arr_str(m->values[i]); } printf("}"); }
+static uint64_t map_i64_arr_f64_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_f64 map_i64_arr_f64_new(void){ map_i64_arr_f64 m=(map_i64_arr_f64)GC_MALLOC(sizeof(map_i64_arr_f64_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_f64*)GC_MALLOC(8*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_f64_grow(map_i64_arr_f64 m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_f64* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_f64*)GC_MALLOC(nc*sizeof(arr_f64)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_f64_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_f64_set(map_i64_arr_f64 m, int64_t k, arr_f64 val){ if(m->len*10>=m->cap*7) map_i64_arr_f64_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_f64 map_i64_arr_f64_get(map_i64_arr_f64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_f64){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_f64){0}; }
+static int64_t map_i64_arr_f64_has(map_i64_arr_f64 m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_f64_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_f64_keys(map_i64_arr_f64 m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_f64_len(map_i64_arr_f64 m){ return m->len; }
+static void map_i64_arr_f64_print(map_i64_arr_f64 m){ (void)m; }
+static uint64_t map_i64_arr_Token_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Token map_i64_arr_Token_new(void){ map_i64_arr_Token m=(map_i64_arr_Token)GC_MALLOC(sizeof(map_i64_arr_Token_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Token*)GC_MALLOC(8*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Token_grow(map_i64_arr_Token m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Token* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Token*)GC_MALLOC(nc*sizeof(arr_Token)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Token_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Token_set(map_i64_arr_Token m, int64_t k, arr_Token val){ if(m->len*10>=m->cap*7) map_i64_arr_Token_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Token map_i64_arr_Token_get(map_i64_arr_Token m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Token){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Token){0}; }
+static int64_t map_i64_arr_Token_has(map_i64_arr_Token m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Token_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Token_keys(map_i64_arr_Token m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Token_len(map_i64_arr_Token m){ return m->len; }
+static void map_i64_arr_Token_print(map_i64_arr_Token m){ (void)m; }
+static uint64_t map_i64_arr_StructDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_StructDef map_i64_arr_StructDef_new(void){ map_i64_arr_StructDef m=(map_i64_arr_StructDef)GC_MALLOC(sizeof(map_i64_arr_StructDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_StructDef*)GC_MALLOC(8*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_StructDef_grow(map_i64_arr_StructDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_StructDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_StructDef*)GC_MALLOC(nc*sizeof(arr_StructDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_StructDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_StructDef_set(map_i64_arr_StructDef m, int64_t k, arr_StructDef val){ if(m->len*10>=m->cap*7) map_i64_arr_StructDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_StructDef map_i64_arr_StructDef_get(map_i64_arr_StructDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_StructDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_StructDef){0}; }
+static int64_t map_i64_arr_StructDef_has(map_i64_arr_StructDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_StructDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_StructDef_keys(map_i64_arr_StructDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_StructDef_len(map_i64_arr_StructDef m){ return m->len; }
+static void map_i64_arr_StructDef_print(map_i64_arr_StructDef m){ (void)m; }
+static uint64_t map_i64_arr_EnumDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_EnumDef map_i64_arr_EnumDef_new(void){ map_i64_arr_EnumDef m=(map_i64_arr_EnumDef)GC_MALLOC(sizeof(map_i64_arr_EnumDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_EnumDef*)GC_MALLOC(8*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_EnumDef_grow(map_i64_arr_EnumDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_EnumDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_EnumDef*)GC_MALLOC(nc*sizeof(arr_EnumDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_EnumDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_EnumDef_set(map_i64_arr_EnumDef m, int64_t k, arr_EnumDef val){ if(m->len*10>=m->cap*7) map_i64_arr_EnumDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_EnumDef map_i64_arr_EnumDef_get(map_i64_arr_EnumDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_EnumDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_EnumDef){0}; }
+static int64_t map_i64_arr_EnumDef_has(map_i64_arr_EnumDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_EnumDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_EnumDef_keys(map_i64_arr_EnumDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_EnumDef_len(map_i64_arr_EnumDef m){ return m->len; }
+static void map_i64_arr_EnumDef_print(map_i64_arr_EnumDef m){ (void)m; }
+static uint64_t map_i64_arr_Func_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Func map_i64_arr_Func_new(void){ map_i64_arr_Func m=(map_i64_arr_Func)GC_MALLOC(sizeof(map_i64_arr_Func_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Func*)GC_MALLOC(8*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Func_grow(map_i64_arr_Func m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Func* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Func*)GC_MALLOC(nc*sizeof(arr_Func)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Func_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Func_set(map_i64_arr_Func m, int64_t k, arr_Func val){ if(m->len*10>=m->cap*7) map_i64_arr_Func_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Func map_i64_arr_Func_get(map_i64_arr_Func m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Func){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Func){0}; }
+static int64_t map_i64_arr_Func_has(map_i64_arr_Func m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Func_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Func_keys(map_i64_arr_Func m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Func_len(map_i64_arr_Func m){ return m->len; }
+static void map_i64_arr_Func_print(map_i64_arr_Func m){ (void)m; }
+static uint64_t map_i64_arr_ClassDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_ClassDef map_i64_arr_ClassDef_new(void){ map_i64_arr_ClassDef m=(map_i64_arr_ClassDef)GC_MALLOC(sizeof(map_i64_arr_ClassDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_ClassDef*)GC_MALLOC(8*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_ClassDef_grow(map_i64_arr_ClassDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_ClassDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_ClassDef*)GC_MALLOC(nc*sizeof(arr_ClassDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_ClassDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_ClassDef_set(map_i64_arr_ClassDef m, int64_t k, arr_ClassDef val){ if(m->len*10>=m->cap*7) map_i64_arr_ClassDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_ClassDef map_i64_arr_ClassDef_get(map_i64_arr_ClassDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_ClassDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_ClassDef){0}; }
+static int64_t map_i64_arr_ClassDef_has(map_i64_arr_ClassDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_ClassDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_ClassDef_keys(map_i64_arr_ClassDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_ClassDef_len(map_i64_arr_ClassDef m){ return m->len; }
+static void map_i64_arr_ClassDef_print(map_i64_arr_ClassDef m){ (void)m; }
+static uint64_t map_i64_arr_TraitDef_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_TraitDef map_i64_arr_TraitDef_new(void){ map_i64_arr_TraitDef m=(map_i64_arr_TraitDef)GC_MALLOC(sizeof(map_i64_arr_TraitDef_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_TraitDef*)GC_MALLOC(8*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_TraitDef_grow(map_i64_arr_TraitDef m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_TraitDef* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_TraitDef*)GC_MALLOC(nc*sizeof(arr_TraitDef)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_TraitDef_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_TraitDef_set(map_i64_arr_TraitDef m, int64_t k, arr_TraitDef val){ if(m->len*10>=m->cap*7) map_i64_arr_TraitDef_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_TraitDef map_i64_arr_TraitDef_get(map_i64_arr_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_TraitDef){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_TraitDef){0}; }
+static int64_t map_i64_arr_TraitDef_has(map_i64_arr_TraitDef m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_TraitDef_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_TraitDef_keys(map_i64_arr_TraitDef m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_TraitDef_len(map_i64_arr_TraitDef m){ return m->len; }
+static void map_i64_arr_TraitDef_print(map_i64_arr_TraitDef m){ (void)m; }
+static uint64_t map_i64_arr_P_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_P map_i64_arr_P_new(void){ map_i64_arr_P m=(map_i64_arr_P)GC_MALLOC(sizeof(map_i64_arr_P_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_P*)GC_MALLOC(8*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_P_grow(map_i64_arr_P m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_P* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_P*)GC_MALLOC(nc*sizeof(arr_P)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_P_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_P_set(map_i64_arr_P m, int64_t k, arr_P val){ if(m->len*10>=m->cap*7) map_i64_arr_P_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_P map_i64_arr_P_get(map_i64_arr_P m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_P){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_P){0}; }
+static int64_t map_i64_arr_P_has(map_i64_arr_P m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_P_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_P_keys(map_i64_arr_P m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_P_len(map_i64_arr_P m){ return m->len; }
+static void map_i64_arr_P_print(map_i64_arr_P m){ (void)m; }
+static uint64_t map_i64_arr_Binds_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Binds map_i64_arr_Binds_new(void){ map_i64_arr_Binds m=(map_i64_arr_Binds)GC_MALLOC(sizeof(map_i64_arr_Binds_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Binds*)GC_MALLOC(8*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Binds_grow(map_i64_arr_Binds m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Binds* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Binds*)GC_MALLOC(nc*sizeof(arr_Binds)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Binds_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Binds_set(map_i64_arr_Binds m, int64_t k, arr_Binds val){ if(m->len*10>=m->cap*7) map_i64_arr_Binds_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Binds map_i64_arr_Binds_get(map_i64_arr_Binds m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Binds){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Binds){0}; }
+static int64_t map_i64_arr_Binds_has(map_i64_arr_Binds m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Binds_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Binds_keys(map_i64_arr_Binds m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Binds_len(map_i64_arr_Binds m){ return m->len; }
+static void map_i64_arr_Binds_print(map_i64_arr_Binds m){ (void)m; }
+static uint64_t map_i64_arr_Syms_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Syms map_i64_arr_Syms_new(void){ map_i64_arr_Syms m=(map_i64_arr_Syms)GC_MALLOC(sizeof(map_i64_arr_Syms_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Syms*)GC_MALLOC(8*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Syms_grow(map_i64_arr_Syms m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Syms* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Syms*)GC_MALLOC(nc*sizeof(arr_Syms)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Syms_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Syms_set(map_i64_arr_Syms m, int64_t k, arr_Syms val){ if(m->len*10>=m->cap*7) map_i64_arr_Syms_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Syms map_i64_arr_Syms_get(map_i64_arr_Syms m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Syms){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Syms){0}; }
+static int64_t map_i64_arr_Syms_has(map_i64_arr_Syms m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Syms_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Syms_keys(map_i64_arr_Syms m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Syms_len(map_i64_arr_Syms m){ return m->len; }
+static void map_i64_arr_Syms_print(map_i64_arr_Syms m){ (void)m; }
+static uint64_t map_i64_arr_Expr_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Expr map_i64_arr_Expr_new(void){ map_i64_arr_Expr m=(map_i64_arr_Expr)GC_MALLOC(sizeof(map_i64_arr_Expr_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Expr*)GC_MALLOC(8*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Expr_grow(map_i64_arr_Expr m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Expr* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Expr*)GC_MALLOC(nc*sizeof(arr_Expr)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Expr_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Expr_set(map_i64_arr_Expr m, int64_t k, arr_Expr val){ if(m->len*10>=m->cap*7) map_i64_arr_Expr_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Expr map_i64_arr_Expr_get(map_i64_arr_Expr m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Expr){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Expr){0}; }
+static int64_t map_i64_arr_Expr_has(map_i64_arr_Expr m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Expr_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Expr_keys(map_i64_arr_Expr m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Expr_len(map_i64_arr_Expr m){ return m->len; }
+static void map_i64_arr_Expr_print(map_i64_arr_Expr m){ (void)m; }
+static uint64_t map_i64_arr_Stmt_hash(int64_t k){ uint64_t x=(uint64_t)(int64_t)k; x^=x>>30; x*=0xbf58476d1ce4e5b9ULL; x^=x>>27; x*=0x94d049bb133111ebULL; x^=x>>31; return x; }
+static map_i64_arr_Stmt map_i64_arr_Stmt_new(void){ map_i64_arr_Stmt m=(map_i64_arr_Stmt)GC_MALLOC(sizeof(map_i64_arr_Stmt_s)); m->cap=8; m->len=0; m->keys=(int64_t*)GC_MALLOC(8*sizeof(int64_t)); m->values=(arr_Stmt*)GC_MALLOC(8*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(8); memset(m->occupied,0,8); return m; }
+static void map_i64_arr_Stmt_grow(map_i64_arr_Stmt m){ int64_t oc=m->cap; int64_t* ok=m->keys; arr_Stmt* ov=m->values; unsigned char* oo=m->occupied; int64_t nc=oc*2; m->cap=nc; m->keys=(int64_t*)GC_MALLOC(nc*sizeof(int64_t)); m->values=(arr_Stmt*)GC_MALLOC(nc*sizeof(arr_Stmt)); m->occupied=(unsigned char*)GC_MALLOC(nc); memset(m->occupied,0,nc); uint64_t mask=(uint64_t)(nc-1); for(int64_t i=0;i<oc;i++){ if(!oo[i]) continue; uint64_t h=map_i64_arr_Stmt_hash(ok[i])&mask; for(int64_t p=0;p<nc;p++){ int64_t j=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[j]){ m->keys[j]=ok[i]; m->values[j]=ov[i]; m->occupied[j]=1; break; } } } }
+static void map_i64_arr_Stmt_set(map_i64_arr_Stmt m, int64_t k, arr_Stmt val){ if(m->len*10>=m->cap*7) map_i64_arr_Stmt_grow(m); uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]){ m->keys[i]=k; m->values[i]=val; m->occupied[i]=1; m->len++; return; } if(m->keys[i]==k){ m->values[i]=val; return; } } }
+static arr_Stmt map_i64_arr_Stmt_get(map_i64_arr_Stmt m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return (arr_Stmt){0}; if(m->keys[i]==k) return m->values[i]; } return (arr_Stmt){0}; }
+static int64_t map_i64_arr_Stmt_has(map_i64_arr_Stmt m, int64_t k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h=map_i64_arr_Stmt_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if(m->keys[i]==k) return 1; } return 0; }
+static arr_i64 map_i64_arr_Stmt_keys(map_i64_arr_Stmt m){ arr_i64 r=arr_i64_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_i64_push(r,m->keys[i]); return r; }
+static int64_t map_i64_arr_Stmt_len(map_i64_arr_Stmt m){ return m->len; }
+static void map_i64_arr_Stmt_print(map_i64_arr_Stmt m){ (void)m; }
 typedef struct { int tag; int64_t ok; const char* err; } res_i64;
 static res_i64 mk_ok_i64(int64_t v){ res_i64 r; r.tag=0; r.ok=v; r.err=""; return r; }
 static res_i64 mk_err_i64(const char* m){ res_i64 r; r.tag=1; r.err=m; return r; }
@@ -1075,6 +1433,9 @@ int64_t f_ckind(s_P* v_p);
 const char* f_ctext(s_P* v_p);
 void f_adv(s_P* v_p);
 const char* f_tok_name(int64_t v_k);
+int64_t f_want_json(void);
+const char* f_diag_code(const char* v_msg);
+const char* f_json_escape(const char* v_s);
 void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_eat(s_P* v_p, int64_t v_k);
@@ -1273,6 +1634,8 @@ const char* f_block_type(s_Syms* v_sy, arr_Stmt v_body);
 const char* f_gen_blk_decl(s_Syms* v_sy, const char* v_name, s_Expr v_e);
 const char* f_gen_blk_stmt(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_blk_tail(s_Syms* v_sy, s_Stmt v_s);
+const char* f_blk_pretype(s_Syms* v_sy, const char* v_name, s_Expr v_e);
+const char* f_hoist_blk_nested(s_Syms* v_sy, s_Stmt v_s);
 const char* f_gen_block_e(s_Syms* v_sy, arr_Stmt v_body);
 const char* f_gen_if(s_Syms* v_sy, s_Expr v_c, arr_Stmt v_b, arr_Stmt v_eb, const char* v_ind);
 const char* f_gen_stmts(s_Syms* v_sy, arr_Stmt v_body, const char* v_ind);
@@ -1304,6 +1667,8 @@ const char* f_gen_arr_helpers(const char* v_suf, const char* v_et);
 const char* f_pf_spec(const char* v_t);
 const char* f_pf_arg(const char* v_t, const char* v_slot);
 int64_t f_is_scalar_ty(const char* v_t);
+int64_t f_arr_elem_printable(const char* v_vt);
+int64_t f_map_printable(const char* v_t);
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt);
 const char* f_gen_map_fwd(const char* v_nm);
 const char* f_gen_map_node(const char* v_nm, const char* v_kt, const char* v_vt);
@@ -1393,6 +1758,7 @@ s_EnumDef f_gen_enum_instance(s_EnumDef v_gt, arr_str v_args);
 arr_EnumDef f_collect_enum_inst(arr_EnumDef v_enums, arr_EnumDef v_genums, const char* v_ty);
 const char* f_var_name(s_Expr v_e);
 int64_t f_is_empty_maplit(s_Expr v_e);
+const char* f_maplit_ann(s_Expr v_e);
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m);
 const char* f_scan_loopin(s_Syms* v_sy, const char* v_vnm, s_Expr v_coll, arr_Stmt v_b, const char* v_m);
 const char* f_scan_loopkv(s_Syms* v_sy, const char* v_kn, const char* v_vn, s_Expr v_coll, arr_Stmt v_b, const char* v_m);
@@ -1434,7 +1800,8 @@ int64_t f_chk_kv(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, i
 int64_t f_chk_try(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_x, int64_t v_pos, const char* v_src);
 int64_t f_homog_check(s_Syms* v_sy, arr_Expr v_elems, const char* v_msg, int64_t v_pos, const char* v_src);
 int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_pos, const char* v_src);
-int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
+int64_t f_map_combo_check(s_Syms* v_sy, const char* v_t, int64_t v_pos, const char* v_src);
+int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, const char* v_mty, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src);
 int64_t f_vn_has(arr_str v_vnames, const char* v_v);
 int64_t f_vn_has_ug(arr_str v_vnames, arr_Expr v_guards, const char* v_v);
 int64_t f_match_check(s_Syms* v_sy, s_Expr v_scrut, arr_str v_vnames, arr_str v_vbinds, arr_Expr v_guards, int64_t v_pos, const char* v_src);
@@ -1448,6 +1815,7 @@ const char* f_concrete_of_tparam(s_Syms* v_sy, s_Func v_f, const char* v_tp, arr
 arr_str f_class_methods(s_Syms* v_sy, const char* v_cls);
 int64_t f_generic_bound_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
+int64_t f_map_values_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src);
 int64_t f_chk_field(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, const char* v_fname, int64_t v_pos, const char* v_src);
 int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, int64_t v_pos, const char* v_src);
@@ -1485,6 +1853,7 @@ arr_str f_module_fn_names(const char* v_body);
 const char* f_prefix_idents(const char* v_src, arr_str v_names, const char* v_pfx);
 const char* f_rewrite_qualified(const char* v_src, arr_str v_aliases);
 const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str v_seen);
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link);
 
 int64_t f_TK_EOF(void) {
     return 0;
@@ -2079,11 +2448,130 @@ const char* f_tok_name(int64_t v_k) {
     return "the expected token";
 }
 
+int64_t f_want_json(void) {
+    arr_str v_av;
+    int64_t v_i;
+    v_av = ailang_args();
+    v_i = 0;
+    while ((v_i < arr_str_len(v_av))) {
+        if ((strcmp(arr_str_get(v_av, v_i), "--") == 0)) {
+            return (1 != 1);
+        }
+        if ((strcmp(arr_str_get(v_av, v_i), "--json") == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+const char* f_diag_code(const char* v_msg) {
+    if (str_contains(v_msg, "non-exhaustive match")) {
+        return "AIL2001";
+    }
+    if (str_contains(v_msg, "unknown variant")) {
+        return "AIL2002";
+    }
+    if (str_contains(v_msg, "match on non-enum")) {
+        return "AIL2003";
+    }
+    if (str_contains(v_msg, "guard cannot be combined")) {
+        return "AIL2004";
+    }
+    if (str_contains(v_msg, "field(s)")) {
+        return "AIL2005";
+    }
+    if (str_contains(v_msg, "does not satisfy bound")) {
+        return "AIL3001";
+    }
+    if (str_contains(v_msg, "missing method")) {
+        return "AIL3002";
+    }
+    if (str_contains(v_msg, "operator ")) {
+        return "AIL3003";
+    }
+    if (str_contains(v_msg, "used outside a function returning")) {
+        return "AIL4001";
+    }
+    if (str_contains(v_msg, "but function returns")) {
+        return "AIL4002";
+    }
+    if (str_contains(v_msg, "must be an inline lambda")) {
+        return "AIL1006";
+    }
+    if (str_contains(v_msg, "callback takes")) {
+        return "AIL1002";
+    }
+    if (str_contains(v_msg, "arguments, got")) {
+        return "AIL1002";
+    }
+    if (str_contains(v_msg, "expects")) {
+        return "AIL1003";
+    }
+    if (str_contains(v_msg, "cannot index")) {
+        return "AIL1004";
+    }
+    if (str_contains(v_msg, "map value")) {
+        return "AIL5002";
+    }
+    if (str_contains(v_msg, "values() on a map")) {
+        return "AIL5003";
+    }
+    if (str_contains(v_msg, "key")) {
+        return "AIL5001";
+    }
+    if (str_contains(v_msg, "did you mean")) {
+        return "AIL6001";
+    }
+    if (str_contains(v_msg, "cannot assign")) {
+        return "AIL1001";
+    }
+    if (str_contains(v_msg, "type mismatch")) {
+        return "AIL1001";
+    }
+    return "AIL0000";
+}
+
+const char* f_json_escape(const char* v_s) {
+    const char* v_o;
+    int64_t v_i;
+    int64_t v_c;
+    v_o = "";
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_s)))) {
+        v_c = ((int64_t)(unsigned char)(v_s)[v_i]);
+        if ((v_c == 34)) {
+            v_o = scat(v_o, "\\\"");
+        } else {
+            if ((v_c == 92)) {
+                v_o = scat(v_o, "\\\\");
+            } else {
+                if ((v_c == 10)) {
+                    v_o = scat(v_o, "\\n");
+                } else {
+                    if ((v_c == 13)) {
+                        v_o = scat(v_o, "\\r");
+                    } else {
+                        if ((v_c == 9)) {
+                            v_o = scat(v_o, "\\t");
+                        } else {
+                            v_o = scat(v_o, chr(v_c));
+                        }
+                    }
+                }
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return v_o;
+}
+
 void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg) {
     int64_t v_line;
     int64_t v_lstart;
     int64_t v_i;
     int64_t v_lend;
+    int64_t v_col;
     const char* v_caret;
     int64_t v_k;
     v_line = 1;
@@ -2103,15 +2591,20 @@ void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg) {
         }
         v_lend = (v_lend + 1);
     }
-    printf("%s\n", scat(scat(scat(scat(scat("error ", i2s(v_line)), ":"), i2s(((v_pos - v_lstart) + 1))), ": "), v_msg));
-    printf("%s\n", scat("  ", substr(v_src, v_lstart, v_lend)));
-    v_caret = "  ";
-    v_k = v_lstart;
-    while ((v_k < v_pos)) {
-        v_caret = scat(v_caret, " ");
-        v_k = (v_k + 1);
+    v_col = ((v_pos - v_lstart) + 1);
+    if (f_want_json()) {
+        printf("%s\n", scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("{\"severity\":\"error\",\"code\":\"", f_diag_code(v_msg)), "\",\"line\":"), i2s(v_line)), ",\"col\":"), i2s(v_col)), ",\"message\":\""), f_json_escape(v_msg)), "\",\"source\":\""), f_json_escape(substr(v_src, v_lstart, v_lend))), "\"}"));
+    } else {
+        printf("%s\n", scat(scat(scat(scat(scat("error ", i2s(v_line)), ":"), i2s(v_col)), ": "), v_msg));
+        printf("%s\n", scat("  ", substr(v_src, v_lstart, v_lend)));
+        v_caret = "  ";
+        v_k = v_lstart;
+        while ((v_k < v_pos)) {
+            v_caret = scat(v_caret, " ");
+            v_k = (v_k + 1);
+        }
+        printf("%s\n", scat(v_caret, "^"));
     }
-    printf("%s\n", scat(v_caret, "^"));
 }
 
 void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg) {
@@ -4346,9 +4839,11 @@ const char* f_fkey(const char* v_sname, const char* v_fname) {
 const char* f_arr_suffix(const char* v_ety) {
     if ((strcmp(v_ety, "bool") == 0)) {
         return "i64";
-    } else {
-        return v_ety;
     }
+    if (f_is_array_ann(v_ety)) {
+        return scat("arr_", f_arr_suffix(f_elem_of_ann(v_ety)));
+    }
+    return v_ety;
 }
 
 int64_t f_is_c_type_ann(const char* v_ty) {
@@ -4503,13 +4998,19 @@ const char* f_bin_type(s_Syms* v_sy, int64_t v_op, s_Expr v_l, s_Expr v_r) {
 }
 
 int64_t f_is_native_call(const char* v_fname) {
-    if (((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_connect_host") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
         return (1 == 1);
     }
-    if ((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
+    if (((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_exec_params") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return (1 == 1);
     }
-    if ((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "myq_exec_params") == 0)) || (strcmp(v_fname, "myq_query_one_params") == 0))) {
+        return (1 == 1);
+    }
+    if ((((((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0)) || (strcmp(v_fname, "fs_size") == 0)) || (strcmp(v_fname, "fs_mtime") == 0)) || (strcmp(v_fname, "fs_list_dir") == 0))) {
+        return (1 == 1);
+    }
+    if (((((((((((((((((strcmp(v_fname, "sq_open") == 0) || (strcmp(v_fname, "sq_close") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_exec") == 0)) || (strcmp(v_fname, "sq_prepare") == 0)) || (strcmp(v_fname, "sq_step") == 0)) || (strcmp(v_fname, "sq_ncols") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0)) || (strcmp(v_fname, "sq_finalize") == 0)) || (strcmp(v_fname, "sq_changes") == 0)) || (strcmp(v_fname, "sq_last_id") == 0)) || (strcmp(v_fname, "sq_bind_text") == 0)) || (strcmp(v_fname, "sq_bind_int") == 0)) || (strcmp(v_fname, "sq_bind_null") == 0)) || (strcmp(v_fname, "sq_reset") == 0))) {
         return (1 == 1);
     }
     return (1 != 1);
@@ -4742,7 +5243,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if ((strcmp(v_fname, "split") == 0)) {
         return "[str]";
     }
-    if ((((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0))) {
+    if (((((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "assert") == 0))) {
         return "i64";
     }
     if ((strcmp(v_fname, "time_iso") == 0)) {
@@ -4778,7 +5279,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "pop") == 0) && (arr_Expr_len(v_args) > 0))) {
         return f_type_of_expr(v_sy, arr_Expr_get(v_args, 0));
     }
-    if ((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "myq_query_one_params") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0))) {
         return "str";
     }
     if ((((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
@@ -4786,6 +5287,12 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "pg_ok") == 0) || (strcmp(v_fname, "pg_isnull") == 0))) {
         return "bool";
+    }
+    if (((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0))) {
+        return "bool";
+    }
+    if ((strcmp(v_fname, "fs_list_dir") == 0)) {
+        return "[str]";
     }
     if (f_is_native_call(v_fname)) {
         return "i64";
@@ -4852,7 +5359,7 @@ const char* f_tcon_var(s_Syms* v_sy, const char* v_name) {
 }
 
 const char* f_builtin_fixed_ret(const char* v_fname) {
-    if ((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
+    if (((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "assert") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
         return "i64";
     }
     if (((((((((((((((((((((((((strcmp(v_fname, "to_str") == 0) || (strcmp(v_fname, "cstr") == 0)) || (strcmp(v_fname, "int_to_str") == 0)) || (strcmp(v_fname, "float_to_str") == 0)) || (strcmp(v_fname, "substring") == 0)) || (strcmp(v_fname, "read_file") == 0)) || (strcmp(v_fname, "bytes_to_str") == 0)) || (strcmp(v_fname, "err_msg") == 0)) || (strcmp(v_fname, "time_iso") == 0)) || (strcmp(v_fname, "regex_find") == 0)) || (strcmp(v_fname, "to_upper") == 0)) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "read_stdin") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
@@ -5631,6 +6138,9 @@ const char* f_subst_multi(s_Syms* v_sy, s_Func v_f, const char* v_ty, arr_Expr v
         }
         v_i = (v_i + 1);
     }
+    if (f_is_map_ann(v_ty)) {
+        return scat(scat(scat(scat("{", f_subst_multi(v_sy, v_f, f_map_ktype(v_ty), v_args)), ":"), f_subst_multi(v_sy, v_f, f_map_vtype(v_ty), v_args)), "}");
+    }
     return v_ty;
 }
 
@@ -6036,7 +6546,7 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
         if ((strcmp(v_t, "bytes") == 0)) {
             return scat(scat("(print_bytes(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), putchar(10))");
         }
-        if ((f_is_map_ann(v_t) && f_is_scalar_ty(f_map_vtype(v_t)))) {
+        if ((f_is_map_ann(v_t) && f_map_printable(v_t))) {
             return scat(scat(scat(scat("(", f_map_cty(v_t)), "_print("), f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), putchar(10))");
         }
         return scat(scat("printf(\"%lld\\n\", (long long)(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "))");
@@ -6088,6 +6598,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "exit") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("exit((int)(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "))");
+    }
+    if (((strcmp(v_fname, "assert") == 0) && (arr_Expr_len(v_args) == 2))) {
+        return scat(scat(scat(scat("ail_assert_check((", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), "), f_gen_expr(v_sy, arr_Expr_get(v_args, 1))), ")");
     }
     if (((strcmp(v_fname, "ok") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat(scat(scat("mk_ok_", f_arr_suffix(f_type_of_expr(v_sy, arr_Expr_get(v_args, 0)))), "("), f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ")");
@@ -6346,6 +6859,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
         if (f_has_sub(v_fname, "myq_")) {
             map_str_str_set((v_sy)->evar, "@uses.mysql", "1");
         }
+        if (f_has_sub(v_fname, "sq_")) {
+            map_str_str_set((v_sy)->evar, "@uses.sqlite", "1");
+        }
         return scat(scat(scat(v_fname, "("), f_gen_args(v_sy, v_args)), ")");
     }
     if (f_is_gstruct(v_sy, v_fname)) {
@@ -6542,15 +7058,30 @@ const char* f_gen_blk_tail(s_Syms* v_sy, s_Stmt v_s) {
     return ({ const char* __m; s_Stmt __s = v_s; if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = scat(f_gen_expr(v_sy, v_e), "; "); } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = scat(f_gen_expr(v_sy, v_e), "; "); } else if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = scat(f_gen_blk_decl(v_sy, v_name, v_e), "0; "); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_i = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = scat(f_gen_stmt(v_sy, v_s, ""), "0; "); } else if(__s.tag==12){ __m = "break; 0; "; } else if(__s.tag==13){ __m = "continue; 0; "; } __m; });
 }
 
+const char* f_blk_pretype(s_Syms* v_sy, const char* v_name, s_Expr v_e) {
+    f_set_ty(v_sy, v_name, f_type_of_expr(v_sy, v_e));
+    return "";
+}
+
+const char* f_hoist_blk_nested(s_Syms* v_sy, s_Stmt v_s) {
+    return ({ const char* __m; s_Stmt __s = v_s; if(__s.tag==0){ const char* v_name = __s.u.SDecl.f0; s_Expr v_e = *(__s.u.SDecl.f1); __m = f_blk_pretype(v_sy, v_name, v_e); } else if(__s.tag==1){ arr_str v_names = __s.u.SDestructure.f0; s_Expr v_e = *(__s.u.SDestructure.f1); __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==2){ const char* v_name = __s.u.SAssign.f0; s_Expr v_e = *(__s.u.SAssign.f1); __m = ""; } else if(__s.tag==3){ s_Expr v_o = *(__s.u.SIdxAssign.f0); s_Expr v_i = *(__s.u.SIdxAssign.f1); s_Expr v_e = *(__s.u.SIdxAssign.f2); __m = ""; } else if(__s.tag==4){ s_Expr v_o = *(__s.u.SFieldAssign.f0); const char* v_f = __s.u.SFieldAssign.f1; s_Expr v_e = *(__s.u.SFieldAssign.f2); __m = ""; } else if(__s.tag==5){ s_Expr v_e = *(__s.u.SReturn.f0); __m = ""; } else if(__s.tag==6){ s_Expr v_e = *(__s.u.SPrint.f0); __m = ""; } else if(__s.tag==7){ s_Expr v_c = *(__s.u.SIf.f0); arr_Stmt v_b = __s.u.SIf.f1; arr_Stmt v_eb = __s.u.SIf.f2; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==8){ s_Expr v_c = *(__s.u.SLoop.f0); arr_Stmt v_b = __s.u.SLoop.f1; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==9){ const char* v_vnm = __s.u.SLoopIn.f0; s_Expr v_coll = *(__s.u.SLoopIn.f1); arr_Stmt v_b = __s.u.SLoopIn.f2; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==10){ const char* v_kn = __s.u.SLoopKV.f0; const char* v_vn = __s.u.SLoopKV.f1; s_Expr v_coll = *(__s.u.SLoopKV.f2); arr_Stmt v_b = __s.u.SLoopKV.f3; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==11){ const char* v_v = __s.u.SLoopRange.f0; s_Expr v_lo = *(__s.u.SLoopRange.f1); s_Expr v_hi = *(__s.u.SLoopRange.f2); arr_Stmt v_b = __s.u.SLoopRange.f3; __m = f_hoist_stmt(v_sy, v_s, ""); } else if(__s.tag==12){ __m = ""; } else if(__s.tag==13){ __m = ""; } else if(__s.tag==14){ s_Expr v_e = *(__s.u.SExpr.f0); __m = ""; } __m; });
+}
+
 const char* f_gen_block_e(s_Syms* v_sy, arr_Stmt v_body) {
     int64_t v_n;
     const char* v_out;
+    int64_t v_hi;
     int64_t v_i;
     v_n = arr_Stmt_len(v_body);
     if ((v_n == 0)) {
         return "0";
     }
     v_out = "({ ";
+    v_hi = 0;
+    while ((v_hi < v_n)) {
+        v_out = scat(v_out, f_hoist_blk_nested(v_sy, arr_Stmt_get(v_body, v_hi)));
+        v_hi = (v_hi + 1);
+    }
     v_i = 0;
     while ((v_i < (v_n - 1))) {
         v_out = scat(v_out, f_gen_blk_stmt(v_sy, arr_Stmt_get(v_body, v_i)));
@@ -6677,7 +7208,7 @@ const char* f_gen_print(s_Syms* v_sy, s_Expr v_e, const char* v_ind) {
             return scat(scat(scat(scat(scat(v_ind, "print_arr_"), v_suf), "("), f_gen_expr(v_sy, v_e)), "); putchar(10);\n");
         }
     }
-    if ((f_is_map_ann(v_t) && f_is_scalar_ty(f_map_vtype(v_t)))) {
+    if ((f_is_map_ann(v_t) && f_map_printable(v_t))) {
         return scat(scat(scat(scat(v_ind, f_map_cty(v_t)), "_print("), f_gen_expr(v_sy, v_e)), "); putchar(10);\n");
     }
     return scat(scat(scat(v_ind, "printf(\"%lld\\n\", (long long)("), f_gen_expr(v_sy, v_e)), "));\n");
@@ -6934,15 +7465,38 @@ int64_t f_is_scalar_ty(const char* v_t) {
     return (((strcmp(v_t, "str") == 0) || (strcmp(v_t, "i64") == 0)) || (strcmp(v_t, "f64") == 0));
 }
 
+int64_t f_arr_elem_printable(const char* v_vt) {
+    const char* v_es;
+    if ((f_is_array_ann(v_vt) == (1 != 1))) {
+        return (1 != 1);
+    }
+    v_es = f_arr_suffix(f_elem_of_ann(v_vt));
+    return ((strcmp(v_es, "i64") == 0) || (strcmp(v_es, "str") == 0));
+}
+
+int64_t f_map_printable(const char* v_t) {
+    const char* v_vt;
+    v_vt = f_map_vtype(v_t);
+    if (f_is_scalar_ty(v_vt)) {
+        return (1 == 1);
+    }
+    return f_arr_elem_printable(v_vt);
+}
+
 const char* f_gen_map_print(const char* v_nm, const char* v_kt, const char* v_vt) {
-    const char* v_fmt;
     const char* v_ka;
+    const char* v_fmt;
     const char* v_va;
+    const char* v_es;
+    v_ka = f_pf_arg(v_kt, "m->keys[i]");
     if (f_is_scalar_ty(v_vt)) {
         v_fmt = scat(scat(f_pf_spec(v_kt), ": "), f_pf_spec(v_vt));
-        v_ka = f_pf_arg(v_kt, "m->keys[i]");
         v_va = f_pf_arg(v_vt, "m->values[i]");
         return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), v_fmt), "\", "), v_ka), ", "), v_va), "); } printf(\"}\"); }\n");
+    }
+    if (f_arr_elem_printable(v_vt)) {
+        v_es = f_arr_suffix(f_elem_of_ann(v_vt));
+        return scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ printf(\"{\"); int64_t __f=1; for(int64_t i=0;i<m->cap;i++){ if(!m->occupied[i]) continue; if(!__f) printf(\", \"); __f=0; printf(\""), f_pf_spec(v_kt)), ": \", "), v_ka), "); print_arr_"), v_es), "(m->values[i]); } printf(\"}\"); }\n");
     }
     return scat(scat(scat(scat("static void ", v_nm), "_print("), v_nm), " m){ (void)m; }\n");
 }
@@ -6982,7 +7536,9 @@ const char* f_gen_map_helpers(const char* v_nm, const char* v_kt, const char* v_
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static "), v_vc), " "), v_nm), "_get("), v_nm), " m, "), v_kc), " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h="), v_nm), "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return "), v_dflt), "; if("), v_keyeq), ") return m->values[i]; } return "), v_dflt), "; }\n");
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static int64_t "), v_nm), "_has("), v_nm), " m, "), v_kc), " k){ uint64_t mask=(uint64_t)(m->cap-1); uint64_t h="), v_nm), "_hash(k)&mask; for(int64_t p=0;p<m->cap;p++){ int64_t i=(int64_t)((h+(uint64_t)p)&mask); if(!m->occupied[i]) return 0; if("), v_keyeq), ") return 1; } return 0; }\n");
     v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_ksuf), " "), v_nm), "_keys("), v_nm), " m){ arr_"), v_ksuf), " r=arr_"), v_ksuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_ksuf), "_push(r,m->keys[i]); return r; }\n");
-    v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_vsuf), " "), v_nm), "_values("), v_nm), " m){ arr_"), v_vsuf), " r=arr_"), v_vsuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_vsuf), "_push(r,m->values[i]); return r; }\n");
+    if ((f_is_array_ann(v_vt) == (1 != 1))) {
+        v_o = scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(scat(v_o, "static arr_"), v_vsuf), " "), v_nm), "_values("), v_nm), " m){ arr_"), v_vsuf), " r=arr_"), v_vsuf), "_new(); for(int64_t i=0;i<m->cap;i++) if(m->occupied[i]) r=arr_"), v_vsuf), "_push(r,m->values[i]); return r; }\n");
+    }
     v_o = scat(scat(scat(scat(scat(v_o, "static int64_t "), v_nm), "_len("), v_nm), " m){ return m->len; }\n");
     v_o = scat(v_o, f_gen_map_print(v_nm, v_kt, v_vt));
     return v_o;
@@ -6997,6 +7553,9 @@ const char* f_map_dflt(const char* v_vt) {
     }
     if ((strcmp(v_vt, "f64") == 0)) {
         return "0";
+    }
+    if (f_is_array_ann(v_vt)) {
+        return scat(scat("(", f_cty(v_vt)), "){0}");
     }
     return scat(scat("(s_", v_vt), "){0}");
 }
@@ -8022,6 +8581,10 @@ int64_t f_is_empty_maplit(s_Expr v_e) {
     return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = (arr_Expr_len(v_mks) == 0); } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = (1 != 1); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = (1 != 1); } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = (1 != 1); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = (1 != 1); } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = (1 != 1); } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = (1 != 1); } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = (1 != 1); } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = (1 != 1); } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = (1 != 1); } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = (1 != 1); } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = (1 != 1); } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = (1 != 1); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = (1 != 1); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = (1 != 1); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = (1 != 1); } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = (1 != 1); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = (1 != 1); } else if(__s.tag==18){ __m = (1 != 1); } __m; });
 }
 
+const char* f_maplit_ann(s_Expr v_e) {
+    return ({ const char* __m; s_Expr __s = v_e; if(__s.tag==10){ const char* v_ml = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = v_ml; } else if(__s.tag==16){ arr_Expr v_tes = __s.u.Tuple.f0; __m = ""; } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = ""; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = ""; } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = ""; } else if(__s.tag==1){ const char* v_fs = __s.u.Flt.f0; __m = ""; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = ""; } else if(__s.tag==4){ int64_t v_o = __s.u.Bin.f0; s_Expr v_a = *(__s.u.Bin.f1); s_Expr v_b = *(__s.u.Bin.f2); __m = ""; } else if(__s.tag==5){ int64_t v_o = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = ""; } else if(__s.tag==6){ const char* v_f = __s.u.Call.f0; arr_Expr v_a = __s.u.Call.f1; __m = ""; } else if(__s.tag==7){ s_Expr v_o = *(__s.u.Field.f0); const char* v_f = __s.u.Field.f1; __m = ""; } else if(__s.tag==8){ s_Expr v_o = *(__s.u.Index.f0); s_Expr v_ix = *(__s.u.Index.f1); __m = ""; } else if(__s.tag==9){ arr_Expr v_es = __s.u.Array.f0; const char* v_et = __s.u.Array.f1; __m = ""; } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = ""; } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; __m = ""; } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = ""; } else if(__s.tag==14){ s_Expr v_e2 = *(__s.u.Try.f0); __m = ""; } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = ""; } else if(__s.tag==18){ __m = ""; } __m; });
+}
+
 const char* f_map_assign_type(s_Syms* v_sy, arr_Stmt v_body, const char* v_m) {
     int64_t v_i;
     const char* v_t;
@@ -8117,7 +8680,7 @@ const char* f_array_elem_from_push(s_Syms* v_sy, arr_Stmt v_body, const char* v_
 s_Stmt f_stamp_decl_e(s_Syms* v_sy, arr_Stmt v_body, const char* v_name, s_Expr v_e, int64_t v_pos) {
     const char* v_t;
     const char* v_et;
-    if (f_is_empty_maplit(v_e)) {
+    if ((f_is_empty_maplit(v_e) && (((int64_t)strlen(f_maplit_ann(v_e))) == 0))) {
         v_t = f_map_assign_type(v_sy, v_body, v_name);
         if ((((int64_t)strlen(v_t)) > 0)) {
             return mkv_SDecl(v_name, mkv_MapLit(v_t, f_no_exprs(), f_no_exprs()), v_pos);
@@ -8507,9 +9070,43 @@ int64_t f_chk_array(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_elems, int64_t v_
     return 0;
 }
 
-int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src) {
+int64_t f_map_combo_check(s_Syms* v_sy, const char* v_t, int64_t v_pos, const char* v_src) {
+    const char* v_kt;
+    const char* v_vt;
+    const char* v_ev;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if ((f_is_map_ann(v_t) == (1 != 1))) {
+        return 0;
+    }
+    v_kt = f_map_ktype(v_t);
+    v_vt = f_map_vtype(v_t);
+    if (f_is_map_ann(v_vt)) {
+        f_report_chk(v_sy, v_src, v_pos, scat("unsupported map value type ", v_vt));
+        return 0;
+    }
+    if (f_is_array_ann(v_vt)) {
+        v_ev = f_elem_of_ann(v_vt);
+        if ((f_is_array_ann(v_ev) || f_is_map_ann(v_ev))) {
+            f_report_chk(v_sy, v_src, v_pos, scat("unsupported map value type ", v_vt));
+            return 0;
+        }
+        if ((((strcmp(v_kt, "str") != 0) && (strcmp(v_kt, "i64") != 0)) && (strcmp(v_kt, "bool") != 0))) {
+            f_report_chk(v_sy, v_src, v_pos, scat("a map with array values requires a str or i64 key, got ", v_kt));
+            return 0;
+        }
+    }
+    if ((f_is_array_ann(v_kt) || f_is_map_ann(v_kt))) {
+        f_report_chk(v_sy, v_src, v_pos, scat("unsupported map key type ", v_kt));
+    }
+    return 0;
+}
+
+int64_t f_chk_maplit(arr_Func v_funcs, s_Syms* v_sy, const char* v_mty, arr_Expr v_ks, arr_Expr v_vs, int64_t v_pos, const char* v_src) {
     f_homog_check(v_sy, v_ks, "map literal mixes key types", v_pos, v_src);
     f_homog_check(v_sy, v_vs, "map literal mixes value types", v_pos, v_src);
+    f_map_combo_check(v_sy, f_maplit_type(v_sy, v_mty, v_ks, v_vs), v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_ks, v_pos, v_src);
     f_chk_args(v_funcs, v_sy, v_vs, v_pos, v_src);
     return 0;
@@ -8662,20 +9259,27 @@ int64_t f_lambda_arity(s_Expr v_e) {
 
 int64_t f_hof_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     int64_t v_want;
+    int64_t v_cbidx;
     int64_t v_i;
     int64_t v_np;
     if ((v_pos < 0)) {
         return 0;
     }
     v_want = (0 - 1);
+    v_cbidx = (0 - 1);
     if (((strcmp(v_fname, "map") == 0) || (strcmp(v_fname, "filter") == 0))) {
         v_want = 1;
+        v_cbidx = 1;
     }
     if ((strcmp(v_fname, "reduce") == 0)) {
         v_want = 2;
+        v_cbidx = 2;
     }
     if ((v_want < 0)) {
         return 0;
+    }
+    if ((((v_cbidx >= 0) && (v_cbidx < arr_Expr_len(v_args))) && (f_lambda_arity(arr_Expr_get(v_args, v_cbidx)) < 0))) {
+        f_report_chk(v_sy, v_src, v_pos, scat(scat("the function argument to '", v_fname), "' must be an inline lambda (fn(x) …); a stored or named function isn't supported here — use std/seq.ail (keep/map_to/fold) for that"));
     }
     v_i = 0;
     while ((v_i < arr_Expr_len(v_args))) {
@@ -8811,7 +9415,22 @@ int64_t f_ok_ret_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64
     return 0;
 }
 
+int64_t f_map_values_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    const char* v_t;
+    if ((v_pos < 0)) {
+        return 0;
+    }
+    if (((strcmp(v_fname, "values") == 0) && (arr_Expr_len(v_args) == 1))) {
+        v_t = f_type_confident(v_sy, arr_Expr_get(v_args, 0));
+        if ((f_is_map_ann(v_t) && f_is_array_ann(f_map_vtype(v_t)))) {
+            f_report_chk(v_sy, v_src, v_pos, "values() on a map with array values is not supported (iterate keys() instead)");
+        }
+    }
+    return 0;
+}
+
 int64_t f_chk_call(arr_Func v_funcs, s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
+    f_map_values_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_callarg_check(v_funcs, v_sy, v_fname, v_args, v_pos, v_src);
     f_ctor_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
     f_variant_arg_check(v_sy, v_fname, v_args, v_pos, v_src);
@@ -8837,7 +9456,7 @@ int64_t f_chk_index(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_obj, s_Expr v_idx, 
 }
 
 int64_t f_check_expr(arr_Func v_funcs, s_Syms* v_sy, s_Expr v_e, int64_t v_pos, const char* v_src) {
-    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_gd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
+    return ({ int64_t __m; s_Expr __s = v_e; if(__s.tag==4){ int64_t v_op = __s.u.Bin.f0; s_Expr v_l = *(__s.u.Bin.f1); s_Expr v_r = *(__s.u.Bin.f2); __m = f_chk_bin(v_funcs, v_sy, v_op, v_l, v_r, v_pos, v_src); } else if(__s.tag==6){ const char* v_fname = __s.u.Call.f0; arr_Expr v_args = __s.u.Call.f1; __m = f_chk_call(v_funcs, v_sy, v_fname, v_args, v_pos, v_src); } else if(__s.tag==7){ s_Expr v_obj = *(__s.u.Field.f0); const char* v_fnm = __s.u.Field.f1; __m = f_chk_field(v_funcs, v_sy, v_obj, v_fnm, v_pos, v_src); } else if(__s.tag==8){ s_Expr v_obj = *(__s.u.Index.f0); s_Expr v_idx = *(__s.u.Index.f1); __m = f_chk_index(v_funcs, v_sy, v_obj, v_idx, v_pos, v_src); } else if(__s.tag==5){ int64_t v_op = __s.u.Unary.f0; s_Expr v_x = *(__s.u.Unary.f1); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==11){ s_Expr v_x = *(__s.u.Addr.f0); __m = f_check_expr(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==9){ arr_Expr v_elems = __s.u.Array.f0; const char* v_ety = __s.u.Array.f1; __m = f_chk_array(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==10){ const char* v_mty = __s.u.MapLit.f0; arr_Expr v_mks = __s.u.MapLit.f1; arr_Expr v_mvs = __s.u.MapLit.f2; __m = f_chk_maplit(v_funcs, v_sy, v_mty, v_mks, v_mvs, v_pos, v_src); } else if(__s.tag==12){ s_Expr v_sc = *(__s.u.Match.f0); arr_str v_vn = __s.u.Match.f1; arr_str v_vb = __s.u.Match.f2; arr_Expr v_bd = __s.u.Match.f3; arr_Expr v_gd = __s.u.Match.f4; __m = f_chk_match(v_funcs, v_sy, v_sc, v_vn, v_vb, v_bd, v_gd, v_pos, v_src); } else if(__s.tag==13){ s_Expr v_c = *(__s.u.IfE.f0); s_Expr v_t = *(__s.u.IfE.f1); s_Expr v_el2 = *(__s.u.IfE.f2); __m = f_chk3(v_funcs, v_sy, v_c, v_t, v_el2, v_pos, v_src); } else if(__s.tag==14){ s_Expr v_x = *(__s.u.Try.f0); __m = f_chk_try(v_funcs, v_sy, v_x, v_pos, v_src); } else if(__s.tag==16){ arr_Expr v_elems = __s.u.Tuple.f0; __m = f_chk_args(v_funcs, v_sy, v_elems, v_pos, v_src); } else if(__s.tag==17){ arr_Stmt v_bb = __s.u.BlockE.f0; __m = f_check_stmts(v_funcs, v_sy, v_bb, v_src); } else if(__s.tag==15){ arr_str v_ps = __s.u.Lambda.f0; arr_str v_pts = __s.u.Lambda.f1; s_Expr v_b = *(__s.u.Lambda.f2); int64_t v_id = __s.u.Lambda.f3; __m = f_check_expr(v_funcs, v_sy, v_b, v_pos, v_src); } else if(__s.tag==0){ int64_t v_v = __s.u.Num.f0; __m = 0; } else if(__s.tag==1){ const char* v_s = __s.u.Flt.f0; __m = 0; } else if(__s.tag==2){ const char* v_s = __s.u.Str.f0; __m = 0; } else if(__s.tag==3){ const char* v_n = __s.u.Var.f0; __m = 0; } else if(__s.tag==18){ __m = 0; } __m; });
 }
 
 int64_t f_chk_assign(arr_Func v_funcs, s_Syms* v_sy, const char* v_name, s_Expr v_e, int64_t v_pos, const char* v_src) {
@@ -9189,17 +9808,23 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_needs_time;
     int64_t v_needs_sock;
     int64_t v_needs_proc;
+    int64_t v_needs_fs;
     int64_t v_needs_thread;
     int64_t v_needs_regex;
     int64_t v_needs_tls;
     int64_t v_needs_hmac;
     int64_t v_needs_pg;
     int64_t v_needs_exedir;
+    int64_t v_needs_assert;
     int64_t v_ci;
     arr_str v_mapkeys;
     arr_str v_mapvals;
     int64_t v_mvs;
     int64_t v_mve;
+    arr_str v_arrkeys;
+    arr_str v_arrvals;
+    int64_t v_avs;
+    int64_t v_ave;
     int64_t v_vt1;
     arr_str v_tup_seen;
     const char* v_rt2;
@@ -9219,8 +9844,12 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_maincall;
     int64_t v_mk;
     const char* v_pat;
+    const char* v_ppat;
     const char* v_mlib;
     const char* v_mp;
+    const char* v_mpp;
+    const char* v_spat;
+    const char* v_sqp;
     v_toks = f_lex(v_src);
     v_p = mk_P(v_toks, 0, v_src);
     v_structs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
@@ -9643,7 +10272,11 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     if (map_str_str_has((v_base).errc, "bad")) {
         v_n = s2i(map_str_str_get((v_base).errc, "n"));
         if ((v_n > 1)) {
-            printf("%s\n", scat(scat("found ", i2s(v_n)), " errors"));
+            if (f_want_json()) {
+                printf("%s\n", scat(scat("{\"severity\":\"summary\",\"errors\":", i2s(v_n)), "}"));
+            } else {
+                printf("%s\n", scat(scat("found ", i2s(v_n)), " errors"));
+            }
         }
         exit((int)(1));
     }
@@ -9669,12 +10302,14 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_needs_time = ((((f_has_sub(v_src, "now_ms") || f_has_sub(v_src, "now_us")) || f_has_sub(v_src, "mono_ms")) || f_has_sub(v_src, "sleep_ms")) || f_has_sub(v_src, "time_iso"));
     v_needs_sock = (((((f_has_sub(v_src, "tcp_listen") || f_has_sub(v_src, "tcp_connect")) || f_has_sub(v_src, "tcp_accept")) || f_has_sub(v_src, "sock_send")) || f_has_sub(v_src, "sock_recv")) || f_has_sub(v_src, "sock_close"));
     v_needs_proc = (((f_has_sub(v_src, "proc_fork") || f_has_sub(v_src, "proc_getpid")) || f_has_sub(v_src, "proc_no_zombies")) || f_has_sub(v_src, "proc_reap"));
+    v_needs_fs = ((((((((f_has_sub(v_src, "fs_mkdir") || f_has_sub(v_src, "fs_rmdir")) || f_has_sub(v_src, "fs_unlink")) || f_has_sub(v_src, "fs_rename")) || f_has_sub(v_src, "fs_exists")) || f_has_sub(v_src, "fs_is_dir")) || f_has_sub(v_src, "fs_size")) || f_has_sub(v_src, "fs_mtime")) || f_has_sub(v_src, "fs_list_dir"));
     v_needs_thread = ((((((((f_has_sub(v_src, "thread_spawn") || f_has_sub(v_src, "thread_join")) || f_has_sub(v_src, "mutex_new")) || f_has_sub(v_src, "mutex_lock")) || f_has_sub(v_src, "mutex_unlock")) || f_has_sub(v_src, "chan_new")) || f_has_sub(v_src, "chan_send")) || f_has_sub(v_src, "chan_recv")) || f_has_sub(v_src, "chan_close"));
     v_needs_regex = (f_has_sub(v_src, "regex_match") || f_has_sub(v_src, "regex_find"));
     v_needs_tls = (f_has_sub(v_src, "tls_") || f_has_sub(v_src, "sha1"));
     v_needs_hmac = f_has_sub(v_src, "hmac_sha256");
     v_needs_pg = f_has_sub(v_src, "pg_");
     v_needs_exedir = f_has_sub(v_src, "exe_dir");
+    v_needs_assert = f_has_sub(v_src, scat("assert", "("));
     if (v_needs_thread) {
         v_out = scat(v_out, "#ifndef _WIN32\n#define GC_THREADS\n#endif\n");
     }
@@ -9687,6 +10322,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     if (v_needs_proc) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n");
+    }
+    if (v_needs_fs) {
+        v_out = scat(v_out, "#ifndef _WIN32\n#include <sys/stat.h>\n#include <sys/types.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
     }
     if (v_needs_regex) {
         v_out = scat(v_out, "#ifndef _WIN32\n#include <regex.h>\n#endif\n");
@@ -9747,6 +10385,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_out = scat(v_out, "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n");
     v_out = scat(v_out, "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n");
     v_out = scat(v_out, "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n");
+    if (v_needs_assert) {
+        v_out = scat(v_out, "static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, \"assertion failed: %s\\n\", m?m:\"\"); exit(1); } return 0; }\n");
+    }
     if (v_needs_exedir) {
         v_out = scat(v_out, "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n");
     }
@@ -9791,6 +10432,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }\n");
         v_out = scat(v_out, "static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
         v_out = scat(v_out, "static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
+        v_out = scat(v_out, "static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n");
         v_out = scat(v_out, "static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }\n");
         v_out = scat(v_out, "static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }\n");
         v_out = scat(v_out, "static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n");
@@ -9824,6 +10466,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "#endif\n");
     }
     v_out = scat(scat(v_out, "/*@MY"), "SQL@*/");
+    v_out = scat(scat(v_out, "/*@SQ"), "LITE@*/");
     v_out = scat(v_out, "static int g_argc=0; static char** g_argv=0;\n");
     if (((arr_Func_len((v_base).lams) > 0) || v_needs_thread)) {
         v_out = scat(v_out, "typedef struct { void* fn; void* env; } closure_t;\n");
@@ -9881,7 +10524,20 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mapvals = arr_str_push(v_mapvals, (arr_EnumDef_get(v_enums, v_mve)).name);
         v_mve = (v_mve + 1);
     }
+    v_arrkeys = ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, "str"); __a = arr_str_push(__a, "i64"); __a; });
+    v_arrvals = ({ arr_str __a = arr_str_new(); __a = arr_str_push(__a, "[i64]"); __a = arr_str_push(__a, "[str]"); __a = arr_str_push(__a, "[f64]"); __a; });
+    v_avs = 0;
+    while ((v_avs < arr_StructDef_len(v_structs))) {
+        v_arrvals = arr_str_push(v_arrvals, scat(scat("[", (arr_StructDef_get(v_structs, v_avs)).name), "]"));
+        v_avs = (v_avs + 1);
+    }
+    v_ave = 0;
+    while ((v_ave < arr_EnumDef_len(v_enums))) {
+        v_arrvals = arr_str_push(v_arrvals, scat(scat("[", (arr_EnumDef_get(v_enums, v_ave)).name), "]"));
+        v_ave = (v_ave + 1);
+    }
     v_out = scat(v_out, f_gen_map_fwds_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_fwds_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, "\n");
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {
@@ -9894,6 +10550,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_ei = (v_ei + 1);
     }
     v_out = scat(v_out, f_gen_map_nodes_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_nodes_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, "\n");
     v_vt1 = 0;
     while ((v_vt1 < arr_ClassDef_len(v_classes))) {
@@ -9910,6 +10567,25 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_out = scat(v_out, "static void print_arr_str(arr_str a){ printf(\"[\"); for(int64_t i=0;i<a.len;i++){ if(i>0) printf(\", \"); putchar(34); printf(\"%s\", a.data[i] ? a.data[i] : \"\"); putchar(34); } printf(\"]\"); }\n");
     v_out = scat(v_out, "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n");
     v_out = scat(v_out, "static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=\"\"; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }\n");
+    if (v_needs_fs) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }\n");
+        v_out = scat(v_out, "static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }\n");
+        v_out = scat(v_out, "static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }\n");
+        v_out = scat(v_out, "static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }\n");
+        v_out = scat(v_out, "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n");
+        v_out = scat(v_out, "#endif\n");
+    }
+    if (v_needs_pg) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n");
+        v_out = scat(v_out, "#endif\n");
+    }
+    v_out = scat(scat(v_out, "/*@MY"), "PARAMS@*/");
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {
         v_out = scat(v_out, f_gen_arr_helpers((arr_StructDef_get(v_structs, v_si)).name, scat("s_", (arr_StructDef_get(v_structs, v_si)).name)));
@@ -9921,6 +10597,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_ei = (v_ei + 1);
     }
     v_out = scat(v_out, f_gen_map_helpers_all(v_mapkeys, v_mapvals));
+    v_out = scat(v_out, f_gen_map_helpers_all(v_arrkeys, v_arrvals));
     v_out = scat(v_out, f_gen_res("i64", "int64_t"));
     v_out = scat(v_out, f_gen_res("str", "const char*"));
     v_si = 0;
@@ -10041,6 +10718,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     v_out = scat(scat(scat(scat(scat(v_out, "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n"), v_mdecls), f_gen_stmts((&v_msy), v_mmains, "    ")), v_maincall), "    return 0;\n}\n");
     v_pat = scat("/*@MY", "SQL@*/");
+    v_ppat = scat("/*@MY", "PARAMS@*/");
     v_mlib = v_libline;
     if (map_str_str_has((v_base).evar, "@uses.mysql")) {
         v_mp = "#ifndef _WIN32\n#include <mysql/mysql.h>\n";
@@ -10057,9 +10735,40 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mp = scat(v_mp, "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n");
         v_mp = scat(v_mp, "#endif\n");
         v_out = str_replace(v_out, v_pat, v_mp);
+        v_mpp = "#ifndef _WIN32\n";
+        v_mpp = scat(v_mpp, "static int64_t myq_exec_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return -1; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return -1; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return -1; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return -1; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return -1; } long long aff=(long long)mysql_stmt_affected_rows(st); mysql_stmt_close(st); return (int64_t)aff; }\n");
+        v_mpp = scat(v_mpp, "static const char* myq_query_one_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return \"\"; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return \"\"; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return \"\"; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return \"\"; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return \"\"; } char* buf=(char*)GC_MALLOC(65536); unsigned long olen=0; MYSQL_BIND ob; memset(&ob,0,sizeof(ob)); ob.buffer_type=MYSQL_TYPE_STRING; ob.buffer=buf; ob.buffer_length=65535; ob.length=&olen; if(mysql_stmt_bind_result(st,&ob)){ mysql_stmt_close(st); return \"\"; } const char* outv=\"\"; if(mysql_stmt_fetch(st)==0){ unsigned long m=olen<65535?olen:65535; char* o=(char*)GC_MALLOC(m+1); memcpy(o,buf,m); o[m]=0; outv=o; } mysql_stmt_free_result(st); mysql_stmt_close(st); return outv; }\n");
+        v_mpp = scat(v_mpp, "#endif\n");
+        v_out = str_replace(v_out, v_ppat, v_mpp);
         v_mlib = scat(v_mlib, " mysqlclient");
     } else {
         v_out = str_replace(v_out, v_pat, "");
+        v_out = str_replace(v_out, v_ppat, "");
+    }
+    v_spat = scat("/*@SQ", "LITE@*/");
+    if (map_str_str_has((v_base).evar, "@uses.sqlite")) {
+        v_sqp = "#ifndef _WIN32\n#include <sqlite3.h>\n";
+        v_sqp = scat(v_sqp, "static int64_t sq_open(const char* path){ sqlite3* db=0; if(sqlite3_open(path?path:\":memory:\",&db)!=SQLITE_OK){ if(db) sqlite3_close(db); return 0; } return (int64_t)(intptr_t)db; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_close(int64_t c){ if(c!=0) sqlite3_close((sqlite3*)(intptr_t)c); return 0; }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=sqlite3_errmsg((sqlite3*)(intptr_t)c); if(!e) return \"\"; size_t n=strlen(e); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_exec(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)sqlite3_exec((sqlite3*)(intptr_t)c,sql,0,0,0); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_prepare(int64_t c, const char* sql){ if(c==0||!sql) return 0; sqlite3_stmt* st=0; if(sqlite3_prepare_v2((sqlite3*)(intptr_t)c,sql,-1,&st,0)!=SQLITE_OK) return 0; return (int64_t)(intptr_t)st; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_step(int64_t st){ if(st==0) return -1; int rc=sqlite3_step((sqlite3_stmt*)(intptr_t)st); if(rc==SQLITE_ROW) return 1; if(rc==SQLITE_DONE) return 0; return -1; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_ncols(int64_t st){ if(st==0) return 0; return (int64_t)sqlite3_column_count((sqlite3_stmt*)(intptr_t)st); }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_col(int64_t st, int64_t i){ if(st==0) return \"\"; const unsigned char* v=sqlite3_column_text((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen((const char*)v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,(const char*)v,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static const char* sq_col_name(int64_t st, int64_t i){ if(st==0) return \"\"; const char* v=sqlite3_column_name((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_text(int64_t st, int64_t i, const char* v){ if(st==0) return -1; return (int64_t)sqlite3_bind_text((sqlite3_stmt*)(intptr_t)st,(int)i,v?v:\"\",-1,SQLITE_TRANSIENT); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_int(int64_t st, int64_t i, int64_t v){ if(st==0) return -1; return (int64_t)sqlite3_bind_int64((sqlite3_stmt*)(intptr_t)st,(int)i,(sqlite3_int64)v); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_null(int64_t st, int64_t i){ if(st==0) return -1; return (int64_t)sqlite3_bind_null((sqlite3_stmt*)(intptr_t)st,(int)i); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_reset(int64_t st){ if(st==0) return -1; sqlite3_clear_bindings((sqlite3_stmt*)(intptr_t)st); return (int64_t)sqlite3_reset((sqlite3_stmt*)(intptr_t)st); }\n");
+        v_sqp = scat(v_sqp, "#endif\n");
+        v_out = str_replace(v_out, v_spat, v_sqp);
+        v_mlib = scat(v_mlib, " sqlite3");
+    } else {
+        v_out = str_replace(v_out, v_spat, "");
     }
     if ((((int64_t)strlen(v_mlib)) > 0)) {
         v_out = scat(scat(scat("// @links:", v_mlib), "\n"), v_out);
@@ -10476,12 +11185,14 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     const char* v_full;
     const char* v_body;
     const char* v_bdir;
+    const char* v_rfull;
     const char* v_root;
     const char* v_gfull;
     const char* v_gbody;
     const char* v_ed;
     const char* v_efull;
     const char* v_ebody;
+    int64_t v_fresh;
     const char* v_rb;
     if ((f_has_import(v_src) == (1 != 1))) {
         return v_src;
@@ -10504,6 +11215,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                     map_str_str_set(v_seen, v_full, "1");
                     v_body = read_file_c(v_full);
                     v_bdir = f_dirname(v_full);
+                    v_rfull = v_full;
                     if ((((int64_t)strlen(v_body)) == 0)) {
                         v_root = get_env("AILANG_STD");
                         if ((((int64_t)strlen(v_root)) > 0)) {
@@ -10512,6 +11224,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                             if ((((int64_t)strlen(v_gbody)) > 0)) {
                                 v_body = v_gbody;
                                 v_bdir = f_dirname(v_gfull);
+                                v_rfull = v_gfull;
                             }
                         }
                     }
@@ -10523,6 +11236,7 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                             if ((((int64_t)strlen(v_ebody)) > 0)) {
                                 v_body = v_ebody;
                                 v_bdir = f_dirname(v_efull);
+                                v_rfull = v_efull;
                             }
                         }
                     }
@@ -10530,11 +11244,21 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
                         printf("%s\n", scat(scat("error: cannot resolve import \"", v_imp), "\" — not found beside the source, in AILANG_STD, or next to ailc"));
                         exit((int)(1));
                     }
-                    v_rb = f_resolve_imports(v_body, v_bdir, v_seen);
-                    if ((((int64_t)strlen(v_alias)) > 0)) {
-                        v_rb = f_prefix_idents(v_rb, f_module_fn_names(v_body), scat(v_alias, "_"));
+                    v_fresh = (1 == 1);
+                    if ((strcmp(v_rfull, v_full) != 0)) {
+                        if (map_str_str_has(v_seen, v_rfull)) {
+                            v_fresh = (1 != 1);
+                        } else {
+                            map_str_str_set(v_seen, v_rfull, "1");
+                        }
                     }
-                    v_out = scat(scat(v_out, v_rb), "\n");
+                    if (v_fresh) {
+                        v_rb = f_resolve_imports(v_body, v_bdir, v_seen);
+                        if ((((int64_t)strlen(v_alias)) > 0)) {
+                            v_rb = f_prefix_idents(v_rb, f_module_fn_names(v_body), scat(v_alias, "_"));
+                        }
+                        v_out = scat(scat(v_out, v_rb), "\n");
+                    }
                 }
             } else {
                 v_out = scat(scat(v_out, v_line), "\n");
@@ -10546,25 +11270,12 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     return f_rewrite_qualified(v_out, v_aliases);
 }
 
-int main(int argc, char** argv){
-    GC_INIT();
-    g_argc=argc; g_argv=argv;
-    arr_str v_av;
-    int64_t v_keepc;
-    arr_str v_pos;
-    int64_t v_fi;
-    const char* v_a;
-    int64_t v_ai;
-    const char* v_input;
-    const char* v_outbin;
-    int64_t v_ni;
-    int64_t v_ob;
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link) {
     const char* v_src;
     map_str_str v_seen;
     const char* v_cprog;
     const char* v_cpath;
     int64_t v_win;
-    const char* v_outexe;
     arr_str v_shims0;
     arr_str v_shims;
     int64_t v_ri;
@@ -10575,59 +11286,23 @@ int main(int argc, char** argv){
     const char* v_shimline;
     int64_t v_si;
     int64_t v_ci2;
-    v_av = ailang_args();
-    v_keepc = (1 != 1);
-    v_pos = ({ arr_str __a = arr_str_new(); __a; });
-    v_fi = 0;
-    while ((v_fi < arr_str_len(v_av))) {
-        v_a = arr_str_get(v_av, v_fi);
-        if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
-            v_keepc = (1 == 1);
-        } else {
-            v_pos = arr_str_push(v_pos, v_a);
-        }
-        v_fi = (v_fi + 1);
-    }
-    v_ai = 0;
-    if (((arr_str_len(v_pos) > 0) && (strcmp(arr_str_get(v_pos, 0), "compile") == 0))) {
-        v_ai = 1;
-    }
-    if ((arr_str_len(v_pos) <= v_ai)) {
-        printf("%s\n", "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]");
-        exit((int)(1));
-    }
-    v_input = arr_str_get(v_pos, v_ai);
-    v_outbin = "";
-    if ((arr_str_len(v_pos) > (v_ai + 1))) {
-        v_outbin = arr_str_get(v_pos, (v_ai + 1));
-    } else {
-        v_ni = ((int64_t)strlen(v_input));
-        if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
-            v_outbin = substr(v_input, 0, (v_ni - 4));
-        } else {
-            v_outbin = scat(v_input, ".out");
-        }
-    }
-    if ((strcmp(v_outbin, v_input) == 0)) {
-        printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
-        exit((int)(1));
-    }
-    v_ob = ((int64_t)strlen(v_outbin));
-    if (((v_ob >= 4) && (strcmp(substr(v_outbin, (v_ob - 4), v_ob), ".ail") == 0))) {
-        printf("%s\n", scat("error: refusing to write the compiled binary over a .ail source file: ", v_outbin));
-        exit((int)(1));
-    }
     v_src = read_file_c(v_input);
+    if ((((int64_t)strlen(v_src)) == 0)) {
+        printf("%s\n", scat("error: cannot read input file (missing or empty): ", v_input));
+        return 1;
+    }
     v_src = scat(f_auto_imports(v_src), v_src);
     if (f_has_import(v_src)) {
         v_seen = map_str_str_new();
         v_src = f_resolve_imports(v_src, f_dirname(v_input), v_seen);
     }
     v_cprog = f_compile_to_c(v_src, f_dirname(v_input));
+    if ((v_link == (1 != 1))) {
+        return 0;
+    }
     v_cpath = scat(v_outbin, ".c");
     write_file_c(v_cpath, v_cprog);
     v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
-    v_outexe = v_outbin;
     v_shims0 = f_csrc_list(v_cprog);
     v_shims = ({ arr_str __a = arr_str_new(); __a; });
     v_ri = 0;
@@ -10637,13 +11312,12 @@ int main(int argc, char** argv){
     }
     v_rc = 0;
     if (v_win) {
-        v_outexe = scat(v_outbin, ".exe");
         if ((arr_str_len(v_shims) == 0)) {
-            v_cmd = scat(scat(scat(scat(scat(scat("clang -O2 -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -static -lgc -lm -o \""), v_outexe), "\"");
+            v_cmd = scat(scat(scat(scat(scat(scat("clang -O2 -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -static -lgc -lm -o \""), v_outbin), ".exe\"");
             v_rc = f_system(v_cmd);
         } else {
             printf("%s\n", "error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux");
-            exit((int)(1));
+            return 1;
         }
     } else {
         v_extra = " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)";
@@ -10659,6 +11333,9 @@ int main(int argc, char** argv){
         v_lf = f_link_flags(v_cprog);
         if (f_has_sub(v_lf, "lmysqlclient")) {
             v_extra = scat(v_extra, " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)");
+        }
+        if (f_has_sub(v_lf, "lsqlite3")) {
+            v_extra = scat(v_extra, " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)");
         }
         v_extra = scat(scat(v_extra, v_lf), " -lm");
         if ((arr_str_len(v_shims) == 0)) {
@@ -10677,7 +11354,7 @@ int main(int argc, char** argv){
     }
     if ((v_rc != 0)) {
         printf("%s\n", "clang failed");
-        exit((int)(1));
+        return 1;
     }
     if ((v_keepc == (1 != 1))) {
         if (v_win) {
@@ -10693,6 +11370,219 @@ int main(int argc, char** argv){
             v_ci2 = (v_ci2 + 1);
         }
     }
-    printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));
+    return 0;
+}
+
+int main(int argc, char** argv){
+    GC_INIT();
+    g_argc=argc; g_argv=argv;
+    const char* v_AILC_VERSION;
+    const char* v_USAGE;
+    arr_str v_av;
+    int64_t v_keepc;
+    int64_t v_jsonmode;
+    arr_str v_pos;
+    arr_str v_runargs;
+    int64_t v_afterdd;
+    int64_t v_fi;
+    const char* v_a;
+    int64_t v_ai;
+    const char* v_mode;
+    const char* v_input;
+    int64_t v_win;
+    const char* v_tdir;
+    int64_t v_npass;
+    int64_t v_nfail;
+    int64_t v_ti;
+    const char* v_tf;
+    const char* v_tout;
+    const char* v_texe;
+    int64_t v_erc;
+    const char* v_outbin;
+    int64_t v_ni;
+    int64_t v_ob;
+    const char* v_outexe;
+    const char* v_runcmd;
+    int64_t v_rj;
+    int64_t v_rrc;
+    v_AILC_VERSION = "0.5.0";
+    v_USAGE = "usage: ailc [--keep-c] [--json] [run|check|test|compile] <input.ail> [output-binary] [-- prog-args]";
+    v_av = ailang_args();
+    v_keepc = (1 != 1);
+    v_jsonmode = (1 != 1);
+    v_pos = ({ arr_str __a = arr_str_new(); __a; });
+    v_runargs = ({ arr_str __a = arr_str_new(); __a; });
+    v_afterdd = (1 != 1);
+    v_fi = 0;
+    while ((v_fi < arr_str_len(v_av))) {
+        v_a = arr_str_get(v_av, v_fi);
+        if (v_afterdd) {
+            v_runargs = arr_str_push(v_runargs, v_a);
+        } else {
+            if ((strcmp(v_a, "--") == 0)) {
+                v_afterdd = (1 == 1);
+            } else {
+                if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
+                    v_keepc = (1 == 1);
+                } else {
+                    if ((strcmp(v_a, "--json") == 0)) {
+                        v_jsonmode = (1 == 1);
+                    } else {
+                        if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
+                            printf("%s\n", v_USAGE);
+                            exit((int)(0));
+                        } else {
+                            if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
+                                printf("%s\n", scat("ailc ", v_AILC_VERSION));
+                                exit((int)(0));
+                            } else {
+                                if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
+                                    printf("%s\n", scat("error: unknown flag: ", v_a));
+                                    printf("%s\n", v_USAGE);
+                                    exit((int)(1));
+                                } else {
+                                    v_pos = arr_str_push(v_pos, v_a);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        v_fi = (v_fi + 1);
+    }
+    v_ai = 0;
+    v_mode = "build";
+    if ((arr_str_len(v_pos) > 0)) {
+        if ((strcmp(arr_str_get(v_pos, 0), "compile") == 0)) {
+            v_ai = 1;
+        } else {
+            if ((strcmp(arr_str_get(v_pos, 0), "run") == 0)) {
+                v_mode = "run";
+                v_ai = 1;
+            } else {
+                if ((strcmp(arr_str_get(v_pos, 0), "check") == 0)) {
+                    v_mode = "check";
+                    v_ai = 1;
+                } else {
+                    if ((strcmp(arr_str_get(v_pos, 0), "test") == 0)) {
+                        v_mode = "test";
+                        v_ai = 1;
+                    }
+                }
+            }
+        }
+    }
+    if ((arr_str_len(v_pos) <= v_ai)) {
+        printf("%s\n", v_USAGE);
+        exit((int)(1));
+    }
+    v_input = arr_str_get(v_pos, v_ai);
+    if ((strcmp(v_mode, "test") == 0)) {
+        v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+        v_tdir = "/tmp";
+        if (v_win) {
+            v_tdir = get_env("TEMP");
+        }
+        v_npass = 0;
+        v_nfail = 0;
+        v_ti = v_ai;
+        while ((v_ti < arr_str_len(v_pos))) {
+            v_tf = arr_str_get(v_pos, v_ti);
+            v_tout = scat(scat(v_tdir, "/ailc_test_"), i2s(now_us()));
+            if ((f_build_one(v_tf, v_tout, (1 != 1), (1 == 1)) != 0)) {
+                printf("%s\n", scat(scat("FAIL ", v_tf), " (build error)"));
+                v_nfail = (v_nfail + 1);
+            } else {
+                v_texe = v_tout;
+                if (v_win) {
+                    v_texe = scat(v_tout, ".exe");
+                }
+                v_erc = f_system(v_texe);
+                if (v_win) {
+                    f_system(scat(scat("del /f /q \"", v_texe), "\""));
+                } else {
+                    f_system(scat("rm -f ", v_texe));
+                }
+                if ((v_erc == 0)) {
+                    printf("%s\n", scat("PASS ", v_tf));
+                    v_npass = (v_npass + 1);
+                } else {
+                    printf("%s\n", scat("FAIL ", v_tf));
+                    v_nfail = (v_nfail + 1);
+                }
+            }
+            v_ti = (v_ti + 1);
+        }
+        printf("%s\n", scat(scat(scat(scat("tests: ", i2s(v_npass)), " passed, "), i2s(v_nfail)), " failed"));
+        if ((v_nfail > 0)) {
+            exit((int)(1));
+        }
+        exit((int)(0));
+    }
+    if ((strcmp(v_mode, "check") == 0)) {
+        f_build_one(v_input, "", (1 != 1), (1 != 1));
+        if (v_jsonmode) {
+            printf("%s\n", "{\"severity\":\"ok\"}");
+        } else {
+            printf("%s\n", "ok");
+        }
+        exit((int)(0));
+    }
+    v_outbin = "";
+    if ((strcmp(v_mode, "run") == 0)) {
+        v_tdir = "/tmp";
+        if ((strcmp(get_env("OS"), "Windows_NT") == 0)) {
+            v_tdir = get_env("TEMP");
+        }
+        v_outbin = scat(scat(v_tdir, "/ailc_run_"), i2s(now_us()));
+    } else {
+        if ((arr_str_len(v_pos) > (v_ai + 1))) {
+            v_outbin = arr_str_get(v_pos, (v_ai + 1));
+        } else {
+            v_ni = ((int64_t)strlen(v_input));
+            if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
+                v_outbin = substr(v_input, 0, (v_ni - 4));
+            } else {
+                v_outbin = scat(v_input, ".out");
+            }
+        }
+        if ((strcmp(v_outbin, v_input) == 0)) {
+            printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
+            exit((int)(1));
+        }
+        v_ob = ((int64_t)strlen(v_outbin));
+        if (((v_ob >= 4) && (strcmp(substr(v_outbin, (v_ob - 4), v_ob), ".ail") == 0))) {
+            printf("%s\n", scat("error: refusing to write the compiled binary over a .ail source file: ", v_outbin));
+            exit((int)(1));
+        }
+    }
+    if ((f_build_one(v_input, v_outbin, v_keepc, (1 == 1)) != 0)) {
+        exit((int)(1));
+    }
+    v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+    v_outexe = v_outbin;
+    if (v_win) {
+        v_outexe = scat(v_outbin, ".exe");
+    }
+    if ((strcmp(v_mode, "run") == 0)) {
+        v_runcmd = v_outexe;
+        v_rj = 0;
+        while ((v_rj < arr_str_len(v_runargs))) {
+            v_runcmd = scat(scat(scat(v_runcmd, " \""), arr_str_get(v_runargs, v_rj)), "\"");
+            v_rj = (v_rj + 1);
+        }
+        v_rrc = f_system(v_runcmd);
+        if (v_win) {
+            f_system(scat(scat("del /f /q \"", v_outexe), "\""));
+        } else {
+            f_system(scat("rm -f ", v_outexe));
+        }
+        if ((v_rrc != 0)) {
+            exit((int)(1));
+        }
+    } else {
+        printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));
+    }
     return 0;
 }

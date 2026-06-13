@@ -1,0 +1,27 @@
+// sock_echo.ail — raw TCP loopback echo: listen on the main thread (the backlog
+// absorbs the connect race), serve one connection on a worker thread, assert the
+// round trip. Port comes from AILANG_TEST_PORT (+10) and is never printed.
+im "std/sock.ail"
+im "std/thread.ail"
+
+port := env_int("AILANG_TEST_PORT", 24701) + 10
+fd := must_listen("127.0.0.1", port, "")
+
+h := spawn(fn() {
+  cli := tcp_accept(fd)
+  data := sock_recv(cli, 4096)
+  n := sock_send_all(cli, data)
+  s := sock_close(cli)
+  n
+})
+
+c := tcp_connect("127.0.0.1", port)
+println(c >= 0)                          // true
+sent := sock_send_str_all(c, "ping-1")
+println(sent)                            // 6
+println(bytes_to_str(sock_recv(c, 4096)))// ping-1
+x := sock_close(c)
+echoed := wait(h)
+println(echoed)                          // 6 — server echoed all bytes
+y := sock_close(fd)
+println("done")

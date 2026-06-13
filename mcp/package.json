@@ -1,0 +1,19 @@
+{
+  "name": "ailang-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for AiLang — gives any coding agent a closed check/run/test loop over the ailc compiler.",
+  "type": "module",
+  "bin": { "ailang-mcp": "index.mjs" },
+  "files": ["index.mjs", "stdlib.json", "SKILL.md", "README.md"],
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "scripts": {
+    "bundle": "cp ../stdlib.json ./stdlib.json && cp ../skill/SKILL.md ./SKILL.md",
+    "start": "node index.mjs"
+  },
+  "keywords": ["mcp", "ailang", "model-context-protocol", "compiler"],
+  "license": "MIT"
+}

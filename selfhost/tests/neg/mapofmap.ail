@@ -1,0 +1,4 @@
+// EXPECT: unsupported map value type
+// A map value that is itself a map has no runtime — must be rejected.
+m := {"a": {"x": 1}}
+println(len(m))

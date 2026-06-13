@@ -1,0 +1,12 @@
+// std/args.ail — CLI flag/option/positional parsing (driven by a literal [str]).
+im "std/args.ail"
+p := args_parse(["build", "--verbose", "--out=bin/app", "--jobs", "4", "-x", "src.ail", "extra"])
+println(arg_pos(p, 0))                  // build
+println(arg_pos(p, 1))                  // src.ail
+println(arg_count(p))                   // 3
+println(arg_opt(p, "out", "?"))         // bin/app
+println(arg_int(p, "jobs", 0))          // 4
+if arg_flag(p, "verbose") { println("verbose on") }
+if arg_flag(p, "x") { println("x set") }
+if arg_flag(p, "missing") { println("no") } el { println("missing absent") }
+println("args ok")

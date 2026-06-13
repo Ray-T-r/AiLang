@@ -19,9 +19,9 @@
 //   sort_by(xs, key)   -> [T]      a sorted copy, ascending by the i64 key
 //   for_each(xs, f)    -> i64      apply f to each for its side effect
 //   zip_with(xs,ys,f)  -> [R]      combine xs & ys element-wise through f
-//
-// (group_by is intentionally absent: it needs a {str:[T]} map-of-array value type
-//  the codegen doesn't support yet.)
+//   group_by(xs, key)  -> {str:[T]} buckets of xs keyed by key(x); insertion
+//                                   order within a bucket, hash-slot order across
+//                                   buckets — iterate sort(keys(g)) for stable output
 //
 // NOTE: when the element type isn't i64, annotate the lambda's parameter so it
 // matches T — e.g. `keep(words, fn(s:str) starts_with(s, "a"))` — since an
@@ -103,4 +103,13 @@ fn zip_with<T,U,R>(xs:[T], ys:[U], f:fn(T,U)->R) -> [R] {
     i = i + 1
   }
   out
+}
+
+fn group_by<T>(xs:[T], key:fn(T)->str) -> {str:[T]} {
+  mu m:{str:[T]} := {}                       // body-substituted: {str:[T]} → concrete per instance
+  lp x in xs {
+    k := key(x)
+    m[k] = push(m[k], x)                     // a missing key reads as the empty array — push allocates
+  }                                          // (NOT `m[k] ?? []`: a bare [] literal types as [i64])
+  m
 }
