@@ -2224,6 +2224,15 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n"
     out = out + "#endif\n"
   }
+  // pg_exec_params — Postgres prepared-statement exec (PQexecParams). Lives HERE
+  // (phase 4), not in the phase-3 pg block, because it takes an arr_str of values
+  // and the array runtime only exists from here on (same reason as fs_list_dir).
+  // Values are passed as text params ($1,$2,…) → bound, never interpolated.
+  if needs_pg {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n"
+    out = out + "#endif\n"
+  }
   si = 0
   lp si < len(structs) { out = out + gen_arr_helpers(structs[si].name, "s_" + structs[si].name); si += 1 }
   ei = 0

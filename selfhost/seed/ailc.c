@@ -511,6 +511,9 @@ static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) re
 static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }
 static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:""); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,".")==0||strcmp(e->d_name,"..")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }
 #endif
+#ifndef _WIN32
+static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:""; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }
+#endif
 static arr_Token arr_Token_new(void){ arr_Token a; a.len=0; a.cap=0; a.data=0; return a; }
 static arr_Token arr_Token_push(arr_Token a, s_Token x){ if(a.cap<=a.len){ int64_t nc=a.cap?a.cap*2:4; s_Token* nd=(s_Token*)GC_MALLOC(nc*sizeof(s_Token)); if(a.len) memcpy(nd,a.data,a.len*sizeof(s_Token)); a.data=nd; a.cap=nc; } a.data[a.len]=x; a.len++; return a; }
 static s_Token arr_Token_get(arr_Token a, int64_t i){ return a.data[i]; }
@@ -4998,7 +5001,7 @@ int64_t f_is_native_call(const char* v_fname) {
     if ((((((((((((((strcmp(v_fname, "tls_server_ctx") == 0) || (strcmp(v_fname, "tls_client_ctx") == 0)) || (strcmp(v_fname, "tls_free_ctx") == 0)) || (strcmp(v_fname, "tls_accept") == 0)) || (strcmp(v_fname, "tls_connect_fd") == 0)) || (strcmp(v_fname, "tls_connect_host") == 0)) || (strcmp(v_fname, "tls_send") == 0)) || (strcmp(v_fname, "tls_send_str") == 0)) || (strcmp(v_fname, "tls_recv") == 0)) || (strcmp(v_fname, "tls_close") == 0)) || (strcmp(v_fname, "tls_error") == 0)) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
         return (1 == 1);
     }
-    if ((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
+    if (((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_exec_params") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return (1 == 1);
     }
     if ((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
@@ -10573,6 +10576,11 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }\n");
         v_out = scat(v_out, "static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }\n");
         v_out = scat(v_out, "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n");
+        v_out = scat(v_out, "#endif\n");
+    }
+    if (v_needs_pg) {
+        v_out = scat(v_out, "#ifndef _WIN32\n");
+        v_out = scat(v_out, "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n");
         v_out = scat(v_out, "#endif\n");
     }
     v_si = 0;
