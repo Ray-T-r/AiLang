@@ -225,7 +225,7 @@ fn bin_type(sy:*Syms, op:i64, l:Expr, r:Expr) -> str {
 fn is_native_call(fname:str) -> bool {
   if fname == "tls_server_ctx" || fname == "tls_client_ctx" || fname == "tls_free_ctx" || fname == "tls_accept" || fname == "tls_connect_fd" || fname == "tls_connect_host" || fname == "tls_send" || fname == "tls_send_str" || fname == "tls_recv" || fname == "tls_close" || fname == "tls_error" || fname == "sha1" || fname == "hmac_sha256" rt true
   if fname == "pg_connect" || fname == "pg_status" || fname == "pg_error" || fname == "pg_close" || fname == "pg_exec" || fname == "pg_exec_params" || fname == "pg_ok" || fname == "pg_result_error" || fname == "pg_clear" || fname == "pg_nrows" || fname == "pg_ncols" || fname == "pg_value" || fname == "pg_isnull" || fname == "pg_col_name" || fname == "pg_affected" || fname == "pg_escape" rt true
-  if fname == "myq_conn" || fname == "myq_query" || fname == "myq_store" || fname == "myq_nrows" || fname == "myq_nfields" || fname == "myq_fetch" || fname == "myq_field" || fname == "myq_err" || fname == "myq_free" || fname == "myq_close" || fname == "myq_escape" rt true
+  if fname == "myq_conn" || fname == "myq_query" || fname == "myq_store" || fname == "myq_nrows" || fname == "myq_nfields" || fname == "myq_fetch" || fname == "myq_field" || fname == "myq_err" || fname == "myq_free" || fname == "myq_close" || fname == "myq_escape" || fname == "myq_exec_params" || fname == "myq_query_one_params" rt true
   if fname == "fs_mkdir" || fname == "fs_rmdir" || fname == "fs_unlink" || fname == "fs_rename" || fname == "fs_exists" || fname == "fs_is_dir" || fname == "fs_size" || fname == "fs_mtime" || fname == "fs_list_dir" rt true
   if fname == "sq_open" || fname == "sq_close" || fname == "sq_err" || fname == "sq_exec" || fname == "sq_prepare" || fname == "sq_step" || fname == "sq_ncols" || fname == "sq_col" || fname == "sq_col_name" || fname == "sq_finalize" || fname == "sq_changes" || fname == "sq_last_id" || fname == "sq_bind_text" || fname == "sq_bind_int" || fname == "sq_bind_null" || fname == "sq_reset" rt true
   false
@@ -375,7 +375,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "abs_f64" rt "f64"
   if fname == "pop" && len(args) > 0 rt type_of_expr(sy, args[0])   // same array type
   // Phase 3 TLS/PG return types (grouped); everything else native → i64.
-  if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" || fname == "myq_err" || fname == "myq_field" || fname == "myq_escape" || fname == "sq_err" || fname == "sq_col" || fname == "sq_col_name" rt "str"
+  if fname == "tls_error" || fname == "pg_error" || fname == "pg_result_error" || fname == "pg_value" || fname == "pg_col_name" || fname == "pg_escape" || fname == "myq_err" || fname == "myq_field" || fname == "myq_escape" || fname == "myq_query_one_params" || fname == "sq_err" || fname == "sq_col" || fname == "sq_col_name" rt "str"
   if fname == "tls_recv" || fname == "sha1" || fname == "hmac_sha256" rt "bytes"
   if fname == "pg_ok" || fname == "pg_isnull" rt "bool"
   if fname == "fs_mkdir" || fname == "fs_rmdir" || fname == "fs_unlink" || fname == "fs_rename" || fname == "fs_exists" || fname == "fs_is_dir" rt "bool"

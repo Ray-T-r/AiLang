@@ -2233,6 +2233,11 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n"
     out = out + "#endif\n"
   }
+  // MySQL prepared-statement helpers (myq_exec_params/myq_query_one_params) take an
+  // arr_str, so — like pg_exec_params — they belong in phase 4 (after the array
+  // runtime), NOT in the phase-2 @uses.mysql slot (which lands before arr_str). A
+  // SECOND split placeholder here is filled post-body in the same @uses.mysql gate.
+  out = out + "/*@MY" + "PARAMS@*/"
   si = 0
   lp si < len(structs) { out = out + gen_arr_helpers(structs[si].name, "s_" + structs[si].name); si += 1 }
   ei = 0
@@ -2340,6 +2345,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   // The compiler itself never calls myq_, so its self-compile stays mysql-free and
   // builds with NO libmysqlclient. (pat is split so it doesn't match string data.)
   pat := "/*@MY" + "SQL@*/"
+  ppat := "/*@MY" + "PARAMS@*/"        // phase-4 slot for the arr_str-taking prepared-stmt helpers
   mu mlib := libline
   if has(base.evar, "@uses.mysql") {
     mu mp := "#ifndef _WIN32\n#include <mysql/mysql.h>\n"
@@ -2356,9 +2362,19 @@ fn compile_to_c(src:str, dir:str) -> str {
     mp = mp + "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n"
     mp = mp + "#endif\n"
     out = replace(out, pat, mp)
+    // Prepared-statement helpers (phase 4 — they take arr_str). All params bind as
+    // MYSQL_TYPE_STRING. We deliberately do NOT set MYSQL_BIND.is_null/.error (whose
+    // type flipped my_bool→bool across MySQL/MariaDB versions) — a zeroed bind +
+    // a generous output buffer keeps it portable. Values are bound, never interpolated.
+    mu mpp := "#ifndef _WIN32\n"
+    mpp = mpp + "static int64_t myq_exec_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return -1; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return -1; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return -1; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return -1; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return -1; } long long aff=(long long)mysql_stmt_affected_rows(st); mysql_stmt_close(st); return (int64_t)aff; }\n"
+    mpp = mpp + "static const char* myq_query_one_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return \"\"; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return \"\"; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return \"\"; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return \"\"; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return \"\"; } char* buf=(char*)GC_MALLOC(65536); unsigned long olen=0; MYSQL_BIND ob; memset(&ob,0,sizeof(ob)); ob.buffer_type=MYSQL_TYPE_STRING; ob.buffer=buf; ob.buffer_length=65535; ob.length=&olen; if(mysql_stmt_bind_result(st,&ob)){ mysql_stmt_close(st); return \"\"; } const char* outv=\"\"; if(mysql_stmt_fetch(st)==0){ unsigned long m=olen<65535?olen:65535; char* o=(char*)GC_MALLOC(m+1); memcpy(o,buf,m); o[m]=0; outv=o; } mysql_stmt_free_result(st); mysql_stmt_close(st); return outv; }\n"
+    mpp = mpp + "#endif\n"
+    out = replace(out, ppat, mpp)
     mlib = mlib + " mysqlclient"
   } el {
     out = replace(out, pat, "")
+    out = replace(out, ppat, "")
   }
   // SQLite is opt-in exactly like mysql: fill the slot only when a real sq_ call
   // set @uses.sqlite. The compiler never calls sq_, so its self-compile stays

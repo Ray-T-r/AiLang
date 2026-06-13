@@ -5004,7 +5004,7 @@ int64_t f_is_native_call(const char* v_fname) {
     if (((((((((((((((((strcmp(v_fname, "pg_connect") == 0) || (strcmp(v_fname, "pg_status") == 0)) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_close") == 0)) || (strcmp(v_fname, "pg_exec") == 0)) || (strcmp(v_fname, "pg_exec_params") == 0)) || (strcmp(v_fname, "pg_ok") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_clear") == 0)) || (strcmp(v_fname, "pg_nrows") == 0)) || (strcmp(v_fname, "pg_ncols") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_isnull") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_affected") == 0)) || (strcmp(v_fname, "pg_escape") == 0))) {
         return (1 == 1);
     }
-    if ((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "myq_conn") == 0) || (strcmp(v_fname, "myq_query") == 0)) || (strcmp(v_fname, "myq_store") == 0)) || (strcmp(v_fname, "myq_nrows") == 0)) || (strcmp(v_fname, "myq_nfields") == 0)) || (strcmp(v_fname, "myq_fetch") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_free") == 0)) || (strcmp(v_fname, "myq_close") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "myq_exec_params") == 0)) || (strcmp(v_fname, "myq_query_one_params") == 0))) {
         return (1 == 1);
     }
     if ((((((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0)) || (strcmp(v_fname, "fs_size") == 0)) || (strcmp(v_fname, "fs_mtime") == 0)) || (strcmp(v_fname, "fs_list_dir") == 0))) {
@@ -5279,7 +5279,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if (((strcmp(v_fname, "pop") == 0) && (arr_Expr_len(v_args) > 0))) {
         return f_type_of_expr(v_sy, arr_Expr_get(v_args, 0));
     }
-    if (((((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0))) {
+    if ((((((((((((((strcmp(v_fname, "tls_error") == 0) || (strcmp(v_fname, "pg_error") == 0)) || (strcmp(v_fname, "pg_result_error") == 0)) || (strcmp(v_fname, "pg_value") == 0)) || (strcmp(v_fname, "pg_col_name") == 0)) || (strcmp(v_fname, "pg_escape") == 0)) || (strcmp(v_fname, "myq_err") == 0)) || (strcmp(v_fname, "myq_field") == 0)) || (strcmp(v_fname, "myq_escape") == 0)) || (strcmp(v_fname, "myq_query_one_params") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0))) {
         return "str";
     }
     if ((((strcmp(v_fname, "tls_recv") == 0) || (strcmp(v_fname, "sha1") == 0)) || (strcmp(v_fname, "hmac_sha256") == 0))) {
@@ -9844,8 +9844,10 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_maincall;
     int64_t v_mk;
     const char* v_pat;
+    const char* v_ppat;
     const char* v_mlib;
     const char* v_mp;
+    const char* v_mpp;
     const char* v_spat;
     const char* v_sqp;
     v_toks = f_lex(v_src);
@@ -10583,6 +10585,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_out = scat(v_out, "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n");
         v_out = scat(v_out, "#endif\n");
     }
+    v_out = scat(scat(v_out, "/*@MY"), "PARAMS@*/");
     v_si = 0;
     while ((v_si < arr_StructDef_len(v_structs))) {
         v_out = scat(v_out, f_gen_arr_helpers((arr_StructDef_get(v_structs, v_si)).name, scat("s_", (arr_StructDef_get(v_structs, v_si)).name)));
@@ -10715,6 +10718,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     }
     v_out = scat(scat(scat(scat(scat(v_out, "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n"), v_mdecls), f_gen_stmts((&v_msy), v_mmains, "    ")), v_maincall), "    return 0;\n}\n");
     v_pat = scat("/*@MY", "SQL@*/");
+    v_ppat = scat("/*@MY", "PARAMS@*/");
     v_mlib = v_libline;
     if (map_str_str_has((v_base).evar, "@uses.mysql")) {
         v_mp = "#ifndef _WIN32\n#include <mysql/mysql.h>\n";
@@ -10731,9 +10735,15 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_mp = scat(v_mp, "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n");
         v_mp = scat(v_mp, "#endif\n");
         v_out = str_replace(v_out, v_pat, v_mp);
+        v_mpp = "#ifndef _WIN32\n";
+        v_mpp = scat(v_mpp, "static int64_t myq_exec_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return -1; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return -1; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return -1; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return -1; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return -1; } long long aff=(long long)mysql_stmt_affected_rows(st); mysql_stmt_close(st); return (int64_t)aff; }\n");
+        v_mpp = scat(v_mpp, "static const char* myq_query_one_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return \"\"; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return \"\"; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return \"\"; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return \"\"; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return \"\"; } char* buf=(char*)GC_MALLOC(65536); unsigned long olen=0; MYSQL_BIND ob; memset(&ob,0,sizeof(ob)); ob.buffer_type=MYSQL_TYPE_STRING; ob.buffer=buf; ob.buffer_length=65535; ob.length=&olen; if(mysql_stmt_bind_result(st,&ob)){ mysql_stmt_close(st); return \"\"; } const char* outv=\"\"; if(mysql_stmt_fetch(st)==0){ unsigned long m=olen<65535?olen:65535; char* o=(char*)GC_MALLOC(m+1); memcpy(o,buf,m); o[m]=0; outv=o; } mysql_stmt_free_result(st); mysql_stmt_close(st); return outv; }\n");
+        v_mpp = scat(v_mpp, "#endif\n");
+        v_out = str_replace(v_out, v_ppat, v_mpp);
         v_mlib = scat(v_mlib, " mysqlclient");
     } else {
         v_out = str_replace(v_out, v_pat, "");
+        v_out = str_replace(v_out, v_ppat, "");
     }
     v_spat = scat("/*@SQ", "LITE@*/");
     if (map_str_str_has((v_base).evar, "@uses.sqlite")) {
