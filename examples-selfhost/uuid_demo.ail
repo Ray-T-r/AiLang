@@ -1,0 +1,9 @@
+// std/uuid.ail — v4 UUID structure (value is random, so assert shape, not bytes).
+im "std/uuid.ail"
+id := uuid_v4()
+assert(uuid_is_v4(id), "uuid_v4 produced an invalid v4 UUID")
+assert(len(id) == 36, "uuid length must be 36")
+assert(substring(id, 14, 15) == "4", "version nibble must be 4")
+assert(uuid_is_v4(uuid_nil()) == false, "nil UUID is not a v4")
+println(uuid_nil())
+println("uuid ok")

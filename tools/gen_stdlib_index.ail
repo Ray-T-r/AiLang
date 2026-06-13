@@ -1,0 +1,91 @@
+// tools/gen_stdlib_index.ail — scan std/*.ail and emit stdlib.json: every public
+// function signature per module, so an agent (or the MCP search tool) can ground
+// itself on the stdlib surface without reading 25 files. Dogfoods AiLang's own
+// read→transform→write pipeline (fs + str + file I/O, zero imports).
+//
+//   ailc run tools/gen_stdlib_index.ail        # run from the repo root → stdlib.json
+
+fn jesc(s:str) -> str {
+  mu o := ""
+  mu i := 0
+  lp i < len(s) {
+    c := s[i]
+    if c == 34 { o = o + "\\\"" } el if c == 92 { o = o + "\\\\" } el { o = o + chr(c) }
+    i = i + 1
+  }
+  o
+}
+
+// First identifier in a signature (up to '(', '<', or space).
+fn sig_name(sig:str) -> str {
+  mu i := 0
+  n := len(sig)
+  lp i < n {
+    c := sig[i]
+    if c == 40 || c == 60 || c == 32 { br }       // '(' '<' ' '
+    i = i + 1
+  }
+  substring(sig, 0, i)
+}
+
+// A `fn`/`ex fn` signature from a source line, body stripped, or "" if not a def.
+// The body brace = the first '{' whose preceding non-space char is NOT ':' (a
+// param map type `m:{K:V}`) nor '>' (a return map type `-> {K:V}`), so map types
+// are preserved and a single-line body (incl. nested `{ }`) is dropped cleanly.
+fn fn_sig(line:str) -> str {
+  t := trim(line)
+  mu rest := ""
+  if starts_with(t, "ex fn ") { rest = substring(t, 6, len(t)) }
+  el if starts_with(t, "fn ") { rest = substring(t, 3, len(t)) }
+  el { rt "" }
+  n := len(rest)
+  mu i := 0
+  mu body := 0 - 1
+  lp i < n {
+    if rest[i] == 123 {                       // '{'
+      mu j := i - 1
+      lp j >= 0 { if rest[j] != 32 { br } j = j - 1 }
+      mu pc := 0
+      if j >= 0 { pc = rest[j] }
+      if pc != 58 && pc != 62 { body = i; br }     // not ':' and not '>'
+    }
+    i = i + 1
+  }
+  if body >= 0 { rest = substring(rest, 0, body) }
+  trim(rest)
+}
+
+mu names := sort(fs_list_dir("std"))
+mu out := "{\"modules\":["
+mu fncount := 0
+mu first_mod := true
+mu mi := 0
+lp mi < len(names) {
+  fname := names[mi]
+  if ends_with(fname, ".ail") {
+    lines := split(read_file("std/" + fname), "\n")
+    mu fns := ""
+    mu first_fn := true
+    mu li := 0
+    lp li < len(lines) {
+      sig := fn_sig(lines[li])
+      if len(sig) > 0 {
+        nm := sig_name(sig)
+        if len(nm) > 0 && starts_with(nm, "_") == false {     // skip private _-helpers
+          if first_fn == false { fns = fns + "," }
+          fns = fns + "{\"name\":\"" + jesc(nm) + "\",\"sig\":\"" + jesc(sig) + "\"}"
+          first_fn = false
+          fncount = fncount + 1
+        }
+      }
+      li = li + 1
+    }
+    if first_mod == false { out = out + "," }
+    out = out + "{\"module\":\"std/" + fname + "\",\"fns\":[" + fns + "]}"
+    first_mod = false
+  }
+  mi = mi + 1
+}
+out = out + "]}"
+write_file("stdlib.json", out)
+println("wrote stdlib.json — " + int_to_str(fncount) + " functions across the std modules")

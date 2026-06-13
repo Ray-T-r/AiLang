@@ -1,0 +1,84 @@
+// std/url.ail — query-string parsing + percent (URL) encoding/decoding.
+//
+//   im "std/url.ail"
+//   q := qs_parse("name=Ada%20L&id=7")    // {str:str}: name→"Ada L", id→"7"
+//   qs_get(q, "name", "?")                 // "Ada L"
+//   url_encode("a b/c")                     // "a%20b%2Fc"
+//   qs_build(["x","y"], ["1","a b"])        // "x=1&y=a%20b"
+
+fn url_nib(n:i64) -> str { hx := "0123456789ABCDEF"; substring(hx, n, n + 1) }
+
+fn url_encode(s:str) -> str {
+  mu out := ""
+  mu i := 0
+  n := len(s)
+  lp i < n {
+    c := s[i]
+    if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95 || c == 46 || c == 126 {
+      out = out + chr(c)                                  // unreserved: A-Z a-z 0-9 - _ . ~
+    } el {
+      out = out + "%" + url_nib(c / 16) + url_nib(c % 16)
+    }
+    i = i + 1
+  }
+  out
+}
+
+fn url_hexv(c:i64) -> i64 {
+  if c >= 48 && c <= 57 rt c - 48
+  if c >= 97 && c <= 102 rt c - 87
+  if c >= 65 && c <= 70 rt c - 55
+  0 - 1
+}
+
+fn url_decode(s:str) -> str {
+  mu out := ""
+  mu i := 0
+  n := len(s)
+  lp i < n {
+    c := s[i]
+    if c == 37 && i + 2 < n {
+      hi := url_hexv(s[i + 1])
+      lo := url_hexv(s[i + 2])
+      if hi >= 0 && lo >= 0 { out = out + chr(hi * 16 + lo); i = i + 3 } el { out = out + chr(c); i = i + 1 }
+    } el if c == 43 {
+      out = out + " "; i = i + 1                          // '+' → space
+    } el {
+      out = out + chr(c); i = i + 1
+    }
+  }
+  out
+}
+
+// Parse "a=1&b=2" (values percent-decoded; last value wins on a repeated key).
+fn qs_parse(query:str) -> {str:str} {
+  mu m:{str:str} := {}
+  parts := split(query, "&")
+  mu i := 0
+  lp i < len(parts) {
+    p := parts[i]
+    if len(p) > 0 {
+      eq := index_of(p, "=")
+      if eq >= 0 {
+        m[url_decode(substring(p, 0, eq))] = url_decode(substring(p, eq + 1, len(p)))
+      } el {
+        m[url_decode(p)] = ""
+      }
+    }
+    i = i + 1
+  }
+  m
+}
+
+fn qs_get(m:{str:str}, key:str, dflt:str) -> str { m[key] ?? dflt }
+
+fn qs_build(keys:[str], vals:[str]) -> str {
+  mu out := ""
+  mu i := 0
+  lp i < len(keys) {
+    if i > 0 { out = out + "&" }
+    out = out + url_encode(keys[i]) + "=" + url_encode(vals[i])
+    i = i + 1
+  }
+  out
+}

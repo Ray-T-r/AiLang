@@ -1,0 +1,3 @@
+// EXPECT: must be an inline lambda
+f := fn(x) x * 2
+println(map([1, 2, 3], f))

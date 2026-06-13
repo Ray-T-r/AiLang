@@ -871,6 +871,10 @@ fn gen_call(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "exit" && len(args) == 1 {
     rt "exit((int)(" + gen_expr(sy, args[0]) + "))"
   }
+  // assert(cond, msg) → the gated ail_assert_check helper (prelude, driver.ail).
+  if fname == "assert" && len(args) == 2 {
+    rt "ail_assert_check((" + gen_expr(sy, args[0]) + "), " + gen_expr(sy, args[1]) + ")"
+  }
   // `!T` result helpers. `ok(x)` monomorphizes on x's type; `err_<T>(m)` on the
   // name suffix; inspectors read the {tag, ok, err} struct directly.
   if fname == "ok" && len(args) == 1 {

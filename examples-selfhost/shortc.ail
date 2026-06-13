@@ -1,0 +1,70 @@
+// shortc — a complete URL-shortener web service in AiLang. Flagship demo: it
+// wires Express-style routing + :params + JWT-Bearer auth middleware + a real
+// SQLite-backed store + JSON request/response bodies + SQL-escaping, then drives
+// the router socket-free (web_handle) so the output is deterministic.
+//
+//   POST /shorten  {"url":"…"}   (Bearer JWT)  → 201 {"code":"…"}
+//   GET  /r/:code                              → 200 {"url":"…"}  | 404
+//
+// Run live instead with: web_listen(&app, "127.0.0.1", 8080).
+im "std/web.ail"
+im "std/sqlite.ail"
+im "std/json.ail"
+im "std/jwt.ail"
+im "std/encoding.ail" as enc          // aliased: jwt.ail carries its own b64url_* — avoid the splice collision
+
+conn := sqlite_must_open(":memory:")
+sqlite_exec(conn, "CREATE TABLE urls(id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL)")
+SECRET := "shortc-demo-secret"
+
+mu app := web_new()
+
+// Auth middleware: only POST /shorten is protected; a valid Bearer JWT is required.
+web_use(&app, fn(r:Req) {
+  if r.method == "POST" && r.path == "/shorten" {
+    auth := req_header(r, "Authorization")
+    mu tok := ""
+    if starts_with(auth, "Bearer ") { tok = substring(auth, 7, len(auth)) }
+    if jwt_verify(tok, SECRET) == false { rt http_json(401, "{\"error\":\"unauthorized\"}") }
+  }
+  ""
+})
+
+// Create: parse {"url":…}, store via a BOUND parameter (injection-safe — the URL
+// never touches the SQL text), short code = base64url(rowid).
+web_post(&app, "/shorten", fn(r:Req) {
+  url := as_str(obj_get(json_parse(r.body), "url"))
+  if len(url) == 0 { rt http_json(400, "{\"error\":\"missing url\"}") }
+  sqlite_run(conn, "INSERT INTO urls(url) VALUES(?)", [url])
+  code := enc.b64url_encode_str(int_to_str(sqlite_last_id(conn)))
+  http_json(201, "{\"code\":\"" + code + "\"}")
+})
+
+// Resolve: code → rowid → url (bound parameter again).
+web_get(&app, "/r/:code", fn(r:Req) {
+  id := str_to_int(enc.b64url_decode_str(req_param(r, "code")))
+  url := sqlite_query_one(conn, "SELECT url FROM urls WHERE id=?", [int_to_str(id)])
+  if len(url) == 0 { rt http_json(404, "{\"error\":\"not found\"}") }
+  http_json(200, "{\"url\":\"" + url + "\"}")
+})
+
+// ── drive it deterministically (no socket) ─────────────────────────────────
+tok := jwt_sign("{\"sub\":\"demo\"}", SECRET)
+
+// 1. unauthenticated create → 401
+println(http_body(web_handle(&app, "POST /shorten HTTP/1.1\r\nContent-Length: 28\r\n\r\n{\"url\":\"https://ailang.dev\"}")))
+
+// 2. authenticated create → 201 {"code":"MQ"}  (rowid 1)
+req2 := "POST /shorten HTTP/1.1\r\nAuthorization: Bearer " + tok + "\r\nContent-Length: 28\r\n\r\n{\"url\":\"https://ailang.dev\"}"
+println(http_body(web_handle(&app, req2)))
+
+// 3. a URL with a single quote — proves the SQL-escape (rowid 2 → "Mg")
+req3 := "POST /shorten HTTP/1.1\r\nAuthorization: Bearer " + tok + "\r\nContent-Length: 30\r\n\r\n{\"url\":\"https://x.com/o'brien\"}"
+println(http_body(web_handle(&app, req3)))
+
+// 4. resolve both codes
+println(http_body(web_handle(&app, "GET /r/MQ HTTP/1.1\r\n\r\n")))
+println(http_body(web_handle(&app, "GET /r/Mg HTTP/1.1\r\n\r\n")))
+
+// 5. resolve a missing code → 404
+println(http_body(web_handle(&app, "GET /r/Zz HTTP/1.1\r\n\r\n")))

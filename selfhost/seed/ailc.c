@@ -87,6 +87,7 @@ static const char* read_line(void){ size_t cap=128,len=0; char* b=(char*)GC_MALL
 static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }
 static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:""; }
 static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:"",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }
+static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, "assertion failed: %s\n", m?m:""); exit(1); } return 0; }
 static const char* exe_dir(void){ char buf[4096]; buf[0]=0;
 #ifdef _WIN32
  unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return "";
@@ -1429,6 +1430,9 @@ int64_t f_ckind(s_P* v_p);
 const char* f_ctext(s_P* v_p);
 void f_adv(s_P* v_p);
 const char* f_tok_name(int64_t v_k);
+int64_t f_want_json(void);
+const char* f_diag_code(const char* v_msg);
+const char* f_json_escape(const char* v_s);
 void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg);
 void f_eat(s_P* v_p, int64_t v_k);
@@ -1846,6 +1850,7 @@ arr_str f_module_fn_names(const char* v_body);
 const char* f_prefix_idents(const char* v_src, arr_str v_names, const char* v_pfx);
 const char* f_rewrite_qualified(const char* v_src, arr_str v_aliases);
 const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str v_seen);
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link);
 
 int64_t f_TK_EOF(void) {
     return 0;
@@ -2440,11 +2445,130 @@ const char* f_tok_name(int64_t v_k) {
     return "the expected token";
 }
 
+int64_t f_want_json(void) {
+    arr_str v_av;
+    int64_t v_i;
+    v_av = ailang_args();
+    v_i = 0;
+    while ((v_i < arr_str_len(v_av))) {
+        if ((strcmp(arr_str_get(v_av, v_i), "--") == 0)) {
+            return (1 != 1);
+        }
+        if ((strcmp(arr_str_get(v_av, v_i), "--json") == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+const char* f_diag_code(const char* v_msg) {
+    if (str_contains(v_msg, "non-exhaustive match")) {
+        return "AIL2001";
+    }
+    if (str_contains(v_msg, "unknown variant")) {
+        return "AIL2002";
+    }
+    if (str_contains(v_msg, "match on non-enum")) {
+        return "AIL2003";
+    }
+    if (str_contains(v_msg, "guard cannot be combined")) {
+        return "AIL2004";
+    }
+    if (str_contains(v_msg, "field(s)")) {
+        return "AIL2005";
+    }
+    if (str_contains(v_msg, "does not satisfy bound")) {
+        return "AIL3001";
+    }
+    if (str_contains(v_msg, "missing method")) {
+        return "AIL3002";
+    }
+    if (str_contains(v_msg, "operator ")) {
+        return "AIL3003";
+    }
+    if (str_contains(v_msg, "used outside a function returning")) {
+        return "AIL4001";
+    }
+    if (str_contains(v_msg, "but function returns")) {
+        return "AIL4002";
+    }
+    if (str_contains(v_msg, "must be an inline lambda")) {
+        return "AIL1006";
+    }
+    if (str_contains(v_msg, "callback takes")) {
+        return "AIL1002";
+    }
+    if (str_contains(v_msg, "arguments, got")) {
+        return "AIL1002";
+    }
+    if (str_contains(v_msg, "expects")) {
+        return "AIL1003";
+    }
+    if (str_contains(v_msg, "cannot index")) {
+        return "AIL1004";
+    }
+    if (str_contains(v_msg, "map value")) {
+        return "AIL5002";
+    }
+    if (str_contains(v_msg, "values() on a map")) {
+        return "AIL5003";
+    }
+    if (str_contains(v_msg, "key")) {
+        return "AIL5001";
+    }
+    if (str_contains(v_msg, "did you mean")) {
+        return "AIL6001";
+    }
+    if (str_contains(v_msg, "cannot assign")) {
+        return "AIL1001";
+    }
+    if (str_contains(v_msg, "type mismatch")) {
+        return "AIL1001";
+    }
+    return "AIL0000";
+}
+
+const char* f_json_escape(const char* v_s) {
+    const char* v_o;
+    int64_t v_i;
+    int64_t v_c;
+    v_o = "";
+    v_i = 0;
+    while ((v_i < ((int64_t)strlen(v_s)))) {
+        v_c = ((int64_t)(unsigned char)(v_s)[v_i]);
+        if ((v_c == 34)) {
+            v_o = scat(v_o, "\\\"");
+        } else {
+            if ((v_c == 92)) {
+                v_o = scat(v_o, "\\\\");
+            } else {
+                if ((v_c == 10)) {
+                    v_o = scat(v_o, "\\n");
+                } else {
+                    if ((v_c == 13)) {
+                        v_o = scat(v_o, "\\r");
+                    } else {
+                        if ((v_c == 9)) {
+                            v_o = scat(v_o, "\\t");
+                        } else {
+                            v_o = scat(v_o, chr(v_c));
+                        }
+                    }
+                }
+            }
+        }
+        v_i = (v_i + 1);
+    }
+    return v_o;
+}
+
 void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg) {
     int64_t v_line;
     int64_t v_lstart;
     int64_t v_i;
     int64_t v_lend;
+    int64_t v_col;
     const char* v_caret;
     int64_t v_k;
     v_line = 1;
@@ -2464,15 +2588,20 @@ void f_print_diag(const char* v_src, int64_t v_pos, const char* v_msg) {
         }
         v_lend = (v_lend + 1);
     }
-    printf("%s\n", scat(scat(scat(scat(scat("error ", i2s(v_line)), ":"), i2s(((v_pos - v_lstart) + 1))), ": "), v_msg));
-    printf("%s\n", scat("  ", substr(v_src, v_lstart, v_lend)));
-    v_caret = "  ";
-    v_k = v_lstart;
-    while ((v_k < v_pos)) {
-        v_caret = scat(v_caret, " ");
-        v_k = (v_k + 1);
+    v_col = ((v_pos - v_lstart) + 1);
+    if (f_want_json()) {
+        printf("%s\n", scat(scat(scat(scat(scat(scat(scat(scat(scat(scat("{\"severity\":\"error\",\"code\":\"", f_diag_code(v_msg)), "\",\"line\":"), i2s(v_line)), ",\"col\":"), i2s(v_col)), ",\"message\":\""), f_json_escape(v_msg)), "\",\"source\":\""), f_json_escape(substr(v_src, v_lstart, v_lend))), "\"}"));
+    } else {
+        printf("%s\n", scat(scat(scat(scat(scat("error ", i2s(v_line)), ":"), i2s(v_col)), ": "), v_msg));
+        printf("%s\n", scat("  ", substr(v_src, v_lstart, v_lend)));
+        v_caret = "  ";
+        v_k = v_lstart;
+        while ((v_k < v_pos)) {
+            v_caret = scat(v_caret, " ");
+            v_k = (v_k + 1);
+        }
+        printf("%s\n", scat(v_caret, "^"));
     }
-    printf("%s\n", scat(v_caret, "^"));
 }
 
 void f_report_at(const char* v_src, int64_t v_pos, const char* v_msg) {
@@ -4878,7 +5007,7 @@ int64_t f_is_native_call(const char* v_fname) {
     if ((((((((((strcmp(v_fname, "fs_mkdir") == 0) || (strcmp(v_fname, "fs_rmdir") == 0)) || (strcmp(v_fname, "fs_unlink") == 0)) || (strcmp(v_fname, "fs_rename") == 0)) || (strcmp(v_fname, "fs_exists") == 0)) || (strcmp(v_fname, "fs_is_dir") == 0)) || (strcmp(v_fname, "fs_size") == 0)) || (strcmp(v_fname, "fs_mtime") == 0)) || (strcmp(v_fname, "fs_list_dir") == 0))) {
         return (1 == 1);
     }
-    if (((((((((((((strcmp(v_fname, "sq_open") == 0) || (strcmp(v_fname, "sq_close") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_exec") == 0)) || (strcmp(v_fname, "sq_prepare") == 0)) || (strcmp(v_fname, "sq_step") == 0)) || (strcmp(v_fname, "sq_ncols") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0)) || (strcmp(v_fname, "sq_finalize") == 0)) || (strcmp(v_fname, "sq_changes") == 0)) || (strcmp(v_fname, "sq_last_id") == 0))) {
+    if (((((((((((((((((strcmp(v_fname, "sq_open") == 0) || (strcmp(v_fname, "sq_close") == 0)) || (strcmp(v_fname, "sq_err") == 0)) || (strcmp(v_fname, "sq_exec") == 0)) || (strcmp(v_fname, "sq_prepare") == 0)) || (strcmp(v_fname, "sq_step") == 0)) || (strcmp(v_fname, "sq_ncols") == 0)) || (strcmp(v_fname, "sq_col") == 0)) || (strcmp(v_fname, "sq_col_name") == 0)) || (strcmp(v_fname, "sq_finalize") == 0)) || (strcmp(v_fname, "sq_changes") == 0)) || (strcmp(v_fname, "sq_last_id") == 0)) || (strcmp(v_fname, "sq_bind_text") == 0)) || (strcmp(v_fname, "sq_bind_int") == 0)) || (strcmp(v_fname, "sq_bind_null") == 0)) || (strcmp(v_fname, "sq_reset") == 0))) {
         return (1 == 1);
     }
     return (1 != 1);
@@ -5111,7 +5240,7 @@ const char* f_call_type_a(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     if ((strcmp(v_fname, "split") == 0)) {
         return "[str]";
     }
-    if ((((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0))) {
+    if (((((((strcmp(v_fname, "now_ms") == 0) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "assert") == 0))) {
         return "i64";
     }
     if ((strcmp(v_fname, "time_iso") == 0)) {
@@ -5227,7 +5356,7 @@ const char* f_tcon_var(s_Syms* v_sy, const char* v_name) {
 }
 
 const char* f_builtin_fixed_ret(const char* v_fname) {
-    if ((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
+    if (((((((((((((((((((((((((((((((((((strcmp(v_fname, "len") == 0) || (strcmp(v_fname, "str_to_int") == 0)) || (strcmp(v_fname, "bytes_at") == 0)) || (strcmp(v_fname, "index_of") == 0)) || (strcmp(v_fname, "ord") == 0)) || (strcmp(v_fname, "sign") == 0)) || (strcmp(v_fname, "clamp") == 0)) || (strcmp(v_fname, "now_ms") == 0)) || (strcmp(v_fname, "now_us") == 0)) || (strcmp(v_fname, "mono_ms") == 0)) || (strcmp(v_fname, "sleep_ms") == 0)) || (strcmp(v_fname, "flush") == 0)) || (strcmp(v_fname, "assert") == 0)) || (strcmp(v_fname, "write_file_bytes") == 0)) || (strcmp(v_fname, "abs_i64") == 0)) || (strcmp(v_fname, "tcp_listen") == 0)) || (strcmp(v_fname, "tcp_accept") == 0)) || (strcmp(v_fname, "tcp_connect") == 0)) || (strcmp(v_fname, "sock_send") == 0)) || (strcmp(v_fname, "sock_send_str") == 0)) || (strcmp(v_fname, "sock_close") == 0)) || (strcmp(v_fname, "proc_fork") == 0)) || (strcmp(v_fname, "proc_getpid") == 0)) || (strcmp(v_fname, "proc_no_zombies") == 0)) || (strcmp(v_fname, "proc_reap") == 0)) || (strcmp(v_fname, "thread_spawn") == 0)) || (strcmp(v_fname, "thread_join") == 0)) || (strcmp(v_fname, "mutex_new") == 0)) || (strcmp(v_fname, "mutex_lock") == 0)) || (strcmp(v_fname, "mutex_unlock") == 0)) || (strcmp(v_fname, "chan_new") == 0)) || (strcmp(v_fname, "chan_send") == 0)) || (strcmp(v_fname, "chan_recv") == 0)) || (strcmp(v_fname, "chan_close") == 0))) {
         return "i64";
     }
     if (((((((((((((((((((((((((strcmp(v_fname, "to_str") == 0) || (strcmp(v_fname, "cstr") == 0)) || (strcmp(v_fname, "int_to_str") == 0)) || (strcmp(v_fname, "float_to_str") == 0)) || (strcmp(v_fname, "substring") == 0)) || (strcmp(v_fname, "read_file") == 0)) || (strcmp(v_fname, "bytes_to_str") == 0)) || (strcmp(v_fname, "err_msg") == 0)) || (strcmp(v_fname, "time_iso") == 0)) || (strcmp(v_fname, "regex_find") == 0)) || (strcmp(v_fname, "to_upper") == 0)) || (strcmp(v_fname, "to_lower") == 0)) || (strcmp(v_fname, "trim") == 0)) || (strcmp(v_fname, "replace") == 0)) || (strcmp(v_fname, "repeat") == 0)) || (strcmp(v_fname, "pad_left") == 0)) || (strcmp(v_fname, "pad_right") == 0)) || (strcmp(v_fname, "chr") == 0)) || (strcmp(v_fname, "read_line") == 0)) || (strcmp(v_fname, "read_stdin") == 0)) || (strcmp(v_fname, "get_env") == 0)) || (strcmp(v_fname, "exe_dir") == 0)) || (strcmp(v_fname, "format") == 0)) || (strcmp(v_fname, "join") == 0))) {
@@ -6466,6 +6595,9 @@ const char* f_gen_call(s_Syms* v_sy, const char* v_fname, arr_Expr v_args) {
     }
     if (((strcmp(v_fname, "exit") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat("exit((int)(", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "))");
+    }
+    if (((strcmp(v_fname, "assert") == 0) && (arr_Expr_len(v_args) == 2))) {
+        return scat(scat(scat(scat("ail_assert_check((", f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), "), "), f_gen_expr(v_sy, arr_Expr_get(v_args, 1))), ")");
     }
     if (((strcmp(v_fname, "ok") == 0) && (arr_Expr_len(v_args) == 1))) {
         return scat(scat(scat(scat("mk_ok_", f_arr_suffix(f_type_of_expr(v_sy, arr_Expr_get(v_args, 0)))), "("), f_gen_expr(v_sy, arr_Expr_get(v_args, 0))), ")");
@@ -9124,20 +9256,27 @@ int64_t f_lambda_arity(s_Expr v_e) {
 
 int64_t f_hof_arity_check(s_Syms* v_sy, const char* v_fname, arr_Expr v_args, int64_t v_pos, const char* v_src) {
     int64_t v_want;
+    int64_t v_cbidx;
     int64_t v_i;
     int64_t v_np;
     if ((v_pos < 0)) {
         return 0;
     }
     v_want = (0 - 1);
+    v_cbidx = (0 - 1);
     if (((strcmp(v_fname, "map") == 0) || (strcmp(v_fname, "filter") == 0))) {
         v_want = 1;
+        v_cbidx = 1;
     }
     if ((strcmp(v_fname, "reduce") == 0)) {
         v_want = 2;
+        v_cbidx = 2;
     }
     if ((v_want < 0)) {
         return 0;
+    }
+    if ((((v_cbidx >= 0) && (v_cbidx < arr_Expr_len(v_args))) && (f_lambda_arity(arr_Expr_get(v_args, v_cbidx)) < 0))) {
+        f_report_chk(v_sy, v_src, v_pos, scat(scat("the function argument to '", v_fname), "' must be an inline lambda (fn(x) …); a stored or named function isn't supported here — use std/seq.ail (keep/map_to/fold) for that"));
     }
     v_i = 0;
     while ((v_i < arr_Expr_len(v_args))) {
@@ -9673,6 +9812,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     int64_t v_needs_hmac;
     int64_t v_needs_pg;
     int64_t v_needs_exedir;
+    int64_t v_needs_assert;
     int64_t v_ci;
     arr_str v_mapkeys;
     arr_str v_mapvals;
@@ -10127,7 +10267,11 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     if (map_str_str_has((v_base).errc, "bad")) {
         v_n = s2i(map_str_str_get((v_base).errc, "n"));
         if ((v_n > 1)) {
-            printf("%s\n", scat(scat("found ", i2s(v_n)), " errors"));
+            if (f_want_json()) {
+                printf("%s\n", scat(scat("{\"severity\":\"summary\",\"errors\":", i2s(v_n)), "}"));
+            } else {
+                printf("%s\n", scat(scat("found ", i2s(v_n)), " errors"));
+            }
         }
         exit((int)(1));
     }
@@ -10160,6 +10304,7 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_needs_hmac = f_has_sub(v_src, "hmac_sha256");
     v_needs_pg = f_has_sub(v_src, "pg_");
     v_needs_exedir = f_has_sub(v_src, "exe_dir");
+    v_needs_assert = f_has_sub(v_src, scat("assert", "("));
     if (v_needs_thread) {
         v_out = scat(v_out, "#ifndef _WIN32\n#define GC_THREADS\n#endif\n");
     }
@@ -10235,6 +10380,9 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     v_out = scat(v_out, "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n");
     v_out = scat(v_out, "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n");
     v_out = scat(v_out, "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n");
+    if (v_needs_assert) {
+        v_out = scat(v_out, "static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, \"assertion failed: %s\\n\", m?m:\"\"); exit(1); } return 0; }\n");
+    }
     if (v_needs_exedir) {
         v_out = scat(v_out, "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n");
     }
@@ -10594,6 +10742,10 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         v_sqp = scat(v_sqp, "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n");
         v_sqp = scat(v_sqp, "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n");
         v_sqp = scat(v_sqp, "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_text(int64_t st, int64_t i, const char* v){ if(st==0) return -1; return (int64_t)sqlite3_bind_text((sqlite3_stmt*)(intptr_t)st,(int)i,v?v:\"\",-1,SQLITE_TRANSIENT); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_int(int64_t st, int64_t i, int64_t v){ if(st==0) return -1; return (int64_t)sqlite3_bind_int64((sqlite3_stmt*)(intptr_t)st,(int)i,(sqlite3_int64)v); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_bind_null(int64_t st, int64_t i){ if(st==0) return -1; return (int64_t)sqlite3_bind_null((sqlite3_stmt*)(intptr_t)st,(int)i); }\n");
+        v_sqp = scat(v_sqp, "static int64_t sq_reset(int64_t st){ if(st==0) return -1; sqlite3_clear_bindings((sqlite3_stmt*)(intptr_t)st); return (int64_t)sqlite3_reset((sqlite3_stmt*)(intptr_t)st); }\n");
         v_sqp = scat(v_sqp, "#endif\n");
         v_out = str_replace(v_out, v_spat, v_sqp);
         v_mlib = scat(v_mlib, " sqlite3");
@@ -11100,27 +11252,12 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     return f_rewrite_qualified(v_out, v_aliases);
 }
 
-int main(int argc, char** argv){
-    GC_INIT();
-    g_argc=argc; g_argv=argv;
-    const char* v_AILC_VERSION;
-    const char* v_USAGE;
-    arr_str v_av;
-    int64_t v_keepc;
-    arr_str v_pos;
-    int64_t v_fi;
-    const char* v_a;
-    int64_t v_ai;
-    const char* v_input;
-    const char* v_outbin;
-    int64_t v_ni;
-    int64_t v_ob;
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link) {
     const char* v_src;
     map_str_str v_seen;
     const char* v_cprog;
     const char* v_cpath;
     int64_t v_win;
-    const char* v_outexe;
     arr_str v_shims0;
     arr_str v_shims;
     int64_t v_ri;
@@ -11131,70 +11268,10 @@ int main(int argc, char** argv){
     const char* v_shimline;
     int64_t v_si;
     int64_t v_ci2;
-    v_AILC_VERSION = "0.5.0";
-    v_USAGE = "usage: ailc [--keep-c] [compile] <input.ail> [output-binary]";
-    v_av = ailang_args();
-    v_keepc = (1 != 1);
-    v_pos = ({ arr_str __a = arr_str_new(); __a; });
-    v_fi = 0;
-    while ((v_fi < arr_str_len(v_av))) {
-        v_a = arr_str_get(v_av, v_fi);
-        if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
-            v_keepc = (1 == 1);
-        } else {
-            if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
-                printf("%s\n", v_USAGE);
-                exit((int)(0));
-            } else {
-                if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
-                    printf("%s\n", scat("ailc ", v_AILC_VERSION));
-                    exit((int)(0));
-                } else {
-                    if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
-                        printf("%s\n", scat("error: unknown flag: ", v_a));
-                        printf("%s\n", v_USAGE);
-                        exit((int)(1));
-                    } else {
-                        v_pos = arr_str_push(v_pos, v_a);
-                    }
-                }
-            }
-        }
-        v_fi = (v_fi + 1);
-    }
-    v_ai = 0;
-    if (((arr_str_len(v_pos) > 0) && (strcmp(arr_str_get(v_pos, 0), "compile") == 0))) {
-        v_ai = 1;
-    }
-    if ((arr_str_len(v_pos) <= v_ai)) {
-        printf("%s\n", v_USAGE);
-        exit((int)(1));
-    }
-    v_input = arr_str_get(v_pos, v_ai);
-    v_outbin = "";
-    if ((arr_str_len(v_pos) > (v_ai + 1))) {
-        v_outbin = arr_str_get(v_pos, (v_ai + 1));
-    } else {
-        v_ni = ((int64_t)strlen(v_input));
-        if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
-            v_outbin = substr(v_input, 0, (v_ni - 4));
-        } else {
-            v_outbin = scat(v_input, ".out");
-        }
-    }
-    if ((strcmp(v_outbin, v_input) == 0)) {
-        printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
-        exit((int)(1));
-    }
-    v_ob = ((int64_t)strlen(v_outbin));
-    if (((v_ob >= 4) && (strcmp(substr(v_outbin, (v_ob - 4), v_ob), ".ail") == 0))) {
-        printf("%s\n", scat("error: refusing to write the compiled binary over a .ail source file: ", v_outbin));
-        exit((int)(1));
-    }
     v_src = read_file_c(v_input);
     if ((((int64_t)strlen(v_src)) == 0)) {
         printf("%s\n", scat("error: cannot read input file (missing or empty): ", v_input));
-        exit((int)(1));
+        return 1;
     }
     v_src = scat(f_auto_imports(v_src), v_src);
     if (f_has_import(v_src)) {
@@ -11202,10 +11279,12 @@ int main(int argc, char** argv){
         v_src = f_resolve_imports(v_src, f_dirname(v_input), v_seen);
     }
     v_cprog = f_compile_to_c(v_src, f_dirname(v_input));
+    if ((v_link == (1 != 1))) {
+        return 0;
+    }
     v_cpath = scat(v_outbin, ".c");
     write_file_c(v_cpath, v_cprog);
     v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
-    v_outexe = v_outbin;
     v_shims0 = f_csrc_list(v_cprog);
     v_shims = ({ arr_str __a = arr_str_new(); __a; });
     v_ri = 0;
@@ -11215,13 +11294,12 @@ int main(int argc, char** argv){
     }
     v_rc = 0;
     if (v_win) {
-        v_outexe = scat(v_outbin, ".exe");
         if ((arr_str_len(v_shims) == 0)) {
-            v_cmd = scat(scat(scat(scat(scat(scat("clang -O2 -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -static -lgc -lm -o \""), v_outexe), "\"");
+            v_cmd = scat(scat(scat(scat(scat(scat("clang -O2 -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -static -lgc -lm -o \""), v_outbin), ".exe\"");
             v_rc = f_system(v_cmd);
         } else {
             printf("%s\n", "error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux");
-            exit((int)(1));
+            return 1;
         }
     } else {
         v_extra = " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)";
@@ -11258,7 +11336,7 @@ int main(int argc, char** argv){
     }
     if ((v_rc != 0)) {
         printf("%s\n", "clang failed");
-        exit((int)(1));
+        return 1;
     }
     if ((v_keepc == (1 != 1))) {
         if (v_win) {
@@ -11274,6 +11352,219 @@ int main(int argc, char** argv){
             v_ci2 = (v_ci2 + 1);
         }
     }
-    printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));
+    return 0;
+}
+
+int main(int argc, char** argv){
+    GC_INIT();
+    g_argc=argc; g_argv=argv;
+    const char* v_AILC_VERSION;
+    const char* v_USAGE;
+    arr_str v_av;
+    int64_t v_keepc;
+    int64_t v_jsonmode;
+    arr_str v_pos;
+    arr_str v_runargs;
+    int64_t v_afterdd;
+    int64_t v_fi;
+    const char* v_a;
+    int64_t v_ai;
+    const char* v_mode;
+    const char* v_input;
+    int64_t v_win;
+    const char* v_tdir;
+    int64_t v_npass;
+    int64_t v_nfail;
+    int64_t v_ti;
+    const char* v_tf;
+    const char* v_tout;
+    const char* v_texe;
+    int64_t v_erc;
+    const char* v_outbin;
+    int64_t v_ni;
+    int64_t v_ob;
+    const char* v_outexe;
+    const char* v_runcmd;
+    int64_t v_rj;
+    int64_t v_rrc;
+    v_AILC_VERSION = "0.5.0";
+    v_USAGE = "usage: ailc [--keep-c] [--json] [run|check|test|compile] <input.ail> [output-binary] [-- prog-args]";
+    v_av = ailang_args();
+    v_keepc = (1 != 1);
+    v_jsonmode = (1 != 1);
+    v_pos = ({ arr_str __a = arr_str_new(); __a; });
+    v_runargs = ({ arr_str __a = arr_str_new(); __a; });
+    v_afterdd = (1 != 1);
+    v_fi = 0;
+    while ((v_fi < arr_str_len(v_av))) {
+        v_a = arr_str_get(v_av, v_fi);
+        if (v_afterdd) {
+            v_runargs = arr_str_push(v_runargs, v_a);
+        } else {
+            if ((strcmp(v_a, "--") == 0)) {
+                v_afterdd = (1 == 1);
+            } else {
+                if (((strcmp(v_a, "--keep-c") == 0) || (strcmp(v_a, "-k") == 0))) {
+                    v_keepc = (1 == 1);
+                } else {
+                    if ((strcmp(v_a, "--json") == 0)) {
+                        v_jsonmode = (1 == 1);
+                    } else {
+                        if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
+                            printf("%s\n", v_USAGE);
+                            exit((int)(0));
+                        } else {
+                            if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
+                                printf("%s\n", scat("ailc ", v_AILC_VERSION));
+                                exit((int)(0));
+                            } else {
+                                if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
+                                    printf("%s\n", scat("error: unknown flag: ", v_a));
+                                    printf("%s\n", v_USAGE);
+                                    exit((int)(1));
+                                } else {
+                                    v_pos = arr_str_push(v_pos, v_a);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        v_fi = (v_fi + 1);
+    }
+    v_ai = 0;
+    v_mode = "build";
+    if ((arr_str_len(v_pos) > 0)) {
+        if ((strcmp(arr_str_get(v_pos, 0), "compile") == 0)) {
+            v_ai = 1;
+        } else {
+            if ((strcmp(arr_str_get(v_pos, 0), "run") == 0)) {
+                v_mode = "run";
+                v_ai = 1;
+            } else {
+                if ((strcmp(arr_str_get(v_pos, 0), "check") == 0)) {
+                    v_mode = "check";
+                    v_ai = 1;
+                } else {
+                    if ((strcmp(arr_str_get(v_pos, 0), "test") == 0)) {
+                        v_mode = "test";
+                        v_ai = 1;
+                    }
+                }
+            }
+        }
+    }
+    if ((arr_str_len(v_pos) <= v_ai)) {
+        printf("%s\n", v_USAGE);
+        exit((int)(1));
+    }
+    v_input = arr_str_get(v_pos, v_ai);
+    if ((strcmp(v_mode, "test") == 0)) {
+        v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+        v_tdir = "/tmp";
+        if (v_win) {
+            v_tdir = get_env("TEMP");
+        }
+        v_npass = 0;
+        v_nfail = 0;
+        v_ti = v_ai;
+        while ((v_ti < arr_str_len(v_pos))) {
+            v_tf = arr_str_get(v_pos, v_ti);
+            v_tout = scat(scat(v_tdir, "/ailc_test_"), i2s(now_us()));
+            if ((f_build_one(v_tf, v_tout, (1 != 1), (1 == 1)) != 0)) {
+                printf("%s\n", scat(scat("FAIL ", v_tf), " (build error)"));
+                v_nfail = (v_nfail + 1);
+            } else {
+                v_texe = v_tout;
+                if (v_win) {
+                    v_texe = scat(v_tout, ".exe");
+                }
+                v_erc = f_system(v_texe);
+                if (v_win) {
+                    f_system(scat(scat("del /f /q \"", v_texe), "\""));
+                } else {
+                    f_system(scat("rm -f ", v_texe));
+                }
+                if ((v_erc == 0)) {
+                    printf("%s\n", scat("PASS ", v_tf));
+                    v_npass = (v_npass + 1);
+                } else {
+                    printf("%s\n", scat("FAIL ", v_tf));
+                    v_nfail = (v_nfail + 1);
+                }
+            }
+            v_ti = (v_ti + 1);
+        }
+        printf("%s\n", scat(scat(scat(scat("tests: ", i2s(v_npass)), " passed, "), i2s(v_nfail)), " failed"));
+        if ((v_nfail > 0)) {
+            exit((int)(1));
+        }
+        exit((int)(0));
+    }
+    if ((strcmp(v_mode, "check") == 0)) {
+        f_build_one(v_input, "", (1 != 1), (1 != 1));
+        if (v_jsonmode) {
+            printf("%s\n", "{\"severity\":\"ok\"}");
+        } else {
+            printf("%s\n", "ok");
+        }
+        exit((int)(0));
+    }
+    v_outbin = "";
+    if ((strcmp(v_mode, "run") == 0)) {
+        v_tdir = "/tmp";
+        if ((strcmp(get_env("OS"), "Windows_NT") == 0)) {
+            v_tdir = get_env("TEMP");
+        }
+        v_outbin = scat(scat(v_tdir, "/ailc_run_"), i2s(now_us()));
+    } else {
+        if ((arr_str_len(v_pos) > (v_ai + 1))) {
+            v_outbin = arr_str_get(v_pos, (v_ai + 1));
+        } else {
+            v_ni = ((int64_t)strlen(v_input));
+            if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
+                v_outbin = substr(v_input, 0, (v_ni - 4));
+            } else {
+                v_outbin = scat(v_input, ".out");
+            }
+        }
+        if ((strcmp(v_outbin, v_input) == 0)) {
+            printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
+            exit((int)(1));
+        }
+        v_ob = ((int64_t)strlen(v_outbin));
+        if (((v_ob >= 4) && (strcmp(substr(v_outbin, (v_ob - 4), v_ob), ".ail") == 0))) {
+            printf("%s\n", scat("error: refusing to write the compiled binary over a .ail source file: ", v_outbin));
+            exit((int)(1));
+        }
+    }
+    if ((f_build_one(v_input, v_outbin, v_keepc, (1 == 1)) != 0)) {
+        exit((int)(1));
+    }
+    v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+    v_outexe = v_outbin;
+    if (v_win) {
+        v_outexe = scat(v_outbin, ".exe");
+    }
+    if ((strcmp(v_mode, "run") == 0)) {
+        v_runcmd = v_outexe;
+        v_rj = 0;
+        while ((v_rj < arr_str_len(v_runargs))) {
+            v_runcmd = scat(scat(scat(v_runcmd, " \""), arr_str_get(v_runargs, v_rj)), "\"");
+            v_rj = (v_rj + 1);
+        }
+        v_rrc = f_system(v_runcmd);
+        if (v_win) {
+            f_system(scat(scat("del /f /q \"", v_outexe), "\""));
+        } else {
+            f_system(scat("rm -f ", v_outexe));
+        }
+        if ((v_rrc != 0)) {
+            exit((int)(1));
+        }
+    } else {
+        printf("%s\n", scat(scat(scat("compiled ", v_input), " -> "), v_outexe));
+    }
     return 0;
 }

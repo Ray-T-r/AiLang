@@ -94,6 +94,48 @@ fi
 if ls ./--bogus-flag* ./-bogus* "/tmp/cli_x_$$"* >/dev/null 2>&1; then
   echo "    FAIL: junk files were created"; cli_ok=0
 fi
+# `run` = compile + execute in one step: its stdout must equal the sample's
+# committed fixture, and no compiler chatter ("compiled …") may leak. `check` =
+# parse + type-check only: prints "ok" + exits 0 on a clean program, and exits
+# nonzero on a real type error (the agent's fast inner loop).
+rsamp=""
+for cand in fib hello fizzbuzz arrays sum; do
+  if [ -f "examples-selfhost/$cand.ail" ] && [ ! -f "examples-selfhost/$cand.in" ] && [ -f "examples-selfhost/expected/$cand.out" ]; then rsamp="$cand"; break; fi
+done
+if [ -n "$rsamp" ]; then
+  run_out="$(guard 30 "$AILC" run "examples-selfhost/$rsamp.ail" 2>&1)" || { echo "    FAIL: 'run $rsamp' exited nonzero"; cli_ok=0; }
+  [ "$run_out" = "$(cat "examples-selfhost/expected/$rsamp.out")" ] || { echo "    FAIL: 'run $rsamp' stdout != fixture"; cli_ok=0; }
+  printf '%s' "$run_out" | grep -q "compiled " && { echo "    FAIL: 'run' leaked compiler chatter"; cli_ok=0; } || true
+  guard 30 "$AILC" check "examples-selfhost/$rsamp.ail" 2>&1 | grep -q "^ok$" || { echo "    FAIL: 'check $rsamp' did not print ok on a clean program"; cli_ok=0; }
+fi
+neg_one="selfhost/tests/neg/aggmismatch.ail"
+[ -f "$neg_one" ] || neg_one="$(ls selfhost/tests/neg/*.ail 2>/dev/null | head -1)"
+if [ -n "$neg_one" ] && "$AILC" check "$neg_one" >/dev/null 2>&1; then
+  echo "    FAIL: 'check' exited 0 on a known type error ($neg_one)"; cli_ok=0
+fi
+"$AILC" run   >/dev/null 2>&1 && { echo "    FAIL: 'run' with no input exited 0"; cli_ok=0; } || true
+"$AILC" check >/dev/null 2>&1 && { echo "    FAIL: 'check' with no input exited 0"; cli_ok=0; } || true
+# --json: machine-readable JSONL for agent consumers. A clean check is the
+# object {"severity":"ok"}; an error carries a code + nonzero exit.
+if [ -n "$rsamp" ]; then
+  "$AILC" check --json "examples-selfhost/$rsamp.ail" 2>&1 | grep -q '{"severity":"ok"}' || { echo "    FAIL: 'check --json' on a clean program is not {\"severity\":\"ok\"}"; cli_ok=0; }
+fi
+if [ -n "$neg_one" ]; then
+  jout="$("$AILC" check --json "$neg_one" 2>&1)" && { echo "    FAIL: 'check --json' exited 0 on a type error"; cli_ok=0; } || true
+  printf '%s' "$jout" | grep -q '"severity":"error"' || { echo "    FAIL: 'check --json' emitted no error object"; cli_ok=0; }
+  printf '%s' "$jout" | grep -q '"code":"AIL'        || { echo "    FAIL: 'check --json' error carried no code"; cli_ok=0; }
+fi
+# assert(cond,msg) + `ailc test`: a passing assert exits 0, a failing one aborts
+# nonzero, and the runner tallies pass/fail. Also proves a program WITH assert
+# compiles + links + runs (the gated prelude helper is reached).
+vt_pass="/tmp/vt_pass_$$.ail"; vt_fail="/tmp/vt_fail_$$.ail"
+printf 'assert(1+1==2, "ok")\nprintln("done")\n' > "$vt_pass"
+printf 'assert(1==2, "boom")\n'                  > "$vt_fail"
+"$AILC" test "$vt_pass" >/dev/null 2>&1 || { echo "    FAIL: 'test' on a passing assert exited nonzero"; cli_ok=0; }
+"$AILC" test "$vt_fail" >/dev/null 2>&1 && { echo "    FAIL: 'test' on a failing assert exited 0"; cli_ok=0; } || true
+tsum="$("$AILC" test "$vt_pass" "$vt_fail" 2>/dev/null || true)"   # nonzero exit (1 test fails) is expected; capture, then assert
+printf '%s' "$tsum" | grep -q "1 passed, 1 failed" || { echo "    FAIL: 'test' summary wrong"; cli_ok=0; }
+rm -f "$vt_pass" "$vt_fail"
 [ "$cli_ok" -eq 1 ] && echo "    ok   CLI guards" || fail=1
 
 rm -f selfhost/ailc

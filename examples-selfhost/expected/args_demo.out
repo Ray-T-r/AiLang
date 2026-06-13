@@ -1,0 +1,9 @@
+build
+src.ail
+3
+bin/app
+4
+verbose on
+x set
+missing absent
+args ok

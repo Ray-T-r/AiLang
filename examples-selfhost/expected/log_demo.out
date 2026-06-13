@@ -1,0 +1,4 @@
+ts=2026-06-13T00:00:00Z level=INFO msg="server started"
+ts=2026-06-13T00:00:01Z level=WARN msg="slow query" ms=812 path=/api
+ERROR
+log ok

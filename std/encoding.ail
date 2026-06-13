@@ -1,0 +1,119 @@
+// std/encoding.ail — base64, base64url, and hex codecs (pure AiLang, no link).
+//
+//   im "std/encoding.ail"
+//   s  := b64_encode(str_to_bytes("hi"))      // "aGk="
+//   t  := b64_decode_str("aGk=")              // "hi"
+//   u  := b64url_encode(str_to_bytes("hi"))   // "aGk"   (no padding, URL alphabet)
+//   h  := hex_encode(str_to_bytes("hi"))      // "6869"
+//
+// Encoders take `bytes` (use `str_to_bytes(s)` for text); decoders return `str`.
+// CAVEAT: a decoded NUL byte truncates the `str` result (str is NUL-terminated) —
+// decode is for text/JSON/token payloads; raw binary with embedded NUL needs a
+// bytes sink (not yet a builtin). The `b64url_*` pair matches std/jwt.ail and the
+// standard `b64_encode` matches std/ws.ail (so it interoperates byte-for-byte).
+//
+// NOTE: keep this module's PUBLIC names (b64_encode, b64url_encode, …) out of the
+// same program as a direct `im "std/jwt.ail"` / `im "std/ws.ail"` unless you alias
+// one (`im "std/encoding.ail" as enc`) — plain `im` splices unqualified and those
+// modules carry their own copies, so the names would collide.
+
+fn enc_p2(n:i64) -> i64 { mu r := 1; mu k := 0; lp k < n { r = r * 2; k += 1 } r }
+
+fn enc_b64(b:bytes, alpha:str, pad:bool) -> str {
+  mu out := ""
+  mu i := 0
+  n := len(b)
+  lp i < n {
+    b0 := bytes_at(b, i)
+    mu b1 := 0
+    mu b2 := 0
+    mu have := 1
+    if i + 1 < n { b1 = bytes_at(b, i + 1); have = 2 }
+    if i + 2 < n { b2 = bytes_at(b, i + 2); have = 3 }
+    g := b0 * 65536 + b1 * 256 + b2
+    c0 := g / 262144
+    c1 := (g / 4096) % 64
+    c2 := (g / 64) % 64
+    c3 := g % 64
+    out = out + substring(alpha, c0, c0 + 1) + substring(alpha, c1, c1 + 1)
+    if have >= 2 { out = out + substring(alpha, c2, c2 + 1) } el { if pad { out = out + "=" } }
+    if have >= 3 { out = out + substring(alpha, c3, c3 + 1) } el { if pad { out = out + "=" } }
+    i = i + 3
+  }
+  out
+}
+
+// 6-bit value of a base64 char (both +/ and -_ alphabets); -1 for padding/invalid.
+fn enc_b64v(c:i64) -> i64 {
+  if c >= 65 && c <= 90 rt c - 65          // A-Z
+  if c >= 97 && c <= 122 rt c - 71         // a-z
+  if c >= 48 && c <= 57 rt c + 4           // 0-9
+  if c == 43 || c == 45 rt 62              // '+' or '-'
+  if c == 47 || c == 95 rt 63              // '/' or '_'
+  0 - 1
+}
+
+fn enc_b64_dec(s:str) -> str {
+  mu out := ""
+  mu buf := 0
+  mu bits := 0
+  mu i := 0
+  n := len(s)
+  lp i < n {
+    v := enc_b64v(s[i])
+    if v >= 0 {
+      buf = buf * 64 + v
+      bits = bits + 6
+      if bits >= 8 {
+        bits = bits - 8
+        out = out + chr((buf / enc_p2(bits)) % 256)
+        buf = buf % enc_p2(bits)
+      }
+    }
+    i = i + 1
+  }
+  out
+}
+
+fn b64_encode(b:bytes) -> str { enc_b64(b, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true) }
+fn b64url_encode(b:bytes) -> str { enc_b64(b, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false) }
+fn b64_encode_str(s:str) -> str { b64_encode(str_to_bytes(s)) }
+fn b64url_encode_str(s:str) -> str { b64url_encode(str_to_bytes(s)) }
+// One decoder handles both alphabets (enc_b64v maps + / - _) and ignores '='.
+fn b64_decode_str(s:str) -> str { enc_b64_dec(s) }
+fn b64url_decode_str(s:str) -> str { enc_b64_dec(s) }
+
+fn hex_encode(b:bytes) -> str {
+  hx := "0123456789abcdef"
+  mu out := ""
+  mu i := 0
+  n := len(b)
+  lp i < n {
+    c := bytes_at(b, i)
+    hi := c / 16
+    lo := c % 16
+    out = out + substring(hx, hi, hi + 1) + substring(hx, lo, lo + 1)
+    i = i + 1
+  }
+  out
+}
+fn hex_encode_str(s:str) -> str { hex_encode(str_to_bytes(s)) }
+
+fn enc_hexv(c:i64) -> i64 {
+  if c >= 48 && c <= 57 rt c - 48          // 0-9
+  if c >= 97 && c <= 102 rt c - 87         // a-f
+  if c >= 65 && c <= 70 rt c - 55          // A-F
+  0 - 1
+}
+fn hex_decode_str(s:str) -> str {
+  mu out := ""
+  mu i := 0
+  n := len(s)
+  lp i + 1 < n {
+    hi := enc_hexv(s[i])
+    lo := enc_hexv(s[i + 1])
+    if hi >= 0 && lo >= 0 { out = out + chr(hi * 16 + lo) }
+    i = i + 2
+  }
+  out
+}

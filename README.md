@@ -36,15 +36,18 @@ external `.cpp`, POSIX), variadic externs
 (`ex fn printf(fmt, ...)`), OS-thread concurrency (pthread-backed
 `thread_spawn`/`thread_join`, `mutex_*`, and bounded blocking `chan_*` channels,
 POSIX), `{str:[T]}` map-of-array values (so `group_by` returns real buckets),
-and the 19 `std/*` modules — sockets, HTTP (server **and** client: `http_get`/
+and the 25 `std/*` modules — sockets, HTTP (server **and** client: `http_get`/
 `http_post` with chunked decoding, https via SNI), TLS, the database trio
 (Postgres, MySQL via libmysqlclient, SQLite via libsqlite3 — the native libs
 linked only by programs that use them), Redis, WebSocket, filesystem (`fs_*`
 ops + path helpers), JSON (flat + nested), CSV, time, str, math, threads, `seq`
 (composable `any`/`keep`/`map_to`/`fold`/`sort_by`/`flat_map`/`zip_with`/
 `group_by` combinators), `web` (Express-style routing: `:id` params, middleware,
-`req_header`, handler closures held in the routes table), and `jwt` (HS256
-sign/verify, real interoperable tokens) — pulled in via `im` (with
+`req_header`, handler closures held in the routes table), `jwt` (HS256
+sign/verify, real interoperable tokens), and the app-building set `encoding`
+(base64/base64url/hex), `url` (percent-encoding + query strings), `uuid` (v4),
+`args` (CLI flag/option parsing), `log` (leveled logfmt), and `env` (typed
+env + `.env`) — pulled in via `im` (with
 optional `im "path" as m` aliasing for a namespaced, collision-free `m.fn()`).
 Whole-stream stdin (`read_stdin`) plus the CSV reader/writer and the recursive JSON
 parser/serializer make read→transform→write pipelines —
@@ -93,7 +96,8 @@ matching `clang -O2`).
 | compiler source | ~7,700 lines across `main.ail` + 6 `src/` modules |
 | strict fixpoint | `stage2.c == stage3.c` — **11,276 lines, byte-identical** |
 | sample programs | **65**, each output-verified against a frozen fixture — including loopback runtime tests for sockets/HTTP/WebSocket/web (in-process server thread, deterministic output) |
-| standard library | 19 modules — networked/db modules exercised by loopback samples + compile-and-link checks (`selfhost/tests/compileonly/`) |
+| standard library | 25 modules — networked/db modules exercised by loopback samples + compile-and-link checks (`selfhost/tests/compileonly/`) |
+| CLI | `ailc run` (compile + execute) · `ailc check` (type-check only) · `ailc test` (run `assert`-based `*_test.ail`, PASS/FAIL summary) · `--json` machine-readable diagnostics with stable `AIL####` codes |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
 | type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **43 negative tests**, all caught |
 | Rust in the build | **none** |

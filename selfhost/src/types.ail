@@ -227,7 +227,7 @@ fn is_native_call(fname:str) -> bool {
   if fname == "pg_connect" || fname == "pg_status" || fname == "pg_error" || fname == "pg_close" || fname == "pg_exec" || fname == "pg_ok" || fname == "pg_result_error" || fname == "pg_clear" || fname == "pg_nrows" || fname == "pg_ncols" || fname == "pg_value" || fname == "pg_isnull" || fname == "pg_col_name" || fname == "pg_affected" || fname == "pg_escape" rt true
   if fname == "myq_conn" || fname == "myq_query" || fname == "myq_store" || fname == "myq_nrows" || fname == "myq_nfields" || fname == "myq_fetch" || fname == "myq_field" || fname == "myq_err" || fname == "myq_free" || fname == "myq_close" || fname == "myq_escape" rt true
   if fname == "fs_mkdir" || fname == "fs_rmdir" || fname == "fs_unlink" || fname == "fs_rename" || fname == "fs_exists" || fname == "fs_is_dir" || fname == "fs_size" || fname == "fs_mtime" || fname == "fs_list_dir" rt true
-  if fname == "sq_open" || fname == "sq_close" || fname == "sq_err" || fname == "sq_exec" || fname == "sq_prepare" || fname == "sq_step" || fname == "sq_ncols" || fname == "sq_col" || fname == "sq_col_name" || fname == "sq_finalize" || fname == "sq_changes" || fname == "sq_last_id" rt true
+  if fname == "sq_open" || fname == "sq_close" || fname == "sq_err" || fname == "sq_exec" || fname == "sq_prepare" || fname == "sq_step" || fname == "sq_ncols" || fname == "sq_col" || fname == "sq_col_name" || fname == "sq_finalize" || fname == "sq_changes" || fname == "sq_last_id" || fname == "sq_bind_text" || fname == "sq_bind_int" || fname == "sq_bind_null" || fname == "sq_reset" rt true
   false
 }
 
@@ -362,7 +362,7 @@ fn call_type_a(sy:*Syms, fname:str, args:[Expr]) -> str {
   if fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "read_stdin" || fname == "get_env" || fname == "exe_dir" || fname == "format" || fname == "join" rt "str"
   if fname == "split" rt "[str]"
   // Phase 2 native builtins: time / sockets / process / regex.
-  if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" rt "i64"
+  if fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" || fname == "assert" rt "i64"
   if fname == "time_iso" rt "str"
   if fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" rt "i64"
   if fname == "sock_recv" rt "bytes"
@@ -431,7 +431,7 @@ fn tcon_var(sy:*Syms, name:str) -> str {
 // arg-dependent builtins (abs/push/pop/slice/reverse/sort/keys/values/map/filter/
 // reduce/ok/unwrap and the err_<T> family), which must stay "?".
 fn builtin_fixed_ret(fname:str) -> str {
-  if fname == "len" || fname == "str_to_int" || fname == "bytes_at" || fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" || fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" || fname == "write_file_bytes" || fname == "abs_i64" || fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" || fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" || fname == "thread_spawn" || fname == "thread_join" || fname == "mutex_new" || fname == "mutex_lock" || fname == "mutex_unlock" || fname == "chan_new" || fname == "chan_send" || fname == "chan_recv" || fname == "chan_close" rt "i64"
+  if fname == "len" || fname == "str_to_int" || fname == "bytes_at" || fname == "index_of" || fname == "ord" || fname == "sign" || fname == "clamp" || fname == "now_ms" || fname == "now_us" || fname == "mono_ms" || fname == "sleep_ms" || fname == "flush" || fname == "assert" || fname == "write_file_bytes" || fname == "abs_i64" || fname == "tcp_listen" || fname == "tcp_accept" || fname == "tcp_connect" || fname == "sock_send" || fname == "sock_send_str" || fname == "sock_close" || fname == "proc_fork" || fname == "proc_getpid" || fname == "proc_no_zombies" || fname == "proc_reap" || fname == "thread_spawn" || fname == "thread_join" || fname == "mutex_new" || fname == "mutex_lock" || fname == "mutex_unlock" || fname == "chan_new" || fname == "chan_send" || fname == "chan_recv" || fname == "chan_close" rt "i64"
   if fname == "to_str" || fname == "cstr" || fname == "int_to_str" || fname == "float_to_str" || fname == "substring" || fname == "read_file" || fname == "bytes_to_str" || fname == "err_msg" || fname == "time_iso" || fname == "regex_find" || fname == "to_upper" || fname == "to_lower" || fname == "trim" || fname == "replace" || fname == "repeat" || fname == "pad_left" || fname == "pad_right" || fname == "chr" || fname == "read_line" || fname == "read_stdin" || fname == "get_env" || fname == "exe_dir" || fname == "format" || fname == "join" rt "str"
   if fname == "str_to_float" || fname == "abs_f64" rt "f64"
   if fname == "starts_with" || fname == "ends_with" || fname == "contains" || fname == "str_to_bool" || fname == "has" || fname == "is_ok" || fname == "is_err" || fname == "regex_match" || fname == "write_file" rt "bool"

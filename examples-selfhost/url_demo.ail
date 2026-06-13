@@ -1,0 +1,11 @@
+// std/url.ail — percent-encoding + query-string parse/build.
+im "std/url.ail"
+println(url_encode("a b/c?d=e"))                 // a%20b%2Fc%3Fd%3De
+println(url_decode("a%20b%2Fc"))                 // a b/c
+q := qs_parse("name=Ada%20L&id=7&flag")
+println(qs_get(q, "name", "?"))                  // Ada L
+println(qs_get(q, "id", "?"))                    // 7
+println(qs_get(q, "missing", "default"))         // default
+println(qs_build(["x", "y"], ["1", "a b"]))      // x=1&y=a%20b
+assert(url_decode(url_encode("hello world!")) == "hello world!", "url roundtrip")
+println("url ok")

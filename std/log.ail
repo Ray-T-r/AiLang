@@ -1,0 +1,47 @@
+// std/log.ail — leveled, structured (logfmt-style) logging.
+//
+//   im "std/log.ail"
+//   log_info("server started")                         // ts=… level=INFO msg="server started"
+//   log_kv(LWarn, "slow query", ["ms","sql"], ["812","SELECT …"])
+//   line := log_format("2026-01-01T00:00:00Z", LInfo, "hi", [], [])   // deterministic — for tests
+//
+// log_info/warn/error/debug stamp the current time (non-deterministic); the pure
+// `log_format(ts, …)` takes the timestamp as an argument, so it is unit-testable.
+
+en LogLevel { LDebug, LInfo, LWarn, LError }
+
+fn log_level_str(l:LogLevel) -> str {
+  mt l {
+    LDebug => "DEBUG";
+    LInfo  => "INFO";
+    LWarn  => "WARN";
+    LError => "ERROR";
+  }
+}
+
+// Render one logfmt line. keys[i]=vals[i] are appended as ` k=v` pairs.
+fn log_format(ts:str, level:LogLevel, msg:str, keys:[str], vals:[str]) -> str {
+  mu out := "ts=" + ts + " level=" + log_level_str(level) + " msg=\"" + msg + "\""
+  mu i := 0
+  lp i < len(keys) {
+    v := ""
+    if i < len(vals) { v = vals[i] }
+    out = out + " " + keys[i] + "=" + v
+    i = i + 1
+  }
+  out
+}
+
+fn log_line(level:LogLevel, msg:str) -> str {
+  mu nokeys:[str] := []
+  log_format(time_iso(now_ms()), level, msg, nokeys, nokeys)
+}
+
+fn log_kv(level:LogLevel, msg:str, keys:[str], vals:[str]) {
+  println(log_format(time_iso(now_ms()), level, msg, keys, vals))
+}
+
+fn log_debug(msg:str) { println(log_line(LDebug, msg)) }
+fn log_info(msg:str)  { println(log_line(LInfo, msg)) }
+fn log_warn(msg:str)  { println(log_line(LWarn, msg)) }
+fn log_error(msg:str) { println(log_line(LError, msg)) }

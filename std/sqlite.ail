@@ -61,6 +61,54 @@ fn sqlite_rows(c:i64, sql:str) -> [SqRow] {
   out
 }
 
+// ── Prepared statements: the injection-safe path. Use `?` placeholders in the
+// SQL and pass values in `params`; they are BOUND, never interpolated, so a value
+// like  o'brien  or  '; DROP TABLE …  is stored/matched verbatim, not executed.
+
+// SELECT with bound params → all rows (each a SqRow of column texts).
+fn sqlite_query(c:i64, sql:str, params:[str]) -> [SqRow] {
+  mu out := _sq_erow()
+  st0 := sq_prepare(c, sql)
+  if st0 == 0 rt out
+  mu i := 0
+  lp i < len(params) { sq_bind_text(st0, i + 1, params[i])  i = i + 1 }   // 1-based
+  n := sq_ncols(st0)
+  mu going := sq_step(st0)
+  lp going == 1 {
+    mu cells := _sq_estr()
+    mu j := 0
+    lp j < n { cells = push(cells, sq_col(st0, j))  j = j + 1 }
+    out = push(out, SqRow(cells))
+    going = sq_step(st0)
+  }
+  f := sq_finalize(st0)
+  out
+}
+
+// Non-SELECT (INSERT/UPDATE/DELETE) with bound params → rows changed, or -1.
+fn sqlite_run(c:i64, sql:str, params:[str]) -> i64 {
+  st0 := sq_prepare(c, sql)
+  if st0 == 0 rt -1
+  mu i := 0
+  lp i < len(params) { sq_bind_text(st0, i + 1, params[i])  i = i + 1 }
+  step := sq_step(st0)
+  f := sq_finalize(st0)
+  if step < 0 rt -1
+  sq_changes(c)
+}
+
+// First column of the first row of a bound SELECT, or "" if no rows.
+fn sqlite_query_one(c:i64, sql:str, params:[str]) -> str {
+  st0 := sq_prepare(c, sql)
+  if st0 == 0 rt ""
+  mu i := 0
+  lp i < len(params) { sq_bind_text(st0, i + 1, params[i])  i = i + 1 }
+  mu v := ""
+  if sq_step(st0) == 1 { v = sq_col(st0, 0) }
+  f := sq_finalize(st0)
+  v
+}
+
 // Header row + every data row, " | "-joined (like mysql_print_table).
 fn sqlite_print_table(c:i64, sql:str) -> i64 {
   st0 := sq_prepare(c, sql)

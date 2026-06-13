@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+# bundled at publish time by `npm run bundle` (copies of the repo's canonical files)
+stdlib.json
+SKILL.md

@@ -1,0 +1,9 @@
+// std/env.ail — .env parsing + typed reads.
+im "std/env.ail"
+cfg := dotenv_parse("# comment\nHOST=localhost\nPORT=5432\nNAME=\"my app\"\n\nDEBUG=true\n")
+println(dotenv_get(cfg, "HOST", "?"))                 // localhost
+println(dotenv_get(cfg, "PORT", "?"))                 // 5432
+println(dotenv_get(cfg, "NAME", "?"))                 // my app
+println(dotenv_get(cfg, "MISSING", "fallback"))       // fallback
+println(env_str("AILANG_DEFINITELY_UNSET_XYZ", "dflt"))   // dflt
+println("env ok")

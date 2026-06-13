@@ -1093,9 +1093,17 @@ fn lambda_arity(e:Expr) -> i64 {
 fn hof_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
   mu want := -1
-  if fname == "map" || fname == "filter" { want = 1 }
-  if fname == "reduce" { want = 2 }
+  mu cbidx := -1
+  if fname == "map" || fname == "filter" { want = 1; cbidx = 1 }
+  if fname == "reduce" { want = 2; cbidx = 2 }
   if want < 0 rt 0
+  // The builtin map/filter/reduce INLINE their callback at codegen time, so it
+  // must be a lambda literal right here — a stored or named function in the
+  // callback slot silently miscompiles (the #1 LLM gotcha). Turn that into a
+  // clear, actionable error. lambda_arity returns >=0 only for a lambda literal.
+  if cbidx >= 0 && cbidx < len(args) && lambda_arity(args[cbidx]) < 0 {
+    report_chk(sy, src, pos, "the function argument to '" + fname + "' must be an inline lambda (fn(x) …); a stored or named function isn't supported here — use std/seq.ail (keep/map_to/fold) for that")
+  }
   mu i := 0
   lp i < len(args) {
     np := lambda_arity(args[i])
@@ -1863,7 +1871,11 @@ fn compile_to_c(src:str, dir:str) -> str {
   check_program(funcs, &base, mains, src)
   if has(base.errc, "bad") {
     n := str_to_int(base.errc["n"])
-    if n > 1 { println("found " + int_to_str(n) + " errors") }   // summary only for multi-error; single-error output stays byte-identical to before
+    if n > 1 {
+      // summary only for multi-error; single-error output stays byte-identical.
+      // --json must stay valid JSONL, so emit a summary object instead of prose.
+      if want_json() { println("{\"severity\":\"summary\",\"errors\":" + int_to_str(n) + "}") } el { println("found " + int_to_str(n) + " errors") }
+    }
     exit(1)
   }
 
@@ -1928,6 +1940,12 @@ fn compile_to_c(src:str, dir:str) -> str {
   // ships beside the ailc binary; gated, so user programs that never call it
   // (and main.ail's self-compile DOES, via the string below) decide on their own.
   needs_exedir := has_sub(src, "exe_dir")
+  // assert(cond,msg): abort with the message on a false condition (libc only, no
+  // header/link). Gate on the SPLIT token so the compiler's own source — which
+  // never contains a contiguous "assert(" — doesn't pull the helper; programs
+  // that don't assert emit byte-identical C. (Same split-placeholder discipline
+  // as the mysql/sqlite link markers.)
+  needs_assert := has_sub(src, "assert" + "(")
   // Threaded GC must be requested before <gc.h> so it pulls in <pthread.h> and
   // redirects pthread_create→GC_pthread_create. Prepended (no header reorder) so
   // non-thread programs emit byte-identical C; POSIX-only so Windows stays plain.
@@ -1993,6 +2011,10 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n"
   out = out + "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n"
   out = out + "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n"
+  // assert(cond,msg) → ail_assert_check: print to stderr + exit(1) when cond is
+  // falsy, else return 0 (so it type-resolves as i64 in any position). The helper
+  // name has no contiguous "assert(" substring, so the gate above stays clean.
+  if needs_assert { out = out + "static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, \"assertion failed: %s\\n\", m?m:\"\"); exit(1); } return 0; }\n" }
   // exe_dir() — directory of the running compiler, so `im "std/…"` finds the
   // bundled std with no env var (the path stripped to its dir; "" if unknown).
   if needs_exedir { out = out + "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n" }
@@ -2347,6 +2369,13 @@ fn compile_to_c(src:str, dir:str) -> str {
     sqp = sqp + "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n"
     sqp = sqp + "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n"
     sqp = sqp + "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n"
+    // Parameter binding (1-based index) for prepared statements — the safe path
+    // that defeats SQL injection: values never touch the SQL text. SQLITE_TRANSIENT
+    // makes sqlite copy the string, so the AiLang str can be GC'd freely.
+    sqp = sqp + "static int64_t sq_bind_text(int64_t st, int64_t i, const char* v){ if(st==0) return -1; return (int64_t)sqlite3_bind_text((sqlite3_stmt*)(intptr_t)st,(int)i,v?v:\"\",-1,SQLITE_TRANSIENT); }\n"
+    sqp = sqp + "static int64_t sq_bind_int(int64_t st, int64_t i, int64_t v){ if(st==0) return -1; return (int64_t)sqlite3_bind_int64((sqlite3_stmt*)(intptr_t)st,(int)i,(sqlite3_int64)v); }\n"
+    sqp = sqp + "static int64_t sq_bind_null(int64_t st, int64_t i){ if(st==0) return -1; return (int64_t)sqlite3_bind_null((sqlite3_stmt*)(intptr_t)st,(int)i); }\n"
+    sqp = sqp + "static int64_t sq_reset(int64_t st){ if(st==0) return -1; sqlite3_clear_bindings((sqlite3_stmt*)(intptr_t)st); return (int64_t)sqlite3_reset((sqlite3_stmt*)(intptr_t)st); }\n"
     sqp = sqp + "#endif\n"
     out = replace(out, spat, sqp)
     mlib = mlib + " sqlite3"
@@ -2662,5 +2691,69 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
     i += 1
   }
   rewrite_qualified(out, aliases)        // `m.fn` → `m_fn`; no aliases → byte-identical (fixpoint-safe)
+}
+
+// Compile `input` to a native binary at `outbin` (clang appends ".exe" on
+// Windows). When link==false this is `check` mode — run lex/parse/type-check
+// only (compile_to_c reports + exit(1)s on any error), write no C, invoke no
+// clang. Returns 0 on success, 1 on a read or clang failure. The single shared
+// build path behind the build / run / check / test CLI modes in main.ail; the
+// clang command strings are byte-identical to the former inline ones.
+fn build_one(input:str, outbin:str, keepc:bool, link:bool) -> i64 {
+  mu src := read_file(input)
+  if len(src) == 0 { println("error: cannot read input file (missing or empty): " + input); rt 1 }
+  src = auto_imports(src) + src
+  if has_import(src) {
+    mu seen:{str:str} := {}
+    src = resolve_imports(src, dirname(input), seen)
+  }
+  cprog := compile_to_c(src, dirname(input))
+  if link == false { rt 0 }
+  cpath := outbin + ".c"
+  write_file(cpath, cprog)
+  win := get_env("OS") == "Windows_NT"
+  shims0 := csrc_list(cprog)
+  mu shims:[str] := []
+  mu ri := 0
+  lp ri < len(shims0) { shims = push(shims, dirname(input) + shims0[ri]); ri += 1 }
+  mu rc := 0
+  if win {
+    if len(shims) == 0 {
+      cmd := "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outbin + ".exe\""
+      rc = system(cmd)
+    } el {
+      println("error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux")
+      rt 1
+    }
+  } el {
+    mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
+    if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
+    if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+    if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }
+    mu lf := link_flags(cprog)
+    if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
+    if has_sub(lf, "lsqlite3") { extra = extra + " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)" }
+    extra = extra + lf + " -lm"
+    if len(shims) == 0 {
+      cmd := "clang -O2 " + cpath + extra + " -o " + outbin
+      rc = system(cmd)
+    } el {
+      mu shimline := ""
+      mu si := 0
+      lp si < len(shims) { shimline = shimline + " " + shims[si]; si += 1 }
+      cmd := "clang++ -O2 -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
+      rc = system(cmd)
+    }
+  }
+  if rc != 0 { println("clang failed"); rt 1 }
+  if keepc == false {
+    if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
+    mu ci2 := 0
+    lp ci2 < len(shims) {
+      if has_sub(shims[ci2], "__ailinline_") { system("rm -f " + shims[ci2]) }
+      ci2 += 1
+    }
+  }
+  0
 }
 
