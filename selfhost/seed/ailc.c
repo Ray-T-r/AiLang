@@ -1839,7 +1839,7 @@ int64_t f_check_stmt(arr_Func v_funcs, s_Syms* v_sy, s_Stmt v_s, const char* v_s
 int64_t f_check_stmts(arr_Func v_funcs, s_Syms* v_sy, arr_Stmt v_body, const char* v_src);
 int64_t f_check_fn(arr_Func v_funcs, s_Syms* v_base, s_Func v_f, const char* v_src);
 int64_t f_check_program(arr_Func v_funcs, s_Syms* v_base, arr_Stmt v_mains, const char* v_src);
-const char* f_compile_to_c(const char* v_src, const char* v_dir);
+const char* f_compile_to_c(const char* v_src, const char* v_dir, int64_t v_libmode, arr_str v_exports);
 const char* f_link_flags(const char* v_cprog);
 arr_str f_csrc_list(const char* v_cprog);
 const char* f_dirname(const char* v_path);
@@ -1853,7 +1853,13 @@ arr_str f_module_fn_names(const char* v_body);
 const char* f_prefix_idents(const char* v_src, arr_str v_names, const char* v_pfx);
 const char* f_rewrite_qualified(const char* v_src, arr_str v_aliases);
 const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str v_seen);
-int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link);
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link, int64_t v_asan);
+const char* f_unix_link_extra(const char* v_cprog);
+int64_t f_str_in(arr_str v_xs, const char* v_s);
+int64_t f_is_cabi_type(const char* v_t);
+int64_t f_cabi_sig_ok(s_Func v_f);
+const char* f_lib_header_path(const char* v_outbin);
+int64_t f_build_lib(const char* v_input, const char* v_outbin, int64_t v_keepc);
 
 int64_t f_TK_EOF(void) {
     return 0;
@@ -9704,7 +9710,7 @@ int64_t f_check_program(arr_Func v_funcs, s_Syms* v_base, arr_Stmt v_mains, cons
     return 0;
 }
 
-const char* f_compile_to_c(const char* v_src, const char* v_dir) {
+const char* f_compile_to_c(const char* v_src, const char* v_dir, int64_t v_libmode, arr_str v_exports) {
     arr_Token v_toks;
     s_P v_p;
     arr_StructDef v_structs;
@@ -9850,6 +9856,15 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     const char* v_mpp;
     const char* v_spat;
     const char* v_sqp;
+    const char* v_libhdr;
+    int64_t v_need_bytes;
+    const char* v_wrap;
+    const char* v_protos;
+    const char* v_plist;
+    const char* v_alist;
+    int64_t v_pi;
+    const char* v_sig;
+    const char* v_call;
     v_toks = f_lex(v_src);
     v_p = mk_P(v_toks, 0, v_src);
     v_structs = ({ arr_StructDef __a = arr_StructDef_new(); __a; });
@@ -10716,7 +10731,14 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
         }
         v_mk = (v_mk + 1);
     }
-    v_out = scat(scat(scat(scat(scat(v_out, "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n"), v_mdecls), f_gen_stmts((&v_msy), v_mmains, "    ")), v_maincall), "    return 0;\n}\n");
+    if (v_libmode) {
+        if ((arr_Stmt_len(v_mains) > 0)) {
+            printf("%s\n", scat(scat("note: ", i2s(arr_Stmt_len(v_mains))), " top-level statement(s) ignored in lib mode (only functions are compiled into a library)"));
+        }
+        v_out = scat(v_out, "__attribute__((constructor)) static void __ail_lib_init(void){ GC_INIT(); }\n");
+    } else {
+        v_out = scat(scat(scat(scat(scat(v_out, "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n"), v_mdecls), f_gen_stmts((&v_msy), v_mmains, "    ")), v_maincall), "    return 0;\n}\n");
+    }
     v_pat = scat("/*@MY", "SQL@*/");
     v_ppat = scat("/*@MY", "PARAMS@*/");
     v_mlib = v_libline;
@@ -10770,8 +10792,62 @@ const char* f_compile_to_c(const char* v_src, const char* v_dir) {
     } else {
         v_out = str_replace(v_out, v_spat, "");
     }
+    v_libhdr = "";
+    if (v_libmode) {
+        v_need_bytes = (1 != 1);
+        v_wrap = "#if defined(_WIN32)\n#define AIL_EXPORT __declspec(dllexport)\n#else\n#define AIL_EXPORT __attribute__((visibility(\"default\")))\n#endif\n";
+        v_protos = "";
+        v_ei = 0;
+        while ((v_ei < arr_Func_len(v_funcs))) {
+            v_f = arr_Func_get(v_funcs, v_ei);
+            if ((f_str_in(v_exports, (v_f).name) && (strcmp((v_f).name, "main") != 0))) {
+                if (f_cabi_sig_ok(v_f)) {
+                    if ((strcmp((v_f).ret, "bytes") == 0)) {
+                        v_need_bytes = (1 == 1);
+                    }
+                    v_plist = "";
+                    v_alist = "";
+                    v_pi = 0;
+                    while ((v_pi < arr_str_len((v_f).params))) {
+                        if ((strcmp(arr_str_get((v_f).ptypes, v_pi), "bytes") == 0)) {
+                            v_need_bytes = (1 == 1);
+                        }
+                        if ((v_pi > 0)) {
+                            v_plist = scat(v_plist, ", ");
+                            v_alist = scat(v_alist, ", ");
+                        }
+                        v_plist = scat(scat(scat(v_plist, f_cty(arr_str_get((v_f).ptypes, v_pi))), " "), arr_str_get((v_f).params, v_pi));
+                        v_alist = scat(v_alist, arr_str_get((v_f).params, v_pi));
+                        v_pi = (v_pi + 1);
+                    }
+                    if ((arr_str_len((v_f).params) == 0)) {
+                        v_plist = "void";
+                    }
+                    v_sig = scat(scat(scat(scat(scat(f_cty_ret((v_f).ret), " "), (v_f).name), "("), v_plist), ")");
+                    v_call = scat(scat(scat(scat("return f_", (v_f).name), "("), v_alist), ");");
+                    if ((((int64_t)strlen((v_f).ret)) == 0)) {
+                        v_call = scat(scat(scat(scat("f_", (v_f).name), "("), v_alist), ");");
+                    }
+                    v_wrap = scat(scat(scat(scat(scat(v_wrap, "AIL_EXPORT "), v_sig), " { "), v_call), " }\n");
+                    v_protos = scat(scat(v_protos, v_sig), ";\n");
+                } else {
+                    printf("%s\n", scat(scat("note: '", (v_f).name), "' not exported — its signature uses a non-C-ABI type (array/map/struct/etc.)"));
+                }
+            }
+            v_ei = (v_ei + 1);
+        }
+        v_out = scat(scat(v_out, "\n/* ── exported C-ABI wrappers ── */\n"), v_wrap);
+        v_libhdr = "#ifndef AILLIB_H\n#define AILLIB_H\n#include <stdint.h>\n";
+        if (v_need_bytes) {
+            v_libhdr = scat(v_libhdr, "typedef struct { int64_t len; const uint8_t* data; } ailang_bytes;\n");
+        }
+        v_libhdr = scat(scat(scat(v_libhdr, "#ifdef __cplusplus\nextern \"C\" {\n#endif\n"), v_protos), "#ifdef __cplusplus\n}\n#endif\n#endif\n");
+    }
     if ((((int64_t)strlen(v_mlib)) > 0)) {
         v_out = scat(scat(scat("// @links:", v_mlib), "\n"), v_out);
+    }
+    if (v_libmode) {
+        v_out = scat(scat(v_out, "\n//@@AILHDR@@\n"), v_libhdr);
     }
     return v_out;
 }
@@ -11270,9 +11346,10 @@ const char* f_resolve_imports(const char* v_src, const char* v_dir, map_str_str 
     return f_rewrite_qualified(v_out, v_aliases);
 }
 
-int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link) {
+int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, int64_t v_link, int64_t v_asan) {
     const char* v_src;
     map_str_str v_seen;
+    arr_str v_noexp;
     const char* v_cprog;
     const char* v_cpath;
     int64_t v_win;
@@ -11282,7 +11359,7 @@ int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, 
     int64_t v_rc;
     const char* v_cmd;
     const char* v_extra;
-    const char* v_lf;
+    const char* v_asanflag;
     const char* v_shimline;
     int64_t v_si;
     int64_t v_ci2;
@@ -11296,7 +11373,8 @@ int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, 
         v_seen = map_str_str_new();
         v_src = f_resolve_imports(v_src, f_dirname(v_input), v_seen);
     }
-    v_cprog = f_compile_to_c(v_src, f_dirname(v_input));
+    v_noexp = ({ arr_str __a = arr_str_new(); __a; });
+    v_cprog = f_compile_to_c(v_src, f_dirname(v_input), (1 != 1), v_noexp);
     if ((v_link == (1 != 1))) {
         return 0;
     }
@@ -11320,26 +11398,13 @@ int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, 
             return 1;
         }
     } else {
-        v_extra = " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)";
-        if (((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1(")) || f_has_sub(v_cprog, "HMAC("))) {
-            v_extra = scat(v_extra, " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)");
+        v_extra = f_unix_link_extra(v_cprog);
+        v_asanflag = "";
+        if (v_asan) {
+            v_asanflag = " -fsanitize=address -g";
         }
-        if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
-            v_extra = scat(v_extra, " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)");
-        }
-        if (f_has_sub(v_cprog, "pthread_")) {
-            v_extra = scat(v_extra, " -lpthread");
-        }
-        v_lf = f_link_flags(v_cprog);
-        if (f_has_sub(v_lf, "lmysqlclient")) {
-            v_extra = scat(v_extra, " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)");
-        }
-        if (f_has_sub(v_lf, "lsqlite3")) {
-            v_extra = scat(v_extra, " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)");
-        }
-        v_extra = scat(scat(v_extra, v_lf), " -lm");
         if ((arr_str_len(v_shims) == 0)) {
-            v_cmd = scat(scat(scat(scat("clang -O2 ", v_cpath), v_extra), " -o "), v_outbin);
+            v_cmd = scat(scat(scat(scat(scat(scat("clang -O2", v_asanflag), " "), v_cpath), v_extra), " -o "), v_outbin);
             v_rc = f_system(v_cmd);
         } else {
             v_shimline = "";
@@ -11348,7 +11413,7 @@ int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, 
                 v_shimline = scat(scat(v_shimline, " "), arr_str_get(v_shims, v_si));
                 v_si = (v_si + 1);
             }
-            v_cmd = scat(scat(scat(scat(scat(scat("clang++ -O2 -x c ", v_cpath), " -x c++"), v_shimline), v_extra), " -o "), v_outbin);
+            v_cmd = scat(scat(scat(scat(scat(scat(scat(scat("clang++ -O2", v_asanflag), " -x c "), v_cpath), " -x c++"), v_shimline), v_extra), " -o "), v_outbin);
             v_rc = f_system(v_cmd);
         }
     }
@@ -11373,6 +11438,140 @@ int64_t f_build_one(const char* v_input, const char* v_outbin, int64_t v_keepc, 
     return 0;
 }
 
+const char* f_unix_link_extra(const char* v_cprog) {
+    const char* v_extra;
+    const char* v_lf;
+    v_extra = " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)";
+    if (((f_has_sub(v_cprog, "SSL_") || f_has_sub(v_cprog, "SHA1(")) || f_has_sub(v_cprog, "HMAC("))) {
+        v_extra = scat(v_extra, " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)");
+    }
+    if ((f_has_sub(v_cprog, "PQconnectdb") || f_has_sub(v_cprog, "PQexec"))) {
+        v_extra = scat(v_extra, " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)");
+    }
+    if (f_has_sub(v_cprog, "pthread_")) {
+        v_extra = scat(v_extra, " -lpthread");
+    }
+    v_lf = f_link_flags(v_cprog);
+    if (f_has_sub(v_lf, "lmysqlclient")) {
+        v_extra = scat(v_extra, " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)");
+    }
+    if (f_has_sub(v_lf, "lsqlite3")) {
+        v_extra = scat(v_extra, " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)");
+    }
+    v_extra = scat(scat(v_extra, v_lf), " -lm");
+    return v_extra;
+}
+
+int64_t f_str_in(arr_str v_xs, const char* v_s) {
+    int64_t v_i;
+    v_i = 0;
+    while ((v_i < arr_str_len(v_xs))) {
+        if ((strcmp(arr_str_get(v_xs, v_i), v_s) == 0)) {
+            return (1 == 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 != 1);
+}
+
+int64_t f_is_cabi_type(const char* v_t) {
+    return (((((((strcmp(v_t, "i64") == 0) || (strcmp(v_t, "i32") == 0)) || (strcmp(v_t, "u32") == 0)) || (strcmp(v_t, "bool") == 0)) || (strcmp(v_t, "f64") == 0)) || (strcmp(v_t, "str") == 0)) || (strcmp(v_t, "bytes") == 0));
+}
+
+int64_t f_cabi_sig_ok(s_Func v_f) {
+    int64_t v_i;
+    if (((((int64_t)strlen((v_f).ret)) > 0) && (f_is_cabi_type((v_f).ret) == (1 != 1)))) {
+        return (1 != 1);
+    }
+    v_i = 0;
+    while ((v_i < arr_str_len((v_f).params))) {
+        if ((f_is_cabi_type(arr_str_get((v_f).ptypes, v_i)) == (1 != 1))) {
+            return (1 != 1);
+        }
+        v_i = (v_i + 1);
+    }
+    return (1 == 1);
+}
+
+const char* f_lib_header_path(const char* v_outbin) {
+    int64_t v_n;
+    v_n = ((int64_t)strlen(v_outbin));
+    if (((v_n >= 6) && (strcmp(substr(v_outbin, (v_n - 6), v_n), ".dylib") == 0))) {
+        return scat(substr(v_outbin, 0, (v_n - 6)), ".h");
+    }
+    if (((v_n >= 3) && (strcmp(substr(v_outbin, (v_n - 3), v_n), ".so") == 0))) {
+        return scat(substr(v_outbin, 0, (v_n - 3)), ".h");
+    }
+    if (((v_n >= 4) && (strcmp(substr(v_outbin, (v_n - 4), v_n), ".dll") == 0))) {
+        return scat(substr(v_outbin, 0, (v_n - 4)), ".h");
+    }
+    return scat(v_outbin, ".h");
+}
+
+int64_t f_build_lib(const char* v_input, const char* v_outbin, int64_t v_keepc) {
+    const char* v_rawsrc;
+    arr_str v_exports;
+    const char* v_src;
+    map_str_str v_seen;
+    const char* v_full;
+    const char* v_sen;
+    const char* v_cprog;
+    const char* v_hdr;
+    int64_t v_sp;
+    const char* v_cpath;
+    const char* v_hpath;
+    int64_t v_win;
+    int64_t v_rc;
+    const char* v_cmd;
+    const char* v_extra;
+    v_rawsrc = read_file_c(v_input);
+    if ((((int64_t)strlen(v_rawsrc)) == 0)) {
+        printf("%s\n", scat("error: cannot read input file (missing or empty): ", v_input));
+        return 1;
+    }
+    v_exports = f_module_fn_names(v_rawsrc);
+    v_src = scat(f_auto_imports(v_rawsrc), v_rawsrc);
+    if (f_has_import(v_src)) {
+        v_seen = map_str_str_new();
+        v_src = f_resolve_imports(v_src, f_dirname(v_input), v_seen);
+    }
+    v_full = f_compile_to_c(v_src, f_dirname(v_input), (1 == 1), v_exports);
+    v_sen = "\n//@@AILHDR@@\n";
+    v_cprog = v_full;
+    v_hdr = "";
+    v_sp = str_index_of(v_full, v_sen);
+    if ((v_sp >= 0)) {
+        v_cprog = substr(v_full, 0, v_sp);
+        v_hdr = substr(v_full, (v_sp + ((int64_t)strlen(v_sen))), ((int64_t)strlen(v_full)));
+    }
+    v_cpath = scat(v_outbin, ".c");
+    v_hpath = f_lib_header_path(v_outbin);
+    write_file_c(v_cpath, v_cprog);
+    write_file_c(v_hpath, v_hdr);
+    v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+    v_rc = 0;
+    if (v_win) {
+        v_cmd = scat(scat(scat(scat(scat(scat(scat(scat("clang -O2 -shared -DGC_NOT_DLL \"", v_cpath), "\""), f_link_flags(v_cprog)), " -lgc -lm -o \""), v_outbin), "\" -Wl,--out-implib,\""), v_outbin), ".a\"");
+        v_rc = f_system(v_cmd);
+    } else {
+        v_extra = f_unix_link_extra(v_cprog);
+        v_cmd = scat(scat(scat(scat("clang -O2 -shared -fPIC -fvisibility=hidden ", v_cpath), v_extra), " -o "), v_outbin);
+        v_rc = f_system(v_cmd);
+    }
+    if ((v_rc != 0)) {
+        printf("%s\n", "clang failed");
+        return 1;
+    }
+    if ((v_keepc == (1 != 1))) {
+        if (v_win) {
+            f_system(scat(scat("del /f /q \"", v_cpath), "\""));
+        } else {
+            f_system(scat("rm -f ", v_cpath));
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv){
     GC_INIT();
     g_argc=argc; g_argv=argv;
@@ -11381,6 +11580,7 @@ int main(int argc, char** argv){
     arr_str v_av;
     int64_t v_keepc;
     int64_t v_jsonmode;
+    int64_t v_asan;
     arr_str v_pos;
     arr_str v_runargs;
     int64_t v_afterdd;
@@ -11398,18 +11598,21 @@ int main(int argc, char** argv){
     const char* v_tout;
     const char* v_texe;
     int64_t v_erc;
-    const char* v_outbin;
+    const char* v_ext;
+    const char* v_outlib;
     int64_t v_ni;
+    const char* v_outbin;
     int64_t v_ob;
     const char* v_outexe;
     const char* v_runcmd;
     int64_t v_rj;
     int64_t v_rrc;
     v_AILC_VERSION = "0.5.0";
-    v_USAGE = "usage: ailc [--keep-c] [--json] [run|check|test|compile] <input.ail> [output-binary] [-- prog-args]";
+    v_USAGE = "usage: ailc [--keep-c] [--json] [--asan] [run|check|test|lib|compile] <input.ail> [output] [-- prog-args]";
     v_av = ailang_args();
     v_keepc = (1 != 1);
     v_jsonmode = (1 != 1);
+    v_asan = (1 != 1);
     v_pos = ({ arr_str __a = arr_str_new(); __a; });
     v_runargs = ({ arr_str __a = arr_str_new(); __a; });
     v_afterdd = (1 != 1);
@@ -11428,20 +11631,24 @@ int main(int argc, char** argv){
                     if ((strcmp(v_a, "--json") == 0)) {
                         v_jsonmode = (1 == 1);
                     } else {
-                        if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
-                            printf("%s\n", v_USAGE);
-                            exit((int)(0));
+                        if ((strcmp(v_a, "--asan") == 0)) {
+                            v_asan = (1 == 1);
                         } else {
-                            if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
-                                printf("%s\n", scat("ailc ", v_AILC_VERSION));
+                            if (((strcmp(v_a, "--help") == 0) || (strcmp(v_a, "-h") == 0))) {
+                                printf("%s\n", v_USAGE);
                                 exit((int)(0));
                             } else {
-                                if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
-                                    printf("%s\n", scat("error: unknown flag: ", v_a));
-                                    printf("%s\n", v_USAGE);
-                                    exit((int)(1));
+                                if (((strcmp(v_a, "--version") == 0) || (strcmp(v_a, "-v") == 0))) {
+                                    printf("%s\n", scat("ailc ", v_AILC_VERSION));
+                                    exit((int)(0));
                                 } else {
-                                    v_pos = arr_str_push(v_pos, v_a);
+                                    if (((((int64_t)strlen(v_a)) > 0) && (((int64_t)(unsigned char)(v_a)[0]) == 45))) {
+                                        printf("%s\n", scat("error: unknown flag: ", v_a));
+                                        printf("%s\n", v_USAGE);
+                                        exit((int)(1));
+                                    } else {
+                                        v_pos = arr_str_push(v_pos, v_a);
+                                    }
                                 }
                             }
                         }
@@ -11468,6 +11675,11 @@ int main(int argc, char** argv){
                     if ((strcmp(arr_str_get(v_pos, 0), "test") == 0)) {
                         v_mode = "test";
                         v_ai = 1;
+                    } else {
+                        if ((strcmp(arr_str_get(v_pos, 0), "lib") == 0)) {
+                            v_mode = "lib";
+                            v_ai = 1;
+                        }
                     }
                 }
             }
@@ -11490,7 +11702,7 @@ int main(int argc, char** argv){
         while ((v_ti < arr_str_len(v_pos))) {
             v_tf = arr_str_get(v_pos, v_ti);
             v_tout = scat(scat(v_tdir, "/ailc_test_"), i2s(now_us()));
-            if ((f_build_one(v_tf, v_tout, (1 != 1), (1 == 1)) != 0)) {
+            if ((f_build_one(v_tf, v_tout, (1 != 1), (1 == 1), v_asan) != 0)) {
                 printf("%s\n", scat(scat("FAIL ", v_tf), " (build error)"));
                 v_nfail = (v_nfail + 1);
             } else {
@@ -11521,12 +11733,44 @@ int main(int argc, char** argv){
         exit((int)(0));
     }
     if ((strcmp(v_mode, "check") == 0)) {
-        f_build_one(v_input, "", (1 != 1), (1 != 1));
+        f_build_one(v_input, "", (1 != 1), (1 != 1), (1 != 1));
         if (v_jsonmode) {
             printf("%s\n", "{\"severity\":\"ok\"}");
         } else {
             printf("%s\n", "ok");
         }
+        exit((int)(0));
+    }
+    if ((strcmp(v_mode, "lib") == 0)) {
+        v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);
+        v_ext = ".so";
+        if (v_win) {
+            v_ext = ".dll";
+        } else {
+            if ((f_system("test \"$(uname)\" = Darwin") == 0)) {
+                v_ext = ".dylib";
+            }
+        }
+        v_outlib = "";
+        if ((arr_str_len(v_pos) > (v_ai + 1))) {
+            v_outlib = arr_str_get(v_pos, (v_ai + 1));
+        } else {
+            v_ni = ((int64_t)strlen(v_input));
+            if (((v_ni >= 4) && (strcmp(substr(v_input, (v_ni - 4), v_ni), ".ail") == 0))) {
+                v_outlib = scat(substr(v_input, 0, (v_ni - 4)), v_ext);
+            } else {
+                v_outlib = scat(v_input, v_ext);
+            }
+        }
+        if ((strcmp(v_outlib, v_input) == 0)) {
+            printf("%s\n", scat("error: output would overwrite the input file: ", v_input));
+            exit((int)(1));
+        }
+        if ((f_build_lib(v_input, v_outlib, v_keepc) != 0)) {
+            exit((int)(1));
+        }
+        printf("%s\n", scat(scat(scat(scat(scat(scat("compiled library ", v_input), " -> "), v_outlib), "  (header: "), f_lib_header_path(v_outlib)), ")"));
+        printf("%s\n", scat(scat("  link a host program:  clang your.c ", v_outlib), " -o your_app"));
         exit((int)(0));
     }
     v_outbin = "";
@@ -11557,7 +11801,7 @@ int main(int argc, char** argv){
             exit((int)(1));
         }
     }
-    if ((f_build_one(v_input, v_outbin, v_keepc, (1 == 1)) != 0)) {
+    if ((f_build_one(v_input, v_outbin, v_keepc, (1 == 1), v_asan) != 0)) {
         exit((int)(1));
     }
     v_win = (strcmp(get_env("OS"), "Windows_NT") == 0);

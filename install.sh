@@ -81,17 +81,33 @@ have_ssl() { pkg-config --exists openssl 2>/dev/null; }
 have_pq()  { pkg-config --exists libpq 2>/dev/null; }
 
 install_deps_macos() {
-    command -v brew >/dev/null 2>&1 || {
-        warn "Homebrew not found — can't auto-install. Install from https://brew.sh then re-run,"
-        warn "or: install bdw-gc, openssl, libpq, pkg-config manually."
-        return
-    }
+    if ! command -v brew >/dev/null 2>&1; then
+        log "Homebrew not found — installing it first"
+        if /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+            # Apple Silicon Homebrew lives at /opt/homebrew, not on PATH yet in this shell.
+            if [[ -x /opt/homebrew/bin/brew ]]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [[ -x /usr/local/bin/brew ]]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+        fi
+        command -v brew >/dev/null 2>&1 || {
+            warn "Homebrew install failed — install from https://brew.sh then re-run,"
+            warn "or: install bdw-gc, openssl, libpq, pkg-config manually."
+            return
+        }
+        ok "Homebrew installed"
+    fi
     local pkgs=()
     have_gc  || pkgs+=("bdw-gc")
     have_ssl || brew --prefix openssl@3 >/dev/null 2>&1 || pkgs+=("openssl@3")
     have_pq  || brew --prefix libpq >/dev/null 2>&1 || pkgs+=("libpq")
     pkg-config --version >/dev/null 2>&1 || pkgs+=("pkg-config")
-    need_cc || warn "no clang/cc — install the Xcode Command Line Tools: xcode-select --install"
+    if ! need_cc; then
+        log "no clang/cc — installing Xcode Command Line Tools"
+        xcode-select --install 2>/dev/null || true
+        warn "a system dialog may have opened — finish that install, then re-run this script"
+    fi
     if (( ${#pkgs[@]} )); then
         log "Installing native deps via Homebrew: ${pkgs[*]}"
         brew install "${pkgs[@]}"

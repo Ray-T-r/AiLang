@@ -29,7 +29,7 @@ im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
 AILC_VERSION := "0.5.0"
-USAGE := "usage: ailc [--keep-c] [--json] [run|check|test|compile] <input.ail> [output-binary] [-- prog-args]"
+USAGE := "usage: ailc [--keep-c] [--json] [--asan] [run|check|test|lib|compile] <input.ail> [output] [-- prog-args]"
 av := args()
 // `--keep-c` / `-k`: keep the generated C next to the binary. Default: delete
 // it after a clean build (it's a transient build intermediate). `--help` and
@@ -38,6 +38,7 @@ av := args()
 // and litter the cwd with junk like `--help.out.c` when clang then choked.
 mu keepc := false
 mu jsonmode := false        // --json: emit machine-readable diagnostics (see print_diag)
+mu asan := false            // --asan: link -fsanitize=address -g (POSIX build/run only, debug RE crashes)
 mu pos:[str] := []
 mu runargs:[str] := []      // tokens after `--`, forwarded to the program in `run` mode
 mu afterdd := false
@@ -52,6 +53,8 @@ lp fi < len(av) {
     keepc = true
   } el if a == "--json" {
     jsonmode = true
+  } el if a == "--asan" {
+    asan = true
   } el if a == "--help" || a == "-h" {
     println(USAGE)
     exit(0)
@@ -78,6 +81,7 @@ if len(pos) > 0 {
   el if pos[0] == "run" { mode = "run"; ai = 1 }
   el if pos[0] == "check" { mode = "check"; ai = 1 }
   el if pos[0] == "test" { mode = "test"; ai = 1 }
+  el if pos[0] == "lib" { mode = "lib"; ai = 1 }
 }
 if len(pos) <= ai {
   println(USAGE)
@@ -101,7 +105,7 @@ if mode == "test" {
   lp ti < len(pos) {
     tf := pos[ti]
     tout := tdir + "/ailc_test_" + int_to_str(now_us())
-    if build_one(tf, tout, false, true) != 0 {
+    if build_one(tf, tout, false, true, asan) != 0 {
       println("FAIL " + tf + " (build error)"); nfail += 1
     } el {
       mu texe := tout
@@ -121,8 +125,33 @@ if mode == "test" {
 // build_one(link=false) runs the checker (which prints diagnostics and exit(1)s
 // on any error); returning here means the program is clean.
 if mode == "check" {
-  build_one(input, "", false, false)
+  build_one(input, "", false, false, false)
   if jsonmode { println("{\"severity\":\"ok\"}") } el { println("ok") }
+  exit(0)
+}
+
+// ── lib: compile to a shared library (.dll on Windows, .dylib on macOS, .so on
+// Linux) + a C header. The exported surface is the root file's own top-level
+// `fn`s with C-ABI signatures; the host `#include`s the generated header and
+// links the library. GC self-initialises when the library loads.
+if mode == "lib" {
+  win := get_env("OS") == "Windows_NT"
+  mu ext := ".so"
+  if win { ext = ".dll" } el { if system("test \"$(uname)\" = Darwin") == 0 { ext = ".dylib" } }
+  mu outlib := ""
+  if len(pos) > ai + 1 {
+    outlib = pos[ai + 1]
+  } el {
+    ni := len(input)
+    if ni >= 4 && substring(input, ni - 4, ni) == ".ail" { outlib = substring(input, 0, ni - 4) + ext } el { outlib = input + ext }
+  }
+  if outlib == input {
+    println("error: output would overwrite the input file: " + input)
+    exit(1)
+  }
+  if build_lib(input, outlib, keepc) != 0 { exit(1) }
+  println("compiled library " + input + " -> " + outlib + "  (header: " + lib_header_path(outlib) + ")")
+  println("  link a host program:  clang your.c " + outlib + " -o your_app")
   exit(0)
 }
 
@@ -152,7 +181,7 @@ if mode == "run" {
   }
 }
 
-if build_one(input, outbin, keepc, true) != 0 { exit(1) }   // build_one printed the error
+if build_one(input, outbin, keepc, true, asan) != 0 { exit(1) }   // build_one printed the error
 win := get_env("OS") == "Windows_NT"
 mu outexe := outbin
 if win { outexe = outbin + ".exe" }

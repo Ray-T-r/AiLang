@@ -1477,7 +1477,11 @@ fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
   0
 }
 
-fn compile_to_c(src:str, dir:str) -> str {
+// `libmode` = compile as a shared library: no `main`, a load-time constructor
+// inits Boehm GC, and each name in `exports` (the root file's top-level `fn`s)
+// with a C-friendly signature gets an unmangled wrapper + a header proto. When
+// libmode==false this is byte-identical to the executable path (`exports` unused).
+fn compile_to_c(src:str, dir:str, libmode:bool, exports:[str]) -> str {
   toks := lex(src)
   mu p := P(toks, 0, src)
 
@@ -2338,7 +2342,16 @@ fn compile_to_c(src:str, dir:str) -> str {
   mu maincall := ""
   mu mk := 0
   lp mk < len(funcs) { if funcs[mk].name == "main" && len(funcs[mk].params) == 0 { maincall = "    f_main();\n" } mk += 1 }
-  out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+  if libmode {
+    // A shared library has no `main`. A load-time constructor inits Boehm GC so
+    // the host needs no GC_INIT. Top-level statements are dropped: a top-level
+    // `mu` binding is main-local and unobservable to any exported fn, so nothing
+    // persistent is lost — we just note if the file had any (likely a demo/CLI).
+    if len(mains) > 0 { println("note: " + int_to_str(len(mains)) + " top-level statement(s) ignored in lib mode (only functions are compiled into a library)") }
+    out = out + "__attribute__((constructor)) static void __ail_lib_init(void){ GC_INIT(); }\n"
+  } el {
+    out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+  }
 
   // MySQL is opt-in: fill the slot with the libmysqlclient wrappers (+ header) only
   // when a real myq_ call set @uses.mysql, and add "mysqlclient" to the link marker.
@@ -2407,7 +2420,58 @@ fn compile_to_c(src:str, dir:str) -> str {
   } el {
     out = replace(out, spat, "")
   }
+  // ── shared-library exports ──────────────────────────────────────────────────
+  // For each root-file top-level `fn` with a C-friendly signature (i64/i32/u32/
+  // bool/f64/str/bytes params & return), emit an unmangled wrapper delegating to
+  // its `f_<name>` body, so a host program calls it by its plain name; collect a
+  // matching header. Aggregate signatures (arrays/maps/structs/…) use AiLang's
+  // internal ABI and are skipped with a note. The wrappers reference `f_<name>`
+  // functions already emitted above, so appending them here is safe.
+  mu libhdr := ""
+  if libmode {
+    mu need_bytes := false
+    // Portable export marker: dllexport on Windows, default visibility elsewhere.
+    mu wrap := "#if defined(_WIN32)\n#define AIL_EXPORT __declspec(dllexport)\n#else\n#define AIL_EXPORT __attribute__((visibility(\"default\")))\n#endif\n"
+    mu protos := ""
+    mu ei := 0
+    lp ei < len(funcs) {
+      f := funcs[ei]
+      if str_in(exports, f.name) && f.name != "main" {
+        if cabi_sig_ok(f) {
+          if f.ret == "bytes" { need_bytes = true }
+          mu plist := ""
+          mu alist := ""
+          mu pi := 0
+          lp pi < len(f.params) {
+            if f.ptypes[pi] == "bytes" { need_bytes = true }
+            if pi > 0 { plist = plist + ", "; alist = alist + ", " }
+            plist = plist + cty(f.ptypes[pi]) + " " + f.params[pi]
+            alist = alist + f.params[pi]
+            pi += 1
+          }
+          if len(f.params) == 0 { plist = "void" }
+          sig := cty_ret(f.ret) + " " + f.name + "(" + plist + ")"
+          mu call := "return f_" + f.name + "(" + alist + ");"
+          if len(f.ret) == 0 { call = "f_" + f.name + "(" + alist + ");" }
+          // AIL_EXPORT (defined at the top of the wrapper block) marks only these
+          // wrappers for export — `__declspec(dllexport)` on Windows, default ELF
+          // visibility elsewhere (built -fvisibility=hidden). Internal `f_*` bodies
+          // + runtime globals stay private, so the DLL/.so exports just the API.
+          wrap = wrap + "AIL_EXPORT " + sig + " { " + call + " }\n"
+          protos = protos + sig + ";\n"
+        } el {
+          println("note: '" + f.name + "' not exported — its signature uses a non-C-ABI type (array/map/struct/etc.)")
+        }
+      }
+      ei += 1
+    }
+    out = out + "\n/* ── exported C-ABI wrappers ── */\n" + wrap
+    libhdr = "#ifndef AILLIB_H\n#define AILLIB_H\n#include <stdint.h>\n"
+    if need_bytes { libhdr = libhdr + "typedef struct { int64_t len; const uint8_t* data; } ailang_bytes;\n" }
+    libhdr = libhdr + "#ifdef __cplusplus\nextern \"C\" {\n#endif\n" + protos + "#ifdef __cplusplus\n}\n#endif\n#endif\n"
+  }
   if len(mlib) > 0 { out = "// @links:" + mlib + "\n" + out }
+  if libmode { out = out + "\n//@@AILHDR@@\n" + libhdr }
   out
 }
 
@@ -2724,7 +2788,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
 // clang. Returns 0 on success, 1 on a read or clang failure. The single shared
 // build path behind the build / run / check / test CLI modes in main.ail; the
 // clang command strings are byte-identical to the former inline ones.
-fn build_one(input:str, outbin:str, keepc:bool, link:bool) -> i64 {
+fn build_one(input:str, outbin:str, keepc:bool, link:bool, asan:bool) -> i64 {
   mu src := read_file(input)
   if len(src) == 0 { println("error: cannot read input file (missing or empty): " + input); rt 1 }
   src = auto_imports(src) + src
@@ -2732,7 +2796,8 @@ fn build_one(input:str, outbin:str, keepc:bool, link:bool) -> i64 {
     mu seen:{str:str} := {}
     src = resolve_imports(src, dirname(input), seen)
   }
-  cprog := compile_to_c(src, dirname(input))
+  mu noexp:[str] := []
+  cprog := compile_to_c(src, dirname(input), false, noexp)
   if link == false { rt 0 }
   cpath := outbin + ".c"
   write_file(cpath, cprog)
@@ -2751,22 +2816,17 @@ fn build_one(input:str, outbin:str, keepc:bool, link:bool) -> i64 {
       rt 1
     }
   } el {
-    mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
-    if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
-    if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
-    if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }
-    mu lf := link_flags(cprog)
-    if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
-    if has_sub(lf, "lsqlite3") { extra = extra + " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)" }
-    extra = extra + lf + " -lm"
+    extra := unix_link_extra(cprog)
+    mu asanflag := ""
+    if asan { asanflag = " -fsanitize=address -g" }
     if len(shims) == 0 {
-      cmd := "clang -O2 " + cpath + extra + " -o " + outbin
+      cmd := "clang -O2" + asanflag + " " + cpath + extra + " -o " + outbin
       rc = system(cmd)
     } el {
       mu shimline := ""
       mu si := 0
       lp si < len(shims) { shimline = shimline + " " + shims[si]; si += 1 }
-      cmd := "clang++ -O2 -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
+      cmd := "clang++ -O2" + asanflag + " -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
       rc = system(cmd)
     }
   }
@@ -2778,6 +2838,105 @@ fn build_one(input:str, outbin:str, keepc:bool, link:bool) -> i64 {
       if has_sub(shims[ci2], "__ailinline_") { system("rm -f " + shims[ci2]) }
       ci2 += 1
     }
+  }
+  0
+}
+
+// The POSIX clang tail: bdw-gc plus usage-gated openssl / libpq / pthread /
+// mysqlclient / sqlite3 discovery, then the `// @links:` flags and -lm. Shared
+// by build_one (executables) and build_lib (shared libraries) so both link the
+// same optional libs. (Windows uses its own -static tail; this is #ifndef there.)
+fn unix_link_extra(cprog:str) -> str {
+  mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
+  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
+  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+  if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }
+  mu lf := link_flags(cprog)
+  if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
+  if has_sub(lf, "lsqlite3") { extra = extra + " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)" }
+  extra = extra + lf + " -lm"
+  extra
+}
+
+// Is `s` in `xs`? (small linear membership over the export-name list)
+fn str_in(xs:[str], s:str) -> bool {
+  mu i := 0
+  lp i < len(xs) { if xs[i] == s rt true   i += 1 }
+  false
+}
+
+// A type usable across a plain C ABI from a host program: the scalars + str +
+// bytes, each of which `cty` lowers to a self-describing C type (int64_t/double/
+// const char*/ailang_bytes). Aggregates (arrays/maps/structs/tuples/results/
+// closures) use AiLang's internal runtime layout and are NOT exportable.
+fn is_cabi_type(t:str) -> bool {
+  t == "i64" || t == "i32" || t == "u32" || t == "bool" || t == "f64" || t == "str" || t == "bytes"
+}
+// True when every param type and the return type (empty == void) are C-ABI-safe.
+fn cabi_sig_ok(f:Func) -> bool {
+  if len(f.ret) > 0 && is_cabi_type(f.ret) == false { rt false }
+  mu i := 0
+  lp i < len(f.params) {
+    if is_cabi_type(f.ptypes[i]) == false { rt false }
+    i += 1
+  }
+  true
+}
+
+// The header path for a library output: `libfoo.dylib`/`.so`/`.dll` → `libfoo.h`
+// (else just append `.h`).
+fn lib_header_path(outbin:str) -> str {
+  n := len(outbin)
+  if n >= 6 && substring(outbin, n - 6, n) == ".dylib" { rt substring(outbin, 0, n - 6) + ".h" }
+  if n >= 3 && substring(outbin, n - 3, n) == ".so" { rt substring(outbin, 0, n - 3) + ".h" }
+  if n >= 4 && substring(outbin, n - 4, n) == ".dll" { rt substring(outbin, 0, n - 4) + ".h" }
+  outbin + ".h"
+}
+
+// Compile `input` to a shared library at `outbin` (.dylib on macOS, .so on
+// Linux; POSIX-only — callers guard Windows out) plus a C header next to it. The
+// exported surface is the root file's own top-level `fn`s with C-ABI signatures.
+// Returns 0 on success, 1 on a read or clang failure.
+fn build_lib(input:str, outbin:str, keepc:bool) -> i64 {
+  mu rawsrc := read_file(input)
+  if len(rawsrc) == 0 { println("error: cannot read input file (missing or empty): " + input); rt 1 }
+  exports := module_fn_names(rawsrc)              // the root file's own top-level fn names
+  mu src := auto_imports(rawsrc) + rawsrc
+  if has_import(src) {
+    mu seen:{str:str} := {}
+    src = resolve_imports(src, dirname(input), seen)
+  }
+  full := compile_to_c(src, dirname(input), true, exports)
+  // The header content is appended after a sentinel line; split it back out.
+  sen := "\n//@@AILHDR@@\n"
+  mu cprog := full
+  mu hdr := ""
+  sp := index_of(full, sen)
+  if sp >= 0 {
+    cprog = substring(full, 0, sp)
+    hdr = substring(full, sp + len(sen), len(full))
+  }
+  cpath := outbin + ".c"
+  hpath := lib_header_path(outbin)
+  write_file(cpath, cprog)
+  write_file(hpath, hdr)
+  win := get_env("OS") == "Windows_NT"
+  mu rc := 0
+  if win {
+    // Windows DLL: only the __declspec(dllexport) wrappers are exported (adding any
+    // dllexport disables MinGW auto-export). Boehm GC is linked statically into the
+    // DLL (-DGC_NOT_DLL, matching the -static exe path); GC_INIT runs in the load
+    // constructor. --out-implib emits a `<dll>.a` import library for the linker.
+    cmd := "clang -O2 -shared -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -lgc -lm -o \"" + outbin + "\" -Wl,--out-implib,\"" + outbin + ".a\""
+    rc = system(cmd)
+  } el {
+    extra := unix_link_extra(cprog)
+    cmd := "clang -O2 -shared -fPIC -fvisibility=hidden " + cpath + extra + " -o " + outbin
+    rc = system(cmd)
+  }
+  if rc != 0 { println("clang failed"); rt 1 }
+  if keepc == false {
+    if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
   }
   0
 }
