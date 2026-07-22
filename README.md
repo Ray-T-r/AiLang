@@ -6,7 +6,7 @@ type-checks, and lowers `.ail` source to C, then drives `clang` to a native
 binary — the whole pipeline authored in `.ail`.
 
 It is **self-hosting at a strict fixpoint**: compiling its own source produces
-a byte-identical compiler (`stage2.c == stage3.c`, 11,276 lines), with **no Rust
+a byte-identical compiler (`stage2.c == stage3.c`, 11,588 lines), with **no Rust
 toolchain anywhere in the loop**.
 
 > The original Rust implementation (`ailangc`) lives in a sibling repo,
@@ -58,46 +58,55 @@ HTTP+sockets, `jwt_verify(tok, secret)` middleware, Postgres/MySQL for storage
 
 ## Benchmarks
 
-AiLang's bet: **the fewest source tokens** (cheap for an LLM to write) at
-**native speed** (it lowers to C, built with `clang -O2`). Both, measured.
+What's load-bearing here is the **self-hosting fixpoint** above and the **tight
+agent feedback loop** below (`ailc check`/`run`/`test` + `--json` diagnostics).
+Two other properties are real and measured — native speed and terse source — but
+neither is the pitch, and the second is more modest than it first looks.
 
-**Token efficiency** — source tokens (`tiktoken`, `cl100k_base`) for the same
-four programs (`fib`, `fizzbuzz`, `greet`, `sum`):
+**Runtime** — recursive `fib(40)`, `hyperfine` mean on Apple Silicon, each
+language at its standard optimization (`clang -O2`, `rustc -O`, `go build`,
+`javac`, `node`, `python3`). Re-measured on this machine:
+
+| language | time | vs AiLang |
+|---|---|---|
+| **AiLang** (→ C, `clang -O2`) | **156.8 ms** | 1.00× |
+| Rust | 155.8 ms | 0.99× |
+| C | 151.0 ms | 0.96× |
+| Java | 171.7 ms | 1.10× |
+| Go | 227.1 ms | 1.45× |
+| Node | 495.7 ms | 3.16× |
+| Python | 6756 ms | 43× |
+
+AiLang runs neck-and-neck with C and Rust — it *is* C, generated. The
+self-hosted `ailc` produces identically fast binaries (`ailc fib40.ail` → 156.8 ms,
+matching `clang -O2`).
+
+**Source density** — source tokens (`tiktoken`, `cl100k_base`) for four tiny
+programs (`fib`, `fizzbuzz`, `greet`, `sum`):
 
 | | AiLang | Python | JS | Rust | Go | Java | C |
 |---|---|---|---|---|---|---|---|
 | tokens | **130** | 136 | 167 | 186 | 223 | 261 | 270 |
 | vs AiLang | 1.00× | 1.05× | 1.28× | 1.43× | 1.72× | 2.01× | 2.08× |
 
-The densest of the seven — fewer tokens than Python, under half of C.
-
-**Runtime** — recursive `fib(40)`, `hyperfine` mean on Apple Silicon, each
-language at its standard optimization (`clang -O2`, `rustc -O`, `go build`,
-`javac`, `node`, `python3`):
-
-| language | time | vs AiLang |
-|---|---|---|
-| **AiLang** (→ C, `clang -O2`) | **145 ms** | 1.00× |
-| Rust | 145 ms | 1.00× |
-| C | 146 ms | 1.01× |
-| Java | 167 ms | 1.15× |
-| Go | 225 ms | 1.55× |
-| Node | 493 ms | 3.40× |
-| Python | 5436 ms | 37× |
-
-AiLang runs neck-and-neck with C and Rust — it *is* C, generated. The
-self-hosted `ailc` produces identically fast binaries (`ailc fib40.ail` → 145 ms,
-matching `clang -O2`).
+AiLang is the densest of the seven — but the margin over Python is **1.05×** on a
+four-program micro-corpus, which is within noise, not a reason to switch. And
+whether terse syntax actually saves an *LLM* tokens is a different, harder
+question: only ~1,400 lines of AiLang exist anywhere, so the language is
+out-of-distribution for every model, and the resulting check→fix retries can cost
+more than the characters saved. That's the honest open question —
+[`study/`](study/) measures it on real tasks against a matched Python baseline,
+and reports it whichever way it falls.
 
 ## Status
 
 | | |
 |---|---|
-| compiler source | ~7,700 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **11,276 lines, byte-identical** |
+| compiler source | ~8,000 lines across `main.ail` + 6 `src/` modules |
+| strict fixpoint | `stage2.c == stage3.c` — **11,808 lines, byte-identical** |
 | sample programs | **65**, each output-verified against a frozen fixture — including loopback runtime tests for sockets/HTTP/WebSocket/web (in-process server thread, deterministic output) |
 | standard library | 25 modules — networked/db modules exercised by loopback samples + compile-and-link checks (`selfhost/tests/compileonly/`) |
-| CLI | `ailc run` (compile + execute) · `ailc check` (type-check only) · `ailc test` (run `assert`-based `*_test.ail`, PASS/FAIL summary) · `--json` machine-readable diagnostics with stable `AIL####` codes |
+| CLI | `ailc run` (compile + execute) · `ailc check` (type-check only) · `ailc test` (run `assert`-based `*_test.ail`, PASS/FAIL summary) · `ailc lib` (compile to a `.dylib`/`.so` shared library + C header) · `--json` machine-readable diagnostics with stable `AIL####` codes |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
 | type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **43 negative tests**, all caught |
 | Rust in the build | **none** |
@@ -240,6 +249,34 @@ bash selfhost/bootstrap.sh          # seed.c → ./selfhost/ailc, verifies the f
 `bootstrap.sh` compiles the checked-in C seed into a working `ailc`, uses it to
 recompile `main.ail` from source, and checks the result reproduces the seed
 byte-for-byte — the self-hosting fixpoint, established without any Rust.
+
+## Call it from C — shared libraries
+
+`ailc lib` compiles an `.ail` file to a native shared library — `.dylib` on
+macOS, `.so` on Linux, `.dll` (plus a `.dll.a` import library) on Windows —
+along with a matching C header, so C/C++/Rust/Python-ctypes — anything that
+speaks the C ABI — can call AiLang functions:
+
+```bash
+ailc lib mathlib.ail            # → mathlib.dylib / .so / .dll  +  mathlib.h
+```
+
+Every top-level `fn` in the file whose signature uses only C-friendly types
+(`i64`/`i32`/`u32`/`bool`/`f64`/`str`/`bytes`) is exported under its **plain
+name** (`i64`→`int64_t`, `f64`→`double`, `str`→`const char*`); functions taking
+or returning aggregates (arrays/maps/structs) are skipped with a note, since
+those use AiLang's internal runtime layout. Boehm GC initialises itself when the
+library loads (a load-time constructor), so the host calls no init routine:
+
+```c
+#include "mathlib.h"
+int main(void){ return (int)ail_add(2, 3); }   // clang app.c mathlib.dylib -o app
+```
+
+Only the exported wrappers land in the dynamic symbol table — the library is
+built `-fvisibility=hidden` (POSIX) / with `__declspec(dllexport)` (Windows), so
+internal functions and the runtime stay private. On Windows link against the
+generated `mathlib.dll.a` import library.
 
 ## Verify
 

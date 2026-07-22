@@ -12,7 +12,8 @@
 # Flags / env:
 #   --no-deps         skip auto-installing native libraries (just warn)
 #   --no-skill        skip installing the Claude Code skill
-#   --version <tag>   install a specific release (e.g. v0.4.3-beta) instead of latest
+#   --version <tag>   install a specific release (e.g. v0.4.3-beta) instead of this
+#                     script's own baked-in version; "latest" floats to newest
 #   AILANG_NO_DEPS=1  same as --no-deps
 #   AILANG_VERSION    same as --version
 #
@@ -21,7 +22,15 @@
 set -euo pipefail
 
 REPO="Ray-T-r/AiLang"
-BASE_URL="https://github.com/${REPO}/releases/latest/download"   # --version overrides this below
+# SELF_VERSION is baked into this script at release time (set to this release's own
+# tag). Downloading install.sh from a SPECIFIC release's URL — e.g.
+# .../releases/download/v0.5.2/install.sh — then installs v0.5.2's binaries by
+# default, instead of silently drifting to whatever is "latest" right now. The
+# "latest" release's own install.sh gets the same treatment, so it's self-consistent
+# (it points at itself, which — being the newest tag — is also latest). --version /
+# $AILANG_VERSION still overrides this for an explicit choice of any other release.
+SELF_VERSION="v0.5.2"
+BASE_URL="https://github.com/${REPO}/releases/download/${SELF_VERSION}"   # --version overrides this below
 BIN_DIR="${HOME}/.local/bin"
 BIN_PATH="${BIN_DIR}/ailc"
 SKILL_DIR="${HOME}/.claude/skills/ailang"
@@ -42,8 +51,15 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
-# --version / $AILANG_VERSION pins a specific release (e.g. a beta) instead of latest.
-[[ -n "$VERSION" ]] && BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+# --version / $AILANG_VERSION pins a DIFFERENT release than this script's own
+# SELF_VERSION (e.g. an older or newer tag, or "latest" to explicitly float).
+if [[ -n "$VERSION" ]]; then
+    if [[ "$VERSION" == "latest" ]]; then
+        BASE_URL="https://github.com/${REPO}/releases/latest/download"
+    else
+        BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+    fi
+fi
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m   ok\033[0m %s\n' "$*"; }
@@ -178,11 +194,53 @@ log "Extracting"
 tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" || die "could not extract ${TMP_ARCHIVE} (corrupt download?)"
 [[ -f "${TMP_DIR}/ailc" ]] || die "archive did not contain an 'ailc' binary at the top level"
 
-install -m 755 "${TMP_DIR}/ailc" "$BIN_PATH"
-if [[ "$OS_NAME" == "Darwin" ]]; then
-    xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
+# -------- 3. install: versioned copy always, plain `ailc` only for stable ------
+# Resolve which tag this run is actually installing. "latest" is resolved to its
+# real tag by following GitHub's redirect (can't suffix a binary with the literal
+# word "latest" and have that mean anything on a later run).
+EFFECTIVE_VERSION="$SELF_VERSION"
+if [[ -n "$VERSION" ]]; then
+    if [[ "$VERSION" == "latest" ]]; then
+        resolved="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+        EFFECTIVE_VERSION="${resolved##*/}"
+        [[ -z "$EFFECTIVE_VERSION" ]] && EFFECTIVE_VERSION="$SELF_VERSION"
+    else
+        EFFECTIVE_VERSION="$VERSION"
+    fi
 fi
-ok "installed to $BIN_PATH"
+
+# The unqualified `ailc` on PATH is meant to always be a STABLE build — never
+# silently become a beta/alpha/rc just because a versioned install ran. A
+# pre-release only ever lands as its versioned copy (ailc0.4.3-beta); grab it
+# explicitly by that name, or `ailc --version <tag>` again with a stable tag to
+# restore plain `ailc`.
+IS_PRERELEASE=0
+case "$EFFECTIVE_VERSION" in
+    *beta*|*alpha*|*rc*|*-pre*|*-dev*) IS_PRERELEASE=1 ;;
+esac
+
+if (( IS_PRERELEASE )); then
+    warn "${EFFECTIVE_VERSION} looks like a pre-release — installing it ONLY as a versioned copy, not as plain \`ailc\`"
+else
+    install -m 755 "${TMP_DIR}/ailc" "$BIN_PATH"
+    if [[ "$OS_NAME" == "Darwin" ]]; then
+        xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
+    fi
+    ok "installed to $BIN_PATH"
+fi
+
+# Versioned side-by-side copy: ailc0.5.2 alongside plain `ailc`. Installed on
+# every run (stable or pre-release) so older/other versions installed earlier
+# aren't clobbered: `ailc --version v0.5.1` leaves `ailc0.5.1` on PATH alongside
+# any earlier `ailc0.5.2` etc. from prior runs.
+VERSIONED_PATH="${BIN_DIR}/ailc${EFFECTIVE_VERSION#v}"     # v0.5.2 -> ailc0.5.2
+if [[ "$VERSIONED_PATH" != "$BIN_PATH" ]]; then
+    install -m 755 "${TMP_DIR}/ailc" "$VERSIONED_PATH"
+    if [[ "$OS_NAME" == "Darwin" ]]; then
+        xattr -d com.apple.quarantine "$VERSIONED_PATH" 2>/dev/null || true
+    fi
+    ok "versioned copy -> $VERSIONED_PATH  (run this directly to pin ${EFFECTIVE_VERSION}, regardless of what \`ailc\` points to later)"
+fi
 
 # -------- 3b. standard library (so `im "std/..."` works from anywhere) --------
 # The compiler falls back to $AILANG_STD when an import isn't found next to the
