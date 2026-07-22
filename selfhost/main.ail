@@ -28,7 +28,7 @@ im "src/parser.ail"
 im "src/types.ail"
 im "src/codegen.ail"
 im "src/driver.ail"
-AILC_VERSION := "0.5.0"
+AILC_VERSION := "0.5.2"
 USAGE := "usage: ailc [--keep-c] [--json] [--asan] [run|check|test|lib|compile] <input.ail> [output] [-- prog-args]"
 av := args()
 // `--keep-c` / `-k`: keep the generated C next to the binary. Default: delete

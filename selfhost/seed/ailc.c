@@ -11607,7 +11607,7 @@ int main(int argc, char** argv){
     const char* v_runcmd;
     int64_t v_rj;
     int64_t v_rrc;
-    v_AILC_VERSION = "0.5.0";
+    v_AILC_VERSION = "0.5.2";
     v_USAGE = "usage: ailc [--keep-c] [--json] [--asan] [run|check|test|lib|compile] <input.ail> [output] [-- prog-args]";
     v_av = ailang_args();
     v_keepc = (1 != 1);
