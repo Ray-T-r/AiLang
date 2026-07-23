@@ -1,0 +1,30 @@
+// bytes.ail — binary buffers: creation, indexing, slicing, file round-trip.
+// ailc bytes.ail && ./bytes
+
+s := "hello, AiLang"
+b := str_to_bytes(s)
+
+println(len(b))              // 13
+println(bytes_at(b, 0))      // 104  ('h')
+println(b[7])                // 65   ('A') — [] is sugar for bytes_at
+
+sl := bytes_slice(b, 0, 5)   // [lo, hi) end-exclusive
+println(bytes_to_str(sl))    // hello
+println(sl)                  // b"hello"
+
+// binary file round-trip
+write_file_bytes("/tmp/demo.bin", b)
+got := read_file_bytes("/tmp/demo.bin")
+println(len(got))            // 13
+println(bytes_to_str(got))   // hello, AiLang
+
+// missing file → empty bytes (len 0), no crash
+miss := read_file_bytes("/tmp/__no_such_file__.bin")
+println(len(miss))           // 0
+
+// text files use read_file / write_file (str, not bytes)
+write_file("/tmp/demo.txt", "line one\nline two\n")
+src := read_file("/tmp/demo.txt")
+lines := filter(split(src, "\n"), fn(x:str) len(x) > 0)
+println(len(lines))          // 2
+println(lines[0])            // line one

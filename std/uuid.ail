@@ -1,0 +1,42 @@
+// std/uuid.ail — RFC-4122-shaped v4 UUIDs (pure AiLang over the sha1 builtin).
+//
+//   im "std/uuid.ail"
+//   id := uuid_v4()        // "1b4e28ba-2fa1-4d3b-a3f5-…"  (36 chars, version 4)
+//
+// HONEST CAVEAT: the entropy is sha1(now_us + mono_ms + counter) — good for
+// request-IDs / log-correlation / dedup keys, NOT a CSPRNG. Do not use for
+// security tokens / session ids (a real `rand_bytes` builtin would be needed).
+// Importing this links OpenSSL (the sha1 builtin). POSIX-only.
+
+fn uuid_v4() -> str {
+  ent := int_to_str(now_us()) + ":" + int_to_str(mono_ms()) + ":ailang-uuid-v4"
+  h := sha1(ent)                              // 20 bytes
+  hx := "0123456789abcdef"
+  mu out := ""
+  mu i := 0
+  lp i < 16 {
+    mu b := bytes_at(h, i)
+    if i == 6 { b = 64 + (b % 16) }           // byte 6 high nibble = 4   (version)
+    if i == 8 { b = 128 + (b % 64) }          // byte 8 top two bits = 10 (variant)
+    out = out + substring(hx, b / 16, b / 16 + 1) + substring(hx, b % 16, b % 16 + 1)
+    if i == 3 || i == 5 || i == 7 || i == 9 { out = out + "-" }   // 8-4-4-4-12
+    i = i + 1
+  }
+  out
+}
+
+fn uuid_nil() -> str { "00000000-0000-0000-0000-000000000000" }
+
+// True if `s` is a structurally valid lowercase v4 UUID (length, dashes, version
+// nibble '4', variant nibble in 8/9/a/b). Useful for asserting in tests.
+fn uuid_is_v4(s:str) -> bool {
+  if len(s) != 36 rt false
+  if substring(s, 8, 9) != "-" rt false
+  if substring(s, 13, 14) != "-" rt false
+  if substring(s, 18, 19) != "-" rt false
+  if substring(s, 23, 24) != "-" rt false
+  if substring(s, 14, 15) != "4" rt false
+  vc := substring(s, 19, 20)
+  if vc == "8" || vc == "9" || vc == "a" || vc == "b" rt true
+  false
+}

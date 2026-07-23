@@ -1,0 +1,44 @@
+// strings.ail — complete string builtin reference.
+// ailc strings.ail && ./strings
+
+// predicates
+println(contains("hello world", "world"))   // 1
+println(starts_with("foobar", "foo"))       // 1
+println(ends_with("foobar", "bar"))         // 1
+println(index_of("abcdef", "cd"))           // 2
+println(index_of("abcdef", "zz"))           // -1
+
+// case / whitespace
+println(to_upper("Hello, World!"))          // HELLO, WORLD!
+println(to_lower("Hello, World!"))          // hello, world!
+println(trim("   spaced   "))               // spaced
+
+// edit
+println(replace("a.b.c.d", ".", "-"))       // a-b-c-d  (ALL occurrences)
+println(repeat("ab", 3))                    // ababab
+println(pad_left("42", 5, "0"))             // 00042
+println(pad_right("42", 5, "."))            // 42...
+println(substring("hello world", 6, 11))   // world   [lo, hi)
+
+// char ↔ int
+println(chr(65))          // A
+println(ord("A"))         // 65
+
+// conversion
+println(str_to_bool("true"))   // 1
+println(str_to_bool("nope"))   // 0
+n := 42
+println(format("%lld items at $%g each", n, 1.99))  // 42 items at $1.99 each
+
+// split / join
+parts := split("a,b,c,d", ",")
+println(len(parts))           // 4
+println(parts[2])             // c
+println(join(parts, " | "))   // a | b | c | d
+
+nums := [10, 20, 30]
+println(join(nums, "+"))      // 10+20+30  — join works on [i64] too
+
+// interpolation (preferred over format when types are mixed)
+name := "Ada"; sq := 6 * 6
+println("Hello, ${name}! 6² = ${sq}")

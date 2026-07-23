@@ -1,0 +1,68 @@
+// std/args.ail — a small CLI argument parser over a [str] (pass args()).
+//
+//   im "std/args.ail"
+//   p := args_parse(args())
+//   if arg_flag(p, "verbose") { … }                 // --verbose  / -v
+//   out := arg_opt(p, "out", "a.out")               // --out=x  or  --out x
+//   n   := arg_int(p, "jobs", 1)                     // --jobs=4
+//   src := arg_pos(p, 0)                             // first positional
+//
+// Forms: `--flag`, `--key=val`, `--key val`, short `-f`, `--` ends option
+// parsing, everything else is positional. Takes a [str] explicitly (not args()
+// directly) so it is unit-testable with literal arrays.
+
+st Parsed { flags:[str]  optkeys:[str]  optvals:[str]  positional:[str] }
+
+fn args_parse(argv:[str]) -> Parsed {
+  mu flags:[str] := []
+  mu okeys:[str] := []
+  mu ovals:[str] := []
+  mu posn:[str] := []
+  mu i := 0
+  mu afterdd := false
+  lp i < len(argv) {
+    a := argv[i]
+    if afterdd {
+      posn = push(posn, a)
+    } el if a == "--" {
+      afterdd = true
+    } el if starts_with(a, "--") {
+      body := substring(a, 2, len(a))
+      eq := index_of(body, "=")
+      if eq >= 0 {
+        okeys = push(okeys, substring(body, 0, eq))
+        ovals = push(ovals, substring(body, eq + 1, len(body)))
+      } el if i + 1 < len(argv) && starts_with(argv[i + 1], "-") == false {
+        okeys = push(okeys, body)              // `--key val`  (next token is the value)
+        ovals = push(ovals, argv[i + 1])
+        i = i + 1
+      } el {
+        flags = push(flags, body)              // bare `--flag`
+      }
+    } el if len(a) > 1 && a[0] == 45 {
+      flags = push(flags, substring(a, 1, len(a)))   // short `-f`
+    } el {
+      posn = push(posn, a)
+    }
+    i = i + 1
+  }
+  Parsed(flags, okeys, ovals, posn)
+}
+
+fn arg_flag(p:Parsed, name:str) -> bool { contains(p.flags, name) }
+
+fn arg_opt(p:Parsed, name:str, dflt:str) -> str {
+  mu i := 0
+  lp i < len(p.optkeys) { if p.optkeys[i] == name { rt p.optvals[i] } i += 1 }
+  dflt
+}
+
+fn arg_int(p:Parsed, name:str, dflt:i64) -> i64 {
+  v := arg_opt(p, name, "")
+  if len(v) == 0 { rt dflt }
+  str_to_int(v)
+}
+
+fn arg_pos(p:Parsed, idx:i64) -> str { if idx < len(p.positional) { p.positional[idx] } el { "" } }
+
+fn arg_count(p:Parsed) -> i64 { len(p.positional) }

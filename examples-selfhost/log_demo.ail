@@ -1,0 +1,8 @@
+// std/log.ail — logfmt rendering (fixed timestamps → deterministic output).
+im "std/log.ail"
+mu nokeys:[str] := []
+println(log_format("2026-06-13T00:00:00Z", LInfo, "server started", nokeys, nokeys))
+println(log_format("2026-06-13T00:00:01Z", LWarn, "slow query", ["ms", "path"], ["812", "/api"]))
+println(log_level_str(LError))
+assert(contains(log_format("T", LDebug, "x", nokeys, nokeys), "level=DEBUG"), "debug level rendered")
+println("log ok")

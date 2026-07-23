@@ -1,0 +1,38 @@
+// group_by.ail — map-of-array value types ({str:[T]} / {i64:[T]}) + std/seq group_by.
+// Covers: annotated empty literal, push onto a missing key (zero default), whole-map
+// println, {i64:[i64]}, bare-{} inference from the first m[k]=[…], and group_by over
+// [str] and a struct (iterating sort(keys(g)) for deterministic lines).
+im "std/seq.ail"
+
+st Person { name:str  team:str }
+
+// --- direct map-of-array use ---
+mu m:{str:[i64]} := {}
+m["evens"] = [2, 4]
+m["evens"] = push(m["evens"], 6)
+m["odds"] = push(m["odds"], 1)          // missing key reads as the empty array
+println(len(m))                          // 2
+println(m["evens"])                      // [2, 4, 6]
+println(len(m["missing"]))               // 0 — zero default, no crash
+println(m["odds"] ?? [])                 // ?? with [] is fine for [i64] values
+println(m)                               // whole-map print (hash-slot order, frozen by fixture)
+
+mu ids:{i64:[i64]} := {}
+ids[1] = [10, 11]
+println(ids[1][1])                       // 11 — chained indexing
+
+mu inf := {}                             // bare {} infers {str:[str]} from the first assign
+inf["x"] = ["xray"]
+println(inf["x"])
+
+// --- group_by over [str] ---
+words := ["apple", "banana", "avocado", "cherry", "blueberry"]
+g := group_by(words, fn(w:str) substring(w, 0, 1))
+lp k in sort(keys(g)) { println(k + ": " + join(g[k], ", ")) }
+
+// --- group_by over a struct ---
+people := [Person("ada", "red"), Person("bob", "blue"), Person("cy", "red")]
+t := group_by(people, fn(p:Person) p.team)
+println(len(t["red"]))                   // 2
+println(t["red"][1].name)                // cy
+lp tk in sort(keys(t)) { println(tk + " has " + int_to_str(len(t[tk]))) }

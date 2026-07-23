@@ -30,6 +30,13 @@ fn mysql_error(c:i64) -> str { myq_err(c) }
 fn mysql_escape(c:i64, s:str) -> str { myq_escape(c, s) }
 fn mysql_close(c:i64) -> i64 { myq_close(c) }
 
+// ── Prepared statements (injection-safe): `?` placeholders, values bound via
+// mysql_stmt_* — never interpolated. mysql_run for writes (returns affected rows);
+// mysql_query_one for a scalar SELECT (first column of the first row).
+
+fn mysql_run(c:i64, sql:str, params:[str]) -> i64 { myq_exec_params(c, sql, params) }
+fn mysql_query_one(c:i64, sql:str, params:[str]) -> str { myq_query_one_params(c, sql, params) }
+
 // First cell of the first row ("" if no rows / error).
 fn mysql_one(c:i64, sql:str) -> str {
   if myq_query(c, sql) != 0 rt ""

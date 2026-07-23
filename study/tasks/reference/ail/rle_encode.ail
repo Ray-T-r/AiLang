@@ -1,0 +1,16 @@
+// AiLang reference solution for the rle_encode study task.
+s := read_stdin()
+lines := split(s, "\n")
+mu line := ""
+if len(lines) > 0 { line = lines[0] }
+n := len(line)
+mu out := ""
+mu i := 0
+lp i < n {
+  c := substring(line, i, i + 1)
+  mu j := i + 1
+  lp j < n && substring(line, j, j + 1) == c { j += 1 }
+  out = out + c + int_to_str(j - i)
+  i = j
+}
+println(out)

@@ -1,0 +1,56 @@
+// web_jwt.ail — Express-style web app with JWT auth middleware.
+// Shows: std/web.ail routes, :param capture, middleware, std/jwt.ail.
+// Run: ailc web_jwt.ail && ./web_jwt   (listens on :8080)
+// Test (socket-free): web_handle drives the router without a network socket.
+im "std/web.ail"
+im "std/jwt.ail"
+
+secret := "supersecret"
+
+// ── build the app ───────────────────────────────────────────────────────────
+mu app := web_new()
+
+// auth middleware: any /api/* path must carry a valid Bearer token
+web_use(&app, fn(r:Req) {
+  if !starts_with(r.path, "/api/") rt ""          // not an API path — pass through
+  auth := req_header(r, "Authorization")
+  if !starts_with(auth, "Bearer ") rt http_json(401, "{\"err\":\"missing token\"}")
+  tok := substring(auth, 7, len(auth))
+  if !jwt_verify(tok, secret) rt http_json(401, "{\"err\":\"invalid token\"}")
+  ""   // empty = pass through to the route handler
+})
+
+// public routes
+web_get(&app, "/health", fn(r:Req) http_json(200, "{\"ok\":true}"))
+web_post(&app, "/login", fn(r:Req) {
+  tok := jwt_sign("{\"sub\":\"alice\",\"role\":\"admin\"}", secret)
+  http_json(200, "{\"token\":\"" + tok + "\"}")
+})
+
+// protected routes
+web_get(&app, "/api/users/:id", fn(r:Req) {
+  id := req_param(r, "id")
+  http_json(200, "{\"id\":\"" + id + "\",\"name\":\"user_" + id + "\"}")
+})
+web_get(&app, "/api/me", fn(r:Req) {
+  tok := substring(req_header(r, "Authorization"), 7, 99)
+  sub := jwt_claim(tok, "sub")
+  rol := jwt_claim(tok, "role")
+  http_json(200, "{\"sub\":\"" + sub + "\",\"role\":\"" + rol + "\"}")
+})
+
+// ── test without a socket ───────────────────────────────────────────────────
+println(http_body(web_handle(&app, "GET /health HTTP/1.1\r\n\r\n")))
+// {"ok":true}
+
+println(http_body(web_handle(&app, "GET /api/users/42 HTTP/1.1\r\n\r\n")))
+// {"err":"missing token"}   ← middleware rejects it
+
+tok := jwt_sign("{\"sub\":\"alice\",\"role\":\"admin\"}", secret)
+req_me := "GET /api/me HTTP/1.1\r\nAuthorization: Bearer " + tok + "\r\n\r\n"
+println(http_body(web_handle(&app, req_me)))
+// {"sub":"alice","role":"admin"}
+
+// ── start the live server ───────────────────────────────────────────────────
+// Comment out the lines above and uncomment the next line to run as a server:
+// web_listen(&app, "0.0.0.0", 8080)

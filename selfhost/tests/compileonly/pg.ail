@@ -1,0 +1,13 @@
+// compile-only: std/pg must compile AND link against libpq (the seed itself
+// links it, so this is safe wherever verify.sh runs). Never executed.
+im "std/pg.ail"
+
+c := pg_connect("dbname=verify_stub connect_timeout=1")
+if pg_status(c) == 0 {
+  one := pg_one(c, "SELECT 1")
+  cols := pg_first_col(c, "SELECT 1")
+  two := pg_query_one(c, "SELECT $1::int", ["2"])      // prepared-statement path (bound param)
+  println(len(cols))
+}
+pg_close(c)
+println("compiled")

@@ -1,0 +1,39 @@
+// pipeline.ail — ETL pipeline: CSV → seq combinators → JSON output.
+// Shows: std/csv.ail, std/seq.ail, std/json.ail, |> pipe, generic HOFs,
+//        lambda param annotations for non-i64 elements.
+// ailc pipeline.ail && ./pipeline
+im "std/csv.ail"
+im "std/seq.ail"
+im "std/json.ail"
+
+data := "name,dept,salary\nalice,eng,180000\nbob,sales,150000\ncarol,eng,120000\ndave,eng,95000\neve,sales,170000"
+
+rows := csv_parse(data)
+body := drop(rows, 1)    // drop the header row
+
+// --- filter to eng dept, compute total & avg --------------------------------
+eng := keep(body, fn(r:Row) r.cells[1] == "eng")
+salaries := map_to(eng, fn(r:Row) str_to_int(r.cells[2]))
+total := fold(salaries, 0, fn(a, n) a + n)
+avg := total / len(eng)
+
+// --- build JSON output ------------------------------------------------------
+names_j := map_to(eng, fn(r:Row) JStr(r.cells[0]))
+out := JObj(
+  ["dept", "count", "total", "avg", "names"],
+  [JStr("eng"), JInt(len(eng)), JInt(total), JInt(avg), JArr(names_j)]
+)
+println(json_str(out))
+// {"dept":"eng","count":3,"total":395000,"avg":131666,"names":["alice","carol","dave"]}
+
+// --- |> pipe style (same result, different style) ---------------------------
+sales_total := body
+  |> keep(fn(r:Row) r.cells[1] == "sales")
+  |> map_to(fn(r:Row) str_to_int(r.cells[2]))
+  |> fold(0, fn(a, n) a + n)
+println("sales total: ${sales_total}")    // sales total: 320000
+
+// --- sort rows by salary descending ----------------------------------------
+by_sal := sort_by(body, fn(r:Row) 0 - str_to_int(r.cells[2]))
+println(by_sal[0].cells[0])   // alice  (highest salary)
+println(by_sal[4].cells[0])   // dave   (lowest salary)

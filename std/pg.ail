@@ -40,6 +40,35 @@ fn pg_one(conn:i64, sql:str) -> str {
   v
 }
 
+// ── Prepared statements (injection-safe): use $1,$2,… placeholders and pass
+// values in `params`; they are sent as bound text parameters, never interpolated.
+
+// pg_query_one(conn, sql, params) — first cell of first row. "" on none/error.
+fn pg_query_one(conn:i64, sql:str, params:[str]) -> str {
+  r := pg_exec_params(conn, sql, params)
+  if !pg_ok(r) { pg_clear(r)  rt "" }
+  if pg_nrows(r) == 0 { pg_clear(r)  rt "" }
+  v := pg_value(r, 0, 0)
+  pg_clear(r)
+  v
+}
+
+// pg_query_col(conn, sql, params) — first column of all rows as [str].
+fn pg_query_col(conn:i64, sql:str, params:[str]) -> [str] {
+  r := pg_exec_params(conn, sql, params)
+  if !pg_ok(r) { pg_clear(r)  rt slice([""], 1, 1) }
+  n := pg_nrows(r)
+  mu out := [""]
+  mu i := 0
+  lp k in 0..1000000 {
+    if i >= n br
+    out = push(out, pg_value(r, i, 0))
+    i = i + 1
+  }
+  pg_clear(r)
+  slice(out, 1, len(out))
+}
+
 // pg_first_col(conn, sql) — first column of all rows as [str].
 // Returns an empty array on error or no rows.
 fn pg_first_col(conn:i64, sql:str) -> [str] {

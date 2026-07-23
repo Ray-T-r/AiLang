@@ -451,6 +451,32 @@ fn is_empty_maplit(e:Expr) -> bool {
     Bad                => false;
   }
 }
+// The map annotation already stamped on a literal ("" when absent) — an
+// annotated empty `{}` must keep its type, not be re-inferred (the inference
+// can't see e.g. a generic instance's key var and would fall back to i64).
+fn maplit_ann(e:Expr) -> str {
+  mt e {
+    MapLit(ml,mks,mvs) => ml;
+    Tuple(tes)         => "";
+    BlockE(bb)         => "";
+    Var(n)             => "";
+    Num(v)             => "";
+    Flt(fs)            => "";
+    Str(s)             => "";
+    Bin(o,a,b)         => "";
+    Unary(o,x)         => "";
+    Call(f,a)          => "";
+    Field(o,f)         => "";
+    Index(o,ix)        => "";
+    Array(es,et)       => "";
+    Addr(x)            => "";
+    Match(sc,vn,vb,bd) => "";
+    IfE(c,t,el2)       => "";
+    Try(e2)            => "";
+    Lambda(ps,pts,b,id)    => "";
+    Bad                => "";
+  }
+}
 // First `m[k]=v` (recursing into nested blocks, typing loop vars en route) →
 // "{type(k):type(v)}", or "" if none.
 fn map_assign_type(sy:*Syms, body:[Stmt], m:str) -> str {
@@ -591,7 +617,7 @@ fn array_elem_from_push(sy:*Syms, body:[Stmt], a:str) -> str {
   ""
 }
 fn stamp_decl_e(sy:*Syms, body:[Stmt], name:str, e:Expr, pos:i64) -> Stmt {
-  if is_empty_maplit(e) {
+  if is_empty_maplit(e) && len(maplit_ann(e)) == 0 {   // unannotated only — an annotation wins over inference
     t := map_assign_type(sy, body, name)
     if len(t) > 0 rt SDecl(name, MapLit(t, no_exprs(), no_exprs()), pos)   // preserve source pos (codegen ignores it; the checker walks stamped bodies and needs it)
   }
@@ -892,9 +918,27 @@ fn chk_array(funcs:[Func], sy:*Syms, elems:[Expr], pos:i64, src:str) -> i64 {
   chk_args(funcs, sy, elems, pos, src)
   0
 }
-fn chk_maplit(funcs:[Func], sy:*Syms, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
+// Reject (K,V) combos the map runtime universe never emits: map values, nested
+// array values, and array values with a non-str/i64 key (f64 keys have no
+// grouping use; only str/i64 key × [T] runtimes exist).
+fn map_combo_check(sy:*Syms, t:str, pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if is_map_ann(t) == false rt 0
+  kt := map_ktype(t)
+  vt := map_vtype(t)
+  if is_map_ann(vt) { report_chk(sy, src, pos, "unsupported map value type " + vt) rt 0 }
+  if is_array_ann(vt) {
+    ev := elem_of_ann(vt)
+    if is_array_ann(ev) || is_map_ann(ev) { report_chk(sy, src, pos, "unsupported map value type " + vt) rt 0 }
+    if kt != "str" && kt != "i64" && kt != "bool" { report_chk(sy, src, pos, "a map with array values requires a str or i64 key, got " + kt) rt 0 }
+  }
+  if is_array_ann(kt) || is_map_ann(kt) { report_chk(sy, src, pos, "unsupported map key type " + kt) }
+  0
+}
+fn chk_maplit(funcs:[Func], sy:*Syms, mty:str, ks:[Expr], vs:[Expr], pos:i64, src:str) -> i64 {
   homog_check(sy, ks, "map literal mixes key types", pos, src)
   homog_check(sy, vs, "map literal mixes value types", pos, src)
+  map_combo_check(sy, maplit_type(sy, mty, ks, vs), pos, src)
   chk_args(funcs, sy, ks, pos, src)
   chk_args(funcs, sy, vs, pos, src)
   0
@@ -1049,9 +1093,17 @@ fn lambda_arity(e:Expr) -> i64 {
 fn hof_arity_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   if pos < 0 rt 0
   mu want := -1
-  if fname == "map" || fname == "filter" { want = 1 }
-  if fname == "reduce" { want = 2 }
+  mu cbidx := -1
+  if fname == "map" || fname == "filter" { want = 1; cbidx = 1 }
+  if fname == "reduce" { want = 2; cbidx = 2 }
   if want < 0 rt 0
+  // The builtin map/filter/reduce INLINE their callback at codegen time, so it
+  // must be a lambda literal right here — a stored or named function in the
+  // callback slot silently miscompiles (the #1 LLM gotcha). Turn that into a
+  // clear, actionable error. lambda_arity returns >=0 only for a lambda literal.
+  if cbidx >= 0 && cbidx < len(args) && lambda_arity(args[cbidx]) < 0 {
+    report_chk(sy, src, pos, "the function argument to '" + fname + "' must be an inline lambda (fn(x) …); a stored or named function isn't supported here — use std/seq.ail (keep/map_to/fold) for that")
+  }
   mu i := 0
   lp i < len(args) {
     np := lambda_arity(args[i])
@@ -1159,7 +1211,19 @@ fn ok_ret_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
   }
   0
 }
+// `values(m)` has no runtime for array-valued maps (would need arr_arr_*).
+fn map_values_check(sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  if pos < 0 rt 0
+  if fname == "values" && len(args) == 1 {
+    t := type_confident(sy, args[0])
+    if is_map_ann(t) && is_array_ann(map_vtype(t)) {
+      report_chk(sy, src, pos, "values() on a map with array values is not supported (iterate keys() instead)")
+    }
+  }
+  0
+}
 fn chk_call(funcs:[Func], sy:*Syms, fname:str, args:[Expr], pos:i64, src:str) -> i64 {
+  map_values_check(sy, fname, args, pos, src)
   callarg_check(funcs, sy, fname, args, pos, src)
   ctor_arg_check(sy, fname, args, pos, src)
   variant_arg_check(sy, fname, args, pos, src)
@@ -1186,7 +1250,7 @@ fn check_expr(funcs:[Func], sy:*Syms, e:Expr, pos:i64, src:str) -> i64 {
     Unary(op,x)         => check_expr(funcs, sy, x, pos, src);
     Addr(x)             => check_expr(funcs, sy, x, pos, src);
     Array(elems,ety)    => chk_array(funcs, sy, elems, pos, src);
-    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mks, mvs, pos, src);
+    MapLit(mty,mks,mvs) => chk_maplit(funcs, sy, mty, mks, mvs, pos, src);
     Match(sc,vn,vb,bd,gd)  => chk_match(funcs, sy, sc, vn, vb, bd, gd, pos, src);
     IfE(c,t,el2)        => chk3(funcs, sy, c, t, el2, pos, src);
     Try(x)              => chk_try(funcs, sy, x, pos, src);
@@ -1413,7 +1477,11 @@ fn check_program(funcs:[Func], base:*Syms, mains:[Stmt], src:str) -> i64 {
   0
 }
 
-fn compile_to_c(src:str, dir:str) -> str {
+// `libmode` = compile as a shared library: no `main`, a load-time constructor
+// inits Boehm GC, and each name in `exports` (the root file's top-level `fn`s)
+// with a C-friendly signature gets an unmangled wrapper + a header proto. When
+// libmode==false this is byte-identical to the executable path (`exports` unused).
+fn compile_to_c(src:str, dir:str, libmode:bool, exports:[str]) -> str {
   toks := lex(src)
   mu p := P(toks, 0, src)
 
@@ -1807,7 +1875,11 @@ fn compile_to_c(src:str, dir:str) -> str {
   check_program(funcs, &base, mains, src)
   if has(base.errc, "bad") {
     n := str_to_int(base.errc["n"])
-    if n > 1 { println("found " + int_to_str(n) + " errors") }   // summary only for multi-error; single-error output stays byte-identical to before
+    if n > 1 {
+      // summary only for multi-error; single-error output stays byte-identical.
+      // --json must stay valid JSONL, so emit a summary object instead of prose.
+      if want_json() { println("{\"severity\":\"summary\",\"errors\":" + int_to_str(n) + "}") } el { println("found " + int_to_str(n) + " errors") }
+    }
     exit(1)
   }
 
@@ -1850,6 +1922,9 @@ fn compile_to_c(src:str, dir:str) -> str {
   needs_time := has_sub(src, "now_ms") || has_sub(src, "now_us") || has_sub(src, "mono_ms") || has_sub(src, "sleep_ms") || has_sub(src, "time_iso")
   needs_sock := has_sub(src, "tcp_listen") || has_sub(src, "tcp_connect") || has_sub(src, "tcp_accept") || has_sub(src, "sock_send") || has_sub(src, "sock_recv") || has_sub(src, "sock_close")
   needs_proc := has_sub(src, "proc_fork") || has_sub(src, "proc_getpid") || has_sub(src, "proc_no_zombies") || has_sub(src, "proc_reap")
+  // Filesystem ops (libc/POSIX, no link flag). Full names, not a bare "fs_",
+  // so unrelated identifiers can't pull the section in.
+  needs_fs := has_sub(src, "fs_mkdir") || has_sub(src, "fs_rmdir") || has_sub(src, "fs_unlink") || has_sub(src, "fs_rename") || has_sub(src, "fs_exists") || has_sub(src, "fs_is_dir") || has_sub(src, "fs_size") || has_sub(src, "fs_mtime") || has_sub(src, "fs_list_dir")
   // OS threads + mutex (pthread). Like sockets/proc this is POSIX-only (#ifndef
   // _WIN32), but unlike them it needs the threaded Boehm GC (`#define GC_THREADS`
   // before <gc.h>, so pthread_create→GC_pthread_create scans the new thread's
@@ -1869,6 +1944,12 @@ fn compile_to_c(src:str, dir:str) -> str {
   // ships beside the ailc binary; gated, so user programs that never call it
   // (and main.ail's self-compile DOES, via the string below) decide on their own.
   needs_exedir := has_sub(src, "exe_dir")
+  // assert(cond,msg): abort with the message on a false condition (libc only, no
+  // header/link). Gate on the SPLIT token so the compiler's own source — which
+  // never contains a contiguous "assert(" — doesn't pull the helper; programs
+  // that don't assert emit byte-identical C. (Same split-placeholder discipline
+  // as the mysql/sqlite link markers.)
+  needs_assert := has_sub(src, "assert" + "(")
   // Threaded GC must be requested before <gc.h> so it pulls in <pthread.h> and
   // redirects pthread_create→GC_pthread_create. Prepended (no header reorder) so
   // non-thread programs emit byte-identical C; POSIX-only so Windows stays plain.
@@ -1877,6 +1958,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   if needs_time { out = out + "#include <time.h>\n" }
   if needs_sock { out = out + "#ifndef _WIN32\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <netdb.h>\n#include <unistd.h>\n#endif\n" }
   if needs_proc { out = out + "#ifndef _WIN32\n#include <unistd.h>\n#include <signal.h>\n#include <sys/wait.h>\n#endif\n" }
+  if needs_fs { out = out + "#ifndef _WIN32\n#include <sys/stat.h>\n#include <sys/types.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n" }
   if needs_regex { out = out + "#ifndef _WIN32\n#include <regex.h>\n#endif\n" }
   if needs_tls { out = out + "#ifndef _WIN32\n#include <openssl/ssl.h>\n#include <openssl/err.h>\n#include <openssl/sha.h>\n#endif\n" }
   if needs_hmac { out = out + "#ifndef _WIN32\n#include <openssl/hmac.h>\n#include <openssl/evp.h>\n#endif\n" }
@@ -1933,6 +2015,10 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static const char* read_stdin(void){ size_t cap=1024,len=0; char* b=(char*)GC_MALLOC(cap); int c; while((c=fgetc(stdin))!=EOF){ if(len+1>=cap){ size_t nc=cap*2; char* nb=(char*)GC_MALLOC(nc); memcpy(nb,b,len); b=nb; cap=nc; } b[len++]=(char)c; } b[len]=0; return b; }\n"
   out = out + "static const char* get_env(const char* name){ const char* v=name?getenv(name):0; return v?v:\"\"; }\n"
   out = out + "static const char* format(const char* fmt, ...){ char b[1024]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt?fmt:\"\",ap); va_end(ap); if(n<0) n=0; if(n>=(int)sizeof b) n=(int)sizeof b-1; char* o=(char*)GC_MALLOC((size_t)n+1); memcpy(o,b,(size_t)n+1); return o; }\n"
+  // assert(cond,msg) → ail_assert_check: print to stderr + exit(1) when cond is
+  // falsy, else return 0 (so it type-resolves as i64 in any position). The helper
+  // name has no contiguous "assert(" substring, so the gate above stays clean.
+  if needs_assert { out = out + "static int64_t ail_assert_check(int64_t c, const char* m){ if(!c){ fprintf(stderr, \"assertion failed: %s\\n\", m?m:\"\"); exit(1); } return 0; }\n" }
   // exe_dir() — directory of the running compiler, so `im "std/…"` finds the
   // bundled std with no env var (the path stripped to its dir; "" if unknown).
   if needs_exedir { out = out + "static const char* exe_dir(void){ char buf[4096]; buf[0]=0;\n#ifdef _WIN32\n unsigned long wn=GetModuleFileNameA(0,buf,(unsigned long)sizeof buf); if(wn==0||wn>=sizeof buf) return \"\";\n#elif defined(__APPLE__)\n unsigned int sz=(unsigned int)sizeof buf; if(_NSGetExecutablePath(buf,&sz)!=0) return \"\";\n#else\n long rn=readlink(\"/proc/self/exe\",buf,sizeof buf-1); if(rn<=0) return \"\"; buf[(size_t)rn]=0;\n#endif\n int i=(int)strlen(buf)-1; while(i>=0 && buf[i]!='/' && buf[i]!=92) i--; if(i<0) return \"\"; char* d=(char*)GC_MALLOC((size_t)i+1); memcpy(d,buf,(size_t)i); d[i]=0; return d; }\n" }
@@ -1979,6 +2065,7 @@ fn compile_to_c(src:str, dir:str) -> str {
     out = out + "static void tls_free_ctx(int64_t ctx){ if(ctx>0) SSL_CTX_free((SSL_CTX*)(intptr_t)ctx); }\n"
     out = out + "static int64_t tls_accept(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_accept(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
     out = out + "static int64_t tls_connect_fd(int64_t ctx, int64_t fd){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
+    out = out + "static int64_t tls_connect_host(int64_t ctx, int64_t fd, const char* host){ if(ctx<=0||fd<0) return -1; SSL* ssl=SSL_new((SSL_CTX*)(intptr_t)ctx); if(!ssl) return -1; SSL_set_fd(ssl,(int)fd); if(host&&*host) SSL_set_tlsext_host_name(ssl,host); if(SSL_connect(ssl)<=0){ SSL_free(ssl); return -1; } return (int64_t)(intptr_t)ssl; }\n"
     out = out + "static int64_t tls_send(int64_t ssl, ailang_bytes b){ if(ssl<=0) return -1; if(b.len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,b.data,(int)b.len); return (int64_t)n; }\n"
     out = out + "static int64_t tls_send_str(int64_t ssl, const char* s){ if(ssl<=0||!s) return -1; size_t len=strlen(s); if(len==0) return 0; int n=SSL_write((SSL*)(intptr_t)ssl,s,(int)len); return (int64_t)n; }\n"
     out = out + "static ailang_bytes tls_recv(int64_t ssl, int64_t max){ ailang_bytes r; r.len=0; r.data=(const uint8_t*)\"\"; if(ssl<=0||max<=0) return r; uint8_t* buf=(uint8_t*)GC_MALLOC((size_t)max); int n=SSL_read((SSL*)(intptr_t)ssl,buf,(int)max); if(n<=0) return r; r.len=(int64_t)n; r.data=buf; return r; }\n"
@@ -2015,6 +2102,8 @@ fn compile_to_c(src:str, dir:str) -> str {
   // marker is split ("/*@MY"+"SQL@*/") so the contiguous token never appears in the
   // compiler's own string data (else the replace below would corrupt it).
   out = out + "/*@MY" + "SQL@*/"
+  // SQLite prelude slot — same opt-in mold as mysql (split marker, filled below).
+  out = out + "/*@SQ" + "LITE@*/"
   out = out + "static int g_argc=0; static char** g_argv=0;\n"
   // Closure value type — only when the program actually has first-class lambdas,
   // so the existing samples + main.ail emit byte-identical C (fixpoint safe).
@@ -2077,7 +2166,16 @@ fn compile_to_c(src:str, dir:str) -> str {
   lp mvs < len(structs) { mapvals = push(mapvals, structs[mvs].name); mvs += 1 }
   mu mve := 0
   lp mve < len(enums) { mapvals = push(mapvals, enums[mve].name); mve += 1 }
+  // Map-of-array universe ({str:[T]}/{i64:[T]} — group_by et al.): str/i64 keys
+  // only (f64 keys have no grouping use), array values over every arr_<T>.
+  mu arrkeys:[str] := ["str", "i64"]
+  mu arrvals:[str] := ["[i64]", "[str]", "[f64]"]
+  mu avs := 0
+  lp avs < len(structs) { arrvals = push(arrvals, "[" + structs[avs].name + "]"); avs += 1 }
+  mu ave := 0
+  lp ave < len(enums) { arrvals = push(arrvals, "[" + enums[ave].name + "]"); ave += 1 }
   out = out + gen_map_fwds_all(mapkeys, mapvals)
+  out = out + gen_map_fwds_all(arrkeys, arrvals)
   out = out + "\n"
 
   // Phase 3: aggregate bodies (now an enum/struct body may embed `arr_<T>` by
@@ -2088,6 +2186,7 @@ fn compile_to_c(src:str, dir:str) -> str {
   lp ei < len(enums) { out = out + gen_enum_body(enums[ei]); ei += 1 }
   // map node bodies (hold the value by value, so they need the aggregates above).
   out = out + gen_map_nodes_all(mapkeys, mapvals)
+  out = out + gen_map_nodes_all(arrkeys, arrvals)
   out = out + "\n"
 
   // vtable types + forward decls for classes with virtual methods (B3). The
@@ -2114,11 +2213,41 @@ fn compile_to_c(src:str, dir:str) -> str {
   out = out + "static arr_str ailang_args(void){ arr_str a = arr_str_new(); for(int i=1;i<g_argc;i++) a = arr_str_push(a, g_argv[i]); return a; }\n"
   // split(s, sep) → [str]; empty sep → [s]; uses arr_str runtime just emitted.
   out = out + "static arr_str split(const char* s, const char* sep){ arr_str a=arr_str_new(); if(!s) s=\"\"; if(!sep||!*sep){ return arr_str_push(a,s); } size_t ls=strlen(sep); const char* r=s; const char* p; while((p=strstr(r,sep))!=0){ size_t n=(size_t)(p-r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n); pc[n]=0; a=arr_str_push(a,pc); r=p+ls; } size_t n=strlen(r); char* pc=(char*)GC_MALLOC(n+1); memcpy(pc,r,n+1); a=arr_str_push(a,pc); return a; }\n"
+  // Filesystem helpers live HERE (phase 4), not in the phase-2 prelude:
+  // fs_list_dir returns arr_str, whose typedef + push only exist from phase 4 on.
+  if needs_fs {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "static int64_t fs_mkdir(const char* p){ if(!p||!*p) return 0; return mkdir(p,0777)==0; }\n"
+    out = out + "static int64_t fs_rmdir(const char* p){ if(!p||!*p) return 0; return rmdir(p)==0; }\n"
+    out = out + "static int64_t fs_unlink(const char* p){ if(!p||!*p) return 0; return unlink(p)==0; }\n"
+    out = out + "static int64_t fs_rename(const char* a, const char* b){ if(!a||!b) return 0; return rename(a,b)==0; }\n"
+    out = out + "static int64_t fs_exists(const char* p){ struct stat st; if(!p) return 0; return stat(p,&st)==0; }\n"
+    out = out + "static int64_t fs_is_dir(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return 0; return S_ISDIR(st.st_mode)!=0; }\n"
+    out = out + "static int64_t fs_size(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_size; }\n"
+    out = out + "static int64_t fs_mtime(const char* p){ struct stat st; if(!p||stat(p,&st)!=0) return -1; return (int64_t)st.st_mtime; }\n"
+    out = out + "static arr_str fs_list_dir(const char* p){ arr_str a=arr_str_new(); DIR* d=opendir(p?p:\"\"); if(!d) return a; struct dirent* e; while((e=readdir(d))!=0){ if(strcmp(e->d_name,\".\")==0||strcmp(e->d_name,\"..\")==0) continue; size_t n=strlen(e->d_name); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e->d_name,n+1); a=arr_str_push(a,o); } closedir(d); return a; }\n"
+    out = out + "#endif\n"
+  }
+  // pg_exec_params — Postgres prepared-statement exec (PQexecParams). Lives HERE
+  // (phase 4), not in the phase-3 pg block, because it takes an arr_str of values
+  // and the array runtime only exists from here on (same reason as fs_list_dir).
+  // Values are passed as text params ($1,$2,…) → bound, never interpolated.
+  if needs_pg {
+    out = out + "#ifndef _WIN32\n"
+    out = out + "static int64_t pg_exec_params(int64_t conn, const char* sql, arr_str params){ if(conn==0||!sql) return 0; int n=(int)params.len; const char** vals=(const char**)GC_MALLOC(sizeof(char*)*(n>0?n:1)); for(int i=0;i<n;i++) vals[i]=params.data[i]?params.data[i]:\"\"; PGresult* r=PQexecParams((PGconn*)(intptr_t)conn,sql,n,0,vals,0,0,0); return (int64_t)(intptr_t)r; }\n"
+    out = out + "#endif\n"
+  }
+  // MySQL prepared-statement helpers (myq_exec_params/myq_query_one_params) take an
+  // arr_str, so — like pg_exec_params — they belong in phase 4 (after the array
+  // runtime), NOT in the phase-2 @uses.mysql slot (which lands before arr_str). A
+  // SECOND split placeholder here is filled post-body in the same @uses.mysql gate.
+  out = out + "/*@MY" + "PARAMS@*/"
   si = 0
   lp si < len(structs) { out = out + gen_arr_helpers(structs[si].name, "s_" + structs[si].name); si += 1 }
   ei = 0
   lp ei < len(enums) { out = out + gen_arr_helpers(enums[ei].name, "s_" + enums[ei].name); ei += 1 }
   out = out + gen_map_helpers_all(mapkeys, mapvals)
+  out = out + gen_map_helpers_all(arrkeys, arrvals)   // after print_arr_* (their printers call them)
   // `!T` result runtimes: scalar `res_i64`/`res_str` + one per struct.
   out = out + gen_res("i64", "int64_t")
   out = out + gen_res("str", "const char*")
@@ -2213,13 +2342,23 @@ fn compile_to_c(src:str, dir:str) -> str {
   mu maincall := ""
   mu mk := 0
   lp mk < len(funcs) { if funcs[mk].name == "main" && len(funcs[mk].params) == 0 { maincall = "    f_main();\n" } mk += 1 }
-  out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+  if libmode {
+    // A shared library has no `main`. A load-time constructor inits Boehm GC so
+    // the host needs no GC_INIT. Top-level statements are dropped: a top-level
+    // `mu` binding is main-local and unobservable to any exported fn, so nothing
+    // persistent is lost — we just note if the file had any (likely a demo/CLI).
+    if len(mains) > 0 { println("note: " + int_to_str(len(mains)) + " top-level statement(s) ignored in lib mode (only functions are compiled into a library)") }
+    out = out + "__attribute__((constructor)) static void __ail_lib_init(void){ GC_INIT(); }\n"
+  } el {
+    out = out + "int main(int argc, char** argv){\n    GC_INIT();\n    g_argc=argc; g_argv=argv;\n" + mdecls + gen_stmts(&msy, mmains, "    ") + maincall + "    return 0;\n}\n"
+  }
 
   // MySQL is opt-in: fill the slot with the libmysqlclient wrappers (+ header) only
   // when a real myq_ call set @uses.mysql, and add "mysqlclient" to the link marker.
   // The compiler itself never calls myq_, so its self-compile stays mysql-free and
   // builds with NO libmysqlclient. (pat is split so it doesn't match string data.)
   pat := "/*@MY" + "SQL@*/"
+  ppat := "/*@MY" + "PARAMS@*/"        // phase-4 slot for the arr_str-taking prepared-stmt helpers
   mu mlib := libline
   if has(base.evar, "@uses.mysql") {
     mu mp := "#ifndef _WIN32\n#include <mysql/mysql.h>\n"
@@ -2236,11 +2375,103 @@ fn compile_to_c(src:str, dir:str) -> str {
     mp = mp + "static const char* myq_escape(int64_t c, const char* s){ if(c==0||!s) return \"\"; size_t n=strlen(s); char* o=(char*)GC_MALLOC(n*2+1); mysql_real_escape_string((MYSQL*)(intptr_t)c, o, s, (unsigned long)n); return o; }\n"
     mp = mp + "#endif\n"
     out = replace(out, pat, mp)
+    // Prepared-statement helpers (phase 4 — they take arr_str). All params bind as
+    // MYSQL_TYPE_STRING. We deliberately do NOT set MYSQL_BIND.is_null/.error (whose
+    // type flipped my_bool→bool across MySQL/MariaDB versions) — a zeroed bind +
+    // a generous output buffer keeps it portable. Values are bound, never interpolated.
+    mu mpp := "#ifndef _WIN32\n"
+    mpp = mpp + "static int64_t myq_exec_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return -1; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return -1; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return -1; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return -1; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return -1; } long long aff=(long long)mysql_stmt_affected_rows(st); mysql_stmt_close(st); return (int64_t)aff; }\n"
+    mpp = mpp + "static const char* myq_query_one_params(int64_t c, const char* sql, arr_str params){ if(c==0||!sql) return \"\"; MYSQL_STMT* st=mysql_stmt_init((MYSQL*)(intptr_t)c); if(!st) return \"\"; if(mysql_stmt_prepare(st,sql,(unsigned long)strlen(sql))){ mysql_stmt_close(st); return \"\"; } int n=(int)params.len; MYSQL_BIND* b=(MYSQL_BIND*)GC_MALLOC(sizeof(MYSQL_BIND)*(n>0?n:1)); memset(b,0,sizeof(MYSQL_BIND)*(n>0?n:1)); unsigned long* L=(unsigned long*)GC_MALLOC(sizeof(unsigned long)*(n>0?n:1)); for(int i=0;i<n;i++){ const char* v=params.data[i]?params.data[i]:\"\"; L[i]=(unsigned long)strlen(v); b[i].buffer_type=MYSQL_TYPE_STRING; b[i].buffer=(void*)v; b[i].buffer_length=L[i]; b[i].length=&L[i]; } if(n>0 && mysql_stmt_bind_param(st,b)){ mysql_stmt_close(st); return \"\"; } if(mysql_stmt_execute(st)){ mysql_stmt_close(st); return \"\"; } char* buf=(char*)GC_MALLOC(65536); unsigned long olen=0; MYSQL_BIND ob; memset(&ob,0,sizeof(ob)); ob.buffer_type=MYSQL_TYPE_STRING; ob.buffer=buf; ob.buffer_length=65535; ob.length=&olen; if(mysql_stmt_bind_result(st,&ob)){ mysql_stmt_close(st); return \"\"; } const char* outv=\"\"; if(mysql_stmt_fetch(st)==0){ unsigned long m=olen<65535?olen:65535; char* o=(char*)GC_MALLOC(m+1); memcpy(o,buf,m); o[m]=0; outv=o; } mysql_stmt_free_result(st); mysql_stmt_close(st); return outv; }\n"
+    mpp = mpp + "#endif\n"
+    out = replace(out, ppat, mpp)
     mlib = mlib + " mysqlclient"
   } el {
     out = replace(out, pat, "")
+    out = replace(out, ppat, "")
+  }
+  // SQLite is opt-in exactly like mysql: fill the slot only when a real sq_ call
+  // set @uses.sqlite. The compiler never calls sq_, so its self-compile stays
+  // sqlite-free and builds with NO libsqlite3.
+  spat := "/*@SQ" + "LITE@*/"
+  if has(base.evar, "@uses.sqlite") {
+    mu sqp := "#ifndef _WIN32\n#include <sqlite3.h>\n"
+    sqp = sqp + "static int64_t sq_open(const char* path){ sqlite3* db=0; if(sqlite3_open(path?path:\":memory:\",&db)!=SQLITE_OK){ if(db) sqlite3_close(db); return 0; } return (int64_t)(intptr_t)db; }\n"
+    sqp = sqp + "static int64_t sq_close(int64_t c){ if(c!=0) sqlite3_close((sqlite3*)(intptr_t)c); return 0; }\n"
+    sqp = sqp + "static const char* sq_err(int64_t c){ if(c==0) return \"(null)\"; const char* e=sqlite3_errmsg((sqlite3*)(intptr_t)c); if(!e) return \"\"; size_t n=strlen(e); char* o=(char*)GC_MALLOC(n+1); memcpy(o,e,n+1); return o; }\n"
+    sqp = sqp + "static int64_t sq_exec(int64_t c, const char* sql){ if(c==0||!sql) return -1; return (int64_t)sqlite3_exec((sqlite3*)(intptr_t)c,sql,0,0,0); }\n"
+    sqp = sqp + "static int64_t sq_prepare(int64_t c, const char* sql){ if(c==0||!sql) return 0; sqlite3_stmt* st=0; if(sqlite3_prepare_v2((sqlite3*)(intptr_t)c,sql,-1,&st,0)!=SQLITE_OK) return 0; return (int64_t)(intptr_t)st; }\n"
+    sqp = sqp + "static int64_t sq_step(int64_t st){ if(st==0) return -1; int rc=sqlite3_step((sqlite3_stmt*)(intptr_t)st); if(rc==SQLITE_ROW) return 1; if(rc==SQLITE_DONE) return 0; return -1; }\n"
+    sqp = sqp + "static int64_t sq_ncols(int64_t st){ if(st==0) return 0; return (int64_t)sqlite3_column_count((sqlite3_stmt*)(intptr_t)st); }\n"
+    sqp = sqp + "static const char* sq_col(int64_t st, int64_t i){ if(st==0) return \"\"; const unsigned char* v=sqlite3_column_text((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen((const char*)v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,(const char*)v,n+1); return o; }\n"
+    sqp = sqp + "static const char* sq_col_name(int64_t st, int64_t i){ if(st==0) return \"\"; const char* v=sqlite3_column_name((sqlite3_stmt*)(intptr_t)st,(int)i); if(!v) return \"\"; size_t n=strlen(v); char* o=(char*)GC_MALLOC(n+1); memcpy(o,v,n+1); return o; }\n"
+    sqp = sqp + "static int64_t sq_finalize(int64_t st){ if(st!=0) sqlite3_finalize((sqlite3_stmt*)(intptr_t)st); return 0; }\n"
+    sqp = sqp + "static int64_t sq_changes(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_changes((sqlite3*)(intptr_t)c); }\n"
+    sqp = sqp + "static int64_t sq_last_id(int64_t c){ if(c==0) return 0; return (int64_t)sqlite3_last_insert_rowid((sqlite3*)(intptr_t)c); }\n"
+    // Parameter binding (1-based index) for prepared statements — the safe path
+    // that defeats SQL injection: values never touch the SQL text. SQLITE_TRANSIENT
+    // makes sqlite copy the string, so the AiLang str can be GC'd freely.
+    sqp = sqp + "static int64_t sq_bind_text(int64_t st, int64_t i, const char* v){ if(st==0) return -1; return (int64_t)sqlite3_bind_text((sqlite3_stmt*)(intptr_t)st,(int)i,v?v:\"\",-1,SQLITE_TRANSIENT); }\n"
+    sqp = sqp + "static int64_t sq_bind_int(int64_t st, int64_t i, int64_t v){ if(st==0) return -1; return (int64_t)sqlite3_bind_int64((sqlite3_stmt*)(intptr_t)st,(int)i,(sqlite3_int64)v); }\n"
+    sqp = sqp + "static int64_t sq_bind_null(int64_t st, int64_t i){ if(st==0) return -1; return (int64_t)sqlite3_bind_null((sqlite3_stmt*)(intptr_t)st,(int)i); }\n"
+    sqp = sqp + "static int64_t sq_reset(int64_t st){ if(st==0) return -1; sqlite3_clear_bindings((sqlite3_stmt*)(intptr_t)st); return (int64_t)sqlite3_reset((sqlite3_stmt*)(intptr_t)st); }\n"
+    sqp = sqp + "#endif\n"
+    out = replace(out, spat, sqp)
+    mlib = mlib + " sqlite3"
+  } el {
+    out = replace(out, spat, "")
+  }
+  // ── shared-library exports ──────────────────────────────────────────────────
+  // For each root-file top-level `fn` with a C-friendly signature (i64/i32/u32/
+  // bool/f64/str/bytes params & return), emit an unmangled wrapper delegating to
+  // its `f_<name>` body, so a host program calls it by its plain name; collect a
+  // matching header. Aggregate signatures (arrays/maps/structs/…) use AiLang's
+  // internal ABI and are skipped with a note. The wrappers reference `f_<name>`
+  // functions already emitted above, so appending them here is safe.
+  mu libhdr := ""
+  if libmode {
+    mu need_bytes := false
+    // Portable export marker: dllexport on Windows, default visibility elsewhere.
+    mu wrap := "#if defined(_WIN32)\n#define AIL_EXPORT __declspec(dllexport)\n#else\n#define AIL_EXPORT __attribute__((visibility(\"default\")))\n#endif\n"
+    mu protos := ""
+    mu ei := 0
+    lp ei < len(funcs) {
+      f := funcs[ei]
+      if str_in(exports, f.name) && f.name != "main" {
+        if cabi_sig_ok(f) {
+          if f.ret == "bytes" { need_bytes = true }
+          mu plist := ""
+          mu alist := ""
+          mu pi := 0
+          lp pi < len(f.params) {
+            if f.ptypes[pi] == "bytes" { need_bytes = true }
+            if pi > 0 { plist = plist + ", "; alist = alist + ", " }
+            plist = plist + cty(f.ptypes[pi]) + " " + f.params[pi]
+            alist = alist + f.params[pi]
+            pi += 1
+          }
+          if len(f.params) == 0 { plist = "void" }
+          sig := cty_ret(f.ret) + " " + f.name + "(" + plist + ")"
+          mu call := "return f_" + f.name + "(" + alist + ");"
+          if len(f.ret) == 0 { call = "f_" + f.name + "(" + alist + ");" }
+          // AIL_EXPORT (defined at the top of the wrapper block) marks only these
+          // wrappers for export — `__declspec(dllexport)` on Windows, default ELF
+          // visibility elsewhere (built -fvisibility=hidden). Internal `f_*` bodies
+          // + runtime globals stay private, so the DLL/.so exports just the API.
+          wrap = wrap + "AIL_EXPORT " + sig + " { " + call + " }\n"
+          protos = protos + sig + ";\n"
+        } el {
+          println("note: '" + f.name + "' not exported — its signature uses a non-C-ABI type (array/map/struct/etc.)")
+        }
+      }
+      ei += 1
+    }
+    out = out + "\n/* ── exported C-ABI wrappers ── */\n" + wrap
+    libhdr = "#ifndef AILLIB_H\n#define AILLIB_H\n#include <stdint.h>\n"
+    if need_bytes { libhdr = libhdr + "typedef struct { int64_t len; const uint8_t* data; } ailang_bytes;\n" }
+    libhdr = libhdr + "#ifdef __cplusplus\nextern \"C\" {\n#endif\n" + protos + "#ifdef __cplusplus\n}\n#endif\n#endif\n"
   }
   if len(mlib) > 0 { out = "// @links:" + mlib + "\n" + out }
+  if libmode { out = out + "\n//@@AILHDR@@\n" + libhdr }
   out
 }
 
@@ -2495,6 +2726,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
           seen[full] = "1"
           mu body := read_file(full)
           mu bdir := dirname(full)
+          mu rfull := full                     // the path that actually resolves (dedup key)
           if len(body) == 0 {
             // Not found next to the source — fall back to the global library dir
             // ($AILANG_STD, set by the installer) so `im "std/…"` works anywhere,
@@ -2503,7 +2735,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             if len(root) > 0 {
               gfull := root + "/" + imp
               gbody := read_file(gfull)
-              if len(gbody) > 0 { body = gbody; bdir = dirname(gfull) }
+              if len(gbody) > 0 { body = gbody; bdir = dirname(gfull); rfull = gfull }
             }
           }
           if len(body) == 0 {
@@ -2514,7 +2746,7 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             if len(ed) > 0 {
               efull := ed + "/" + imp
               ebody := read_file(efull)
-              if len(ebody) > 0 { body = ebody; bdir = dirname(efull) }
+              if len(ebody) > 0 { body = ebody; bdir = dirname(efull); rfull = efull }
             }
           }
           if len(body) == 0 {
@@ -2525,9 +2757,20 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
             println("error: cannot resolve import \"" + imp + "\" — not found beside the source, in AILANG_STD, or next to ailc")
             exit(1)
           }
-          mu rb := resolve_imports(body, bdir, seen)
-          if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
-          out = out + rb + "\n"
+          // Dedup on the RESOLVED path too: the same file reached from different
+          // importer dirs (e.g. auto_imports injecting "std/sock.ail" at the root
+          // while std/http_client.ail imports it via $AILANG_STD) must splice once.
+          // (full itself is already marked above; only a DIFFERENT resolved path
+          // needs the extra check, else every importer-relative hit would skip.)
+          mu fresh := true
+          if rfull != full {
+            if has(seen, rfull) { fresh = false } el { seen[rfull] = "1" }
+          }
+          if fresh {
+            mu rb := resolve_imports(body, bdir, seen)
+            if len(alias) > 0 { rb = prefix_idents(rb, module_fn_names(body), alias + "_") }   // namespace: rename the module's own fns
+            out = out + rb + "\n"
+          }
         }
       } el {
         out = out + line + "\n"
@@ -2537,5 +2780,164 @@ fn resolve_imports(src:str, dir:str, seen:{str:str}) -> str {
     i += 1
   }
   rewrite_qualified(out, aliases)        // `m.fn` → `m_fn`; no aliases → byte-identical (fixpoint-safe)
+}
+
+// Compile `input` to a native binary at `outbin` (clang appends ".exe" on
+// Windows). When link==false this is `check` mode — run lex/parse/type-check
+// only (compile_to_c reports + exit(1)s on any error), write no C, invoke no
+// clang. Returns 0 on success, 1 on a read or clang failure. The single shared
+// build path behind the build / run / check / test CLI modes in main.ail; the
+// clang command strings are byte-identical to the former inline ones.
+fn build_one(input:str, outbin:str, keepc:bool, link:bool, asan:bool) -> i64 {
+  mu src := read_file(input)
+  if len(src) == 0 { println("error: cannot read input file (missing or empty): " + input); rt 1 }
+  src = auto_imports(src) + src
+  if has_import(src) {
+    mu seen:{str:str} := {}
+    src = resolve_imports(src, dirname(input), seen)
+  }
+  mu noexp:[str] := []
+  cprog := compile_to_c(src, dirname(input), false, noexp)
+  if link == false { rt 0 }
+  cpath := outbin + ".c"
+  write_file(cpath, cprog)
+  win := get_env("OS") == "Windows_NT"
+  shims0 := csrc_list(cprog)
+  mu shims:[str] := []
+  mu ri := 0
+  lp ri < len(shims0) { shims = push(shims, dirname(input) + shims0[ri]); ri += 1 }
+  mu rc := 0
+  if win {
+    if len(shims) == 0 {
+      cmd := "clang -O2 -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -static -lgc -lm -o \"" + outbin + ".exe\""
+      rc = system(cmd)
+    } el {
+      println("error: C++ interop (csrc) is not supported on Windows in this release; build on macOS/Linux")
+      rt 1
+    }
+  } el {
+    extra := unix_link_extra(cprog)
+    mu asanflag := ""
+    if asan { asanflag = " -fsanitize=address -g" }
+    if len(shims) == 0 {
+      cmd := "clang -O2" + asanflag + " " + cpath + extra + " -o " + outbin
+      rc = system(cmd)
+    } el {
+      mu shimline := ""
+      mu si := 0
+      lp si < len(shims) { shimline = shimline + " " + shims[si]; si += 1 }
+      cmd := "clang++ -O2" + asanflag + " -x c " + cpath + " -x c++" + shimline + extra + " -o " + outbin
+      rc = system(cmd)
+    }
+  }
+  if rc != 0 { println("clang failed"); rt 1 }
+  if keepc == false {
+    if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
+    mu ci2 := 0
+    lp ci2 < len(shims) {
+      if has_sub(shims[ci2], "__ailinline_") { system("rm -f " + shims[ci2]) }
+      ci2 += 1
+    }
+  }
+  0
+}
+
+// The POSIX clang tail: bdw-gc plus usage-gated openssl / libpq / pthread /
+// mysqlclient / sqlite3 discovery, then the `// @links:` flags and -lm. Shared
+// by build_one (executables) and build_lib (shared libraries) so both link the
+// same optional libs. (Windows uses its own -static tail; this is #ifndef there.)
+fn unix_link_extra(cprog:str) -> str {
+  mu extra := " $(pkg-config --cflags --libs bdw-gc 2>/dev/null || echo -lgc)"
+  if has_sub(cprog, "SSL_") || has_sub(cprog, "SHA1(") || has_sub(cprog, "HMAC(") { extra = extra + " $(pkg-config --cflags --libs openssl 2>/dev/null || echo -I$(brew --prefix openssl@3)/include -L$(brew --prefix openssl@3)/lib -lssl -lcrypto)" }
+  if has_sub(cprog, "PQconnectdb") || has_sub(cprog, "PQexec") { extra = extra + " $(pkg-config --cflags --libs libpq 2>/dev/null || echo -I$(brew --prefix libpq)/include -L$(brew --prefix libpq)/lib -lpq)" }
+  if has_sub(cprog, "pthread_") { extra = extra + " -lpthread" }
+  mu lf := link_flags(cprog)
+  if has_sub(lf, "lmysqlclient") { extra = extra + " $(pkg-config --cflags --libs mysqlclient 2>/dev/null || pkg-config --cflags --libs libmariadb 2>/dev/null || echo -I$(brew --prefix mysql-client)/include -L$(brew --prefix mysql-client)/lib)" }
+  if has_sub(lf, "lsqlite3") { extra = extra + " $(pkg-config --cflags --libs sqlite3 2>/dev/null || echo)" }
+  extra = extra + lf + " -lm"
+  extra
+}
+
+// Is `s` in `xs`? (small linear membership over the export-name list)
+fn str_in(xs:[str], s:str) -> bool {
+  mu i := 0
+  lp i < len(xs) { if xs[i] == s rt true   i += 1 }
+  false
+}
+
+// A type usable across a plain C ABI from a host program: the scalars + str +
+// bytes, each of which `cty` lowers to a self-describing C type (int64_t/double/
+// const char*/ailang_bytes). Aggregates (arrays/maps/structs/tuples/results/
+// closures) use AiLang's internal runtime layout and are NOT exportable.
+fn is_cabi_type(t:str) -> bool {
+  t == "i64" || t == "i32" || t == "u32" || t == "bool" || t == "f64" || t == "str" || t == "bytes"
+}
+// True when every param type and the return type (empty == void) are C-ABI-safe.
+fn cabi_sig_ok(f:Func) -> bool {
+  if len(f.ret) > 0 && is_cabi_type(f.ret) == false { rt false }
+  mu i := 0
+  lp i < len(f.params) {
+    if is_cabi_type(f.ptypes[i]) == false { rt false }
+    i += 1
+  }
+  true
+}
+
+// The header path for a library output: `libfoo.dylib`/`.so`/`.dll` → `libfoo.h`
+// (else just append `.h`).
+fn lib_header_path(outbin:str) -> str {
+  n := len(outbin)
+  if n >= 6 && substring(outbin, n - 6, n) == ".dylib" { rt substring(outbin, 0, n - 6) + ".h" }
+  if n >= 3 && substring(outbin, n - 3, n) == ".so" { rt substring(outbin, 0, n - 3) + ".h" }
+  if n >= 4 && substring(outbin, n - 4, n) == ".dll" { rt substring(outbin, 0, n - 4) + ".h" }
+  outbin + ".h"
+}
+
+// Compile `input` to a shared library at `outbin` (.dylib on macOS, .so on
+// Linux; POSIX-only — callers guard Windows out) plus a C header next to it. The
+// exported surface is the root file's own top-level `fn`s with C-ABI signatures.
+// Returns 0 on success, 1 on a read or clang failure.
+fn build_lib(input:str, outbin:str, keepc:bool) -> i64 {
+  mu rawsrc := read_file(input)
+  if len(rawsrc) == 0 { println("error: cannot read input file (missing or empty): " + input); rt 1 }
+  exports := module_fn_names(rawsrc)              // the root file's own top-level fn names
+  mu src := auto_imports(rawsrc) + rawsrc
+  if has_import(src) {
+    mu seen:{str:str} := {}
+    src = resolve_imports(src, dirname(input), seen)
+  }
+  full := compile_to_c(src, dirname(input), true, exports)
+  // The header content is appended after a sentinel line; split it back out.
+  sen := "\n//@@AILHDR@@\n"
+  mu cprog := full
+  mu hdr := ""
+  sp := index_of(full, sen)
+  if sp >= 0 {
+    cprog = substring(full, 0, sp)
+    hdr = substring(full, sp + len(sen), len(full))
+  }
+  cpath := outbin + ".c"
+  hpath := lib_header_path(outbin)
+  write_file(cpath, cprog)
+  write_file(hpath, hdr)
+  win := get_env("OS") == "Windows_NT"
+  mu rc := 0
+  if win {
+    // Windows DLL: only the __declspec(dllexport) wrappers are exported (adding any
+    // dllexport disables MinGW auto-export). Boehm GC is linked statically into the
+    // DLL (-DGC_NOT_DLL, matching the -static exe path); GC_INIT runs in the load
+    // constructor. --out-implib emits a `<dll>.a` import library for the linker.
+    cmd := "clang -O2 -shared -DGC_NOT_DLL \"" + cpath + "\"" + link_flags(cprog) + " -lgc -lm -o \"" + outbin + "\" -Wl,--out-implib,\"" + outbin + ".a\""
+    rc = system(cmd)
+  } el {
+    extra := unix_link_extra(cprog)
+    cmd := "clang -O2 -shared -fPIC -fvisibility=hidden " + cpath + extra + " -o " + outbin
+    rc = system(cmd)
+  }
+  if rc != 0 { println("clang failed"); rt 1 }
+  if keepc == false {
+    if win { system("del /f /q \"" + cpath + "\"") } el { system("rm -f " + cpath) }
+  }
+  0
 }
 

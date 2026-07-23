@@ -1,0 +1,11 @@
+// std/encoding.ail — base64 / base64url / hex round-trips.
+im "std/encoding.ail"
+println(b64_encode_str("hello"))            // aGVsbG8=
+println(b64_decode_str("aGVsbG8="))         // hello
+println(b64url_encode_str("hello"))         // aGVsbG8  (no padding)
+println(hex_encode_str("hi"))               // 6869
+println(hex_decode_str("6869"))             // hi
+assert(b64_decode_str(b64_encode_str("AiLang!")) == "AiLang!", "b64 roundtrip")
+assert(b64url_decode_str(b64url_encode_str("xyz123")) == "xyz123", "b64url roundtrip")
+assert(hex_decode_str(hex_encode_str("test")) == "test", "hex roundtrip")
+println("encoding ok")

@@ -1,0 +1,4 @@
+// EXPECT: requires a str or i64 key
+// Array values are only emitted for str/i64 keys (no f64-keyed grouping runtime).
+m := {1.5: [1, 2]}
+println(len(m))

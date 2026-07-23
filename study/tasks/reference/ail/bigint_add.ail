@@ -1,0 +1,23 @@
+// AiLang reference solution for the bigint_add study task.
+// AiLang integers are i64, so the sum is computed digit-by-digit on the
+// decimal strings — the kind of work a terse syntax does not shorten.
+s := read_stdin()
+lines := split(s, "\n")
+a := lines[0]
+b := lines[1]
+mu i := len(a) - 1
+mu j := len(b) - 1
+mu carry := 0
+mu out := ""
+lp i >= 0 || j >= 0 || carry > 0 {
+  mu da := 0
+  if i >= 0 { da = ord(substring(a, i, i + 1)) - 48 }
+  mu db := 0
+  if j >= 0 { db = ord(substring(b, j, j + 1)) - 48 }
+  sum := da + db + carry
+  out = chr((sum % 10) + 48) + out
+  carry = sum / 10
+  i -= 1
+  j -= 1
+}
+println(out)

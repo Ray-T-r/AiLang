@@ -1,0 +1,44 @@
+// threads.ail — OS threads, mutex, and bounded channels.
+// Covers both the raw builtins and the std/thread.ail wrappers.
+// ailc threads.ail && ./threads
+im "std/thread.ail"
+
+// ── 1. Parallel fan-out with a mutex-protected shared counter ───────────────
+// Arrays are reference-typed: a 1-element array is the idiomatic shared mutable
+// cell. All closures that capture `cnt` see the same backing storage.
+cnt := [0]
+m := mutex()              // std/thread.ail wrapper for mutex_new()
+
+mu hs:[i64] := []
+lp k in 0..4 {
+  a := k * 250; b := a + 250
+  h := spawn(fn() {       // spawn = thread_spawn
+    mu s := 0
+    lp i in a..b { s = s + i }
+    lock(m); cnt[0] = cnt[0] + s; unlock(m)
+    s
+  })
+  hs = push(hs, h)
+}
+
+total := wait_all(hs)     // joins all handles, sums their return values
+println(cnt[0])           // 499500  (sum of 0..1000 in the shared counter)
+println(total)            // 499500  (same — sum of per-thread partial sums)
+
+// ── 2. Producer/consumer via a bounded blocking channel ────────────────────
+ch := channel(8)          // capacity-8 ring buffer
+
+producer := spawn(fn() {
+  mu i := 1
+  lp i <= 100 {
+    send(ch, i)           // blocks when the buffer is full (backpressure)
+    i = i + 1
+  }
+  close(ch)               // signals "no more items"
+  0
+})
+
+mu sum := 0
+lp k in 0..100 { sum = sum + recv(ch) }   // blocks while empty, 0 after close+drain
+wait(producer)
+println(sum)              // 5050

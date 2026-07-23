@@ -81,32 +81,52 @@ fn ws_send_text(fd:i64, payload:str) -> i64 {
   sock_send_str(fd, frame)
 }
 
+// ws_read_exact(fd, n) — read exactly n bytes, looping over sock_recv
+// (TCP may deliver fewer bytes than asked). Returns the byte values as
+// [i64] — there is no bytes concat, and a str accumulator would truncate
+// at a NUL (mask / masked-payload bytes can be 0 even for text frames).
+// A short array (len < n) means the peer closed early.
+fn ws_read_exact(fd:i64, n:i64) -> [i64] {
+  mu out:[i64] := []
+  lp len(out) < n {
+    chunk := sock_recv(fd, n - len(out))
+    clen := len(chunk)
+    if clen == 0 br
+    mu j := 0
+    lp j < clen {
+      out = push(out, bytes_at(chunk, j))
+      j = j + 1
+    }
+  }
+  out
+}
+
 // ws_recv_text(fd) — read one masked text frame from the client.
 // Returns the payload as str. "" on close/error.
 // LIMITATION: assumes short-frame (len < 126).
 fn ws_recv_text(fd:i64) -> str {
-  hdr := sock_recv(fd, 2)
+  hdr := ws_read_exact(fd, 2)
   if len(hdr) < 2 rt ""
   // byte0: FIN|RSV|opcode — opcode 0x8 = close, return ""
-  op := bytes_at(hdr, 0) & 15
+  op := hdr[0] & 15
   if op == 8 rt ""
   // byte1: MASK | LEN
-  blen := bytes_at(hdr, 1)
+  blen := hdr[1]
   masked := (blen & 128) != 0
   plen := blen & 127
   if plen >= 126 rt ""
   if !masked rt ""    // client MUST mask per RFC
-  // Read 4-byte mask + payload.
-  mk := sock_recv(fd, 4)
+  // Read 4-byte mask + payload, each exactly.
+  mk := ws_read_exact(fd, 4)
   if len(mk) < 4 rt ""
-  payload_b := sock_recv(fd, plen)
-  if len(payload_b) < plen rt ""
+  payload := ws_read_exact(fd, plen)
+  if len(payload) < plen rt ""
   // Unmask: each payload byte XOR mask[i % 4].
   mu out := ""
   mu i := 0
   lp k in 0..1000 {
     if i >= plen br
-    byte_val := bytes_at(payload_b, i) ^ bytes_at(mk, i % 4)
+    byte_val := payload[i] ^ mk[i % 4]
     out = out + chr(byte_val)
     i = i + 1
   }

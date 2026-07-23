@@ -1,0 +1,78 @@
+{
+  "tag": "mock",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "mock": true,
+  "cache": false,
+  "trials": 3,
+  "rounds": 5,
+  "n_records": 18,
+  "rows": [
+    {
+      "task": "bigint_add",
+      "lang": "ailang",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 9260,
+      "median_effective_total_tokens": 9260,
+      "median_output_tokens": 155,
+      "median_rounds": 1
+    },
+    {
+      "task": "bigint_add",
+      "lang": "python",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 67,
+      "median_effective_total_tokens": 67,
+      "median_output_tokens": 17,
+      "median_rounds": 1
+    },
+    {
+      "task": "rle_encode",
+      "lang": "ailang",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 9196,
+      "median_effective_total_tokens": 9196,
+      "median_output_tokens": 91,
+      "median_rounds": 1
+    },
+    {
+      "task": "rle_encode",
+      "lang": "python",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 105,
+      "median_effective_total_tokens": 105,
+      "median_output_tokens": 55,
+      "median_rounds": 1
+    },
+    {
+      "task": "two_sum",
+      "lang": "ailang",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 9208,
+      "median_effective_total_tokens": 9208,
+      "median_output_tokens": 103,
+      "median_rounds": 1
+    },
+    {
+      "task": "two_sum",
+      "lang": "python",
+      "trials": 3,
+      "correct_rate": 1.0,
+      "first_check_clean_rate": 1.0,
+      "median_total_tokens": 95,
+      "median_effective_total_tokens": 95,
+      "median_output_tokens": 45,
+      "median_rounds": 1
+    }
+  ]
+}

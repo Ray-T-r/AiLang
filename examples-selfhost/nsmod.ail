@@ -1,4 +1,0 @@
-// A helper module imported (aliased) by namespacing.ail. Has no expected/ fixture,
-// so verify.sh skips compiling it standalone; it's pulled in via `im … as geo`.
-fn rect(w:i64, h:i64) -> i64 { w * h }
-fn tri(b:i64, h:i64) -> i64 { (b * h) / 2 }

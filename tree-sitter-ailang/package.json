@@ -1,0 +1,18 @@
+{
+  "name": "tree-sitter-ailang",
+  "version": "0.1.0",
+  "description": "AiLang grammar for tree-sitter — syntax highlighting for editors, docs, and the playground.",
+  "main": "bindings/node",
+  "keywords": ["tree-sitter", "parser", "ailang"],
+  "license": "MIT",
+  "dependencies": { "node-addon-api": "^7.0.0", "node-gyp-build": "^4.6.0" },
+  "devDependencies": { "tree-sitter-cli": "^0.22.0" },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    { "scope": "source.ailang", "file-types": ["ail"], "highlights": ["queries/highlights.scm"] }
+  ]
+}

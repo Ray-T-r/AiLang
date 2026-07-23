@@ -1,0 +1,49 @@
+// tools/fetch_module.ail — vendor a shared AiLang module from a URL into ./vendor/,
+// so `im "vendor/<name>.ail"` resolves locally (the minimal "package" story: pin a
+// raw URL to a commit SHA for reproducibility — the SHA is the content address).
+//
+//   ailc run tools/fetch_module.ail -- <url> [local-name.ail]
+//
+// e.g.  ailc run tools/fetch_module.ail -- \
+//         https://raw.githubusercontent.com/user/repo/<sha>/mymod.ail
+//
+// Pure AiLang: http_get + fs + write_file. Importing http_client links OpenSSL.
+im "std/http_client.ail"
+im "std/fs.ail"
+
+// Last path segment of a URL (query stripped); falls back to module.ail.
+fn url_basename(u:str) -> str {
+  mu s := u
+  q := index_of(s, "?")
+  if q >= 0 { s = substring(s, 0, q) }
+  mu last := 0 - 1
+  mu i := 0
+  lp i < len(s) { if s[i] == 47 { last = i } i = i + 1 }   // '/'
+  if last >= 0 { s = substring(s, last + 1, len(s)) }
+  if len(s) == 0 { s = "module.ail" }
+  s
+}
+
+av := args()
+if len(av) < 1 {
+  println("usage: ailc run tools/fetch_module.ail -- <url> [local-name.ail]")
+  exit(1)
+}
+url := av[0]
+mu name := ""
+if len(av) >= 2 { name = av[1] } el { name = url_basename(url) }
+
+resp := http_get(url)
+if resp.status != 200 {
+  println("fetch failed: status ${resp.status} for ${url}")
+  exit(1)
+}
+fs_mkdir("vendor")
+path := "vendor/" + name
+if write_file(path, resp.body) {
+  println("vendored ${url}")
+  println("  → ${path}    (import it with:  im \"${path}\")")
+} el {
+  println("could not write ${path}")
+  exit(1)
+}
