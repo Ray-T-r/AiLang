@@ -103,12 +103,12 @@ and reports it whichever way it falls.
 | | |
 |---|---|
 | compiler source | ~8,000 lines across `main.ail` + 6 `src/` modules |
-| strict fixpoint | `stage2.c == stage3.c` — **11,808 lines, byte-identical** |
-| sample programs | **65**, each output-verified against a frozen fixture — including loopback runtime tests for sockets/HTTP/WebSocket/web (in-process server thread, deterministic output) |
+| strict fixpoint | `stage2.c == stage3.c` — **11,832 lines, byte-identical** |
+| sample programs | **73**, each output-verified against a frozen fixture — including loopback runtime tests for sockets/HTTP/WebSocket/web (in-process server thread, deterministic output) |
 | standard library | 25 modules — networked/db modules exercised by loopback samples + compile-and-link checks (`selfhost/tests/compileonly/`) |
 | CLI | `ailc run` (compile + execute) · `ailc check` (type-check only) · `ailc test` (run `assert`-based `*_test.ail`, PASS/FAIL summary) · `ailc lib` (compile to a `.dylib`/`.so` shared library + C header) · `--json` machine-readable diagnostics with stable `AIL####` codes |
 | concurrency | OS threads + mutex + bounded channels (pthread, POSIX); `spawn`/`wait`/`channel` via `im "std/thread.ail"` |
-| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **43 negative tests**, all caught |
+| type checking | conservative — confident mismatches at the `.ail` `line:col`: types & `!T` results, `mt` exhaustiveness (guard-aware)/variants/bindings/nesting, call/callback/generic arity, and `<T: Trait>` bound satisfaction. Reports **every** error in one run (not just the first) and suggests the nearest name on a misspelled variant/field/method (*"did you mean …?"*). Exercised by **44 negative tests**, all caught |
 | Rust in the build | **none** |
 
 ## Layout
