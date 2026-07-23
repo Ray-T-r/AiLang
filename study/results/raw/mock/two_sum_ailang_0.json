@@ -1,0 +1,20 @@
+{
+  "task": "two_sum",
+  "category": "algo",
+  "lang": "ailang",
+  "trial": 0,
+  "model": "claude-sonnet-4-6",
+  "rounds_used": 1,
+  "first_check_clean": true,
+  "samples_passed": true,
+  "hidden_passed": 3,
+  "hidden_total": 3,
+  "correct": true,
+  "input_tokens": 9105,
+  "output_tokens": 103,
+  "cache_read_input_tokens": 0,
+  "cache_creation_input_tokens": 0,
+  "total_tokens": 9208,
+  "effective_total_tokens": 9208,
+  "wall_ms": 618
+}

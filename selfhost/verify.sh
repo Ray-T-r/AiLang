@@ -136,6 +136,27 @@ printf 'assert(1==2, "boom")\n'                  > "$vt_fail"
 tsum="$("$AILC" test "$vt_pass" "$vt_fail" 2>/dev/null || true)"   # nonzero exit (1 test fails) is expected; capture, then assert
 printf '%s' "$tsum" | grep -q "1 passed, 1 failed" || { echo "    FAIL: 'test' summary wrong"; cli_ok=0; }
 rm -f "$vt_pass" "$vt_fail"
+# `lib` = compile to a shared library (.dylib/.so) + a C header, exporting the
+# root file's C-ABI `fn`s under their plain names. A host C program #includes the
+# header, links the library, and calls an exported fn — GC auto-inits via the
+# library's load-time constructor (the host calls no GC_INIT). POSIX-only.
+if true; then
+  vl_src="/tmp/vl_$$.ail"; vl_lib="/tmp/vl_$$.dylib"; [ "$(uname)" = "Darwin" ] || vl_lib="/tmp/vl_$$.so"
+  vl_h="/tmp/vl_$$.h"; vl_hostc="/tmp/vl_host_$$.c"; vl_host="/tmp/vl_host_$$"
+  printf 'fn vl_triple(n:i64) -> i64 { n * 3 }\nfn vl_hi(s:str) -> str { "hi " + s }\n' > "$vl_src"
+  if guard 60 "$AILC" lib "$vl_src" "$vl_lib" >/dev/null 2>&1 && [ -f "$vl_lib" ] && [ -f "$vl_h" ]; then
+    printf '#include <stdio.h>\n#include "%s"\nint main(void){ printf("%%lld %%s\\n",(long long)vl_triple(14), vl_hi("x")); return 0; }\n' "$vl_h" > "$vl_hostc"
+    if guard 60 clang -O2 "$vl_hostc" "$vl_lib" -o "$vl_host" >/dev/null 2>&1; then
+      vl_out="$(guard 10 env DYLD_LIBRARY_PATH=/tmp LD_LIBRARY_PATH=/tmp "$vl_host" 2>&1 || true)"
+      [ "$vl_out" = "42 hi x" ] || { echo "    FAIL: lib host output '$vl_out' != '42 hi x'"; cli_ok=0; }
+    else
+      echo "    FAIL: host program did not link the ailc-built library"; cli_ok=0
+    fi
+  else
+    echo "    FAIL: 'lib' did not produce a shared library + header"; cli_ok=0
+  fi
+  rm -f "$vl_src" "$vl_lib" "$vl_h" "$vl_hostc" "$vl_host"
+fi
 [ "$cli_ok" -eq 1 ] && echo "    ok   CLI guards" || fail=1
 
 rm -f selfhost/ailc

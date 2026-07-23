@@ -1,0 +1,494 @@
+{
+  "version": "1.0",
+  "io_contract": "Program reads ALL of stdin and writes the answer to stdout. Grading strips trailing newlines from both sides before comparing.",
+  "oracle": "Expected outputs are defined by the Python reference in tasks/reference/py/<id>.py.",
+  "n_tasks": 15,
+  "pilot": [
+    "rle_encode",
+    "two_sum",
+    "bigint_add"
+  ],
+  "tasks": [
+    {
+      "id": "rle_encode",
+      "category": "string",
+      "title": "Run-length encoding",
+      "spec": "Read all of standard input. The input is a single line of lowercase ASCII letters (it may be empty). Write the run-length encoding: for each maximal run of identical characters, output the character followed by the decimal length of that run, all concatenated, on one line. Example: input 'aaabbc' -> output 'a3b2c1'. Empty input -> empty line.",
+      "pilot": true,
+      "samples": [
+        {
+          "in": "aaabbc",
+          "out": "a3b2c1"
+        },
+        {
+          "in": "wwwwww",
+          "out": "w6"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "",
+          "out": ""
+        },
+        {
+          "in": "abcd",
+          "out": "a1b1c1d1"
+        },
+        {
+          "in": "zzzzzzzzzza",
+          "out": "z10a1"
+        },
+        {
+          "in": "a",
+          "out": "a1"
+        }
+      ]
+    },
+    {
+      "id": "caesar",
+      "category": "string",
+      "title": "Caesar shift",
+      "spec": "The first line of input is an integer K (0..25). The second line is a string of lowercase letters. Output that string with every letter shifted forward by K positions in the alphabet, wrapping z->a. Example: K=1, 'abc' -> 'bcd'.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "1\nabc",
+          "out": "bcd"
+        },
+        {
+          "in": "25\nxyz",
+          "out": "wxy"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "0\nhello",
+          "out": "hello"
+        },
+        {
+          "in": "13\nthequickbrownfox",
+          "out": "gurdhvpxoebjasbk"
+        },
+        {
+          "in": "3\nzzz",
+          "out": "ccc"
+        }
+      ]
+    },
+    {
+      "id": "word_freq",
+      "category": "string",
+      "title": "Most frequent word",
+      "spec": "The input is one or more lines of words separated by whitespace. Count word frequencies (case-sensitive). Output the single most frequent word; if several words tie for the maximum frequency, output the lexicographically smallest of them. One line of output.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "a b a c b a",
+          "out": "a"
+        },
+        {
+          "in": "the the cat the dog cat",
+          "out": "the"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "x y z",
+          "out": "x"
+        },
+        {
+          "in": "apple apple banana banana",
+          "out": "apple"
+        },
+        {
+          "in": "one",
+          "out": "one"
+        }
+      ]
+    },
+    {
+      "id": "balanced",
+      "category": "string",
+      "title": "Balanced brackets",
+      "spec": "The input is a single line containing only the characters ()[]{}. Output YES if the brackets are balanced and correctly nested, otherwise NO. An empty line is balanced (YES).",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "()[]{}",
+          "out": "YES"
+        },
+        {
+          "in": "([{}])",
+          "out": "YES"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "(]",
+          "out": "NO"
+        },
+        {
+          "in": "(((",
+          "out": "NO"
+        },
+        {
+          "in": "",
+          "out": "YES"
+        },
+        {
+          "in": "{[()()]}",
+          "out": "YES"
+        }
+      ]
+    },
+    {
+      "id": "roman_to_int",
+      "category": "parse",
+      "title": "Roman numeral to integer",
+      "spec": "The input is a single line with a valid Roman numeral (uppercase, value 1..3999). Output its integer value.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "III",
+          "out": "3"
+        },
+        {
+          "in": "MCMXCIV",
+          "out": "1994"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "IV",
+          "out": "4"
+        },
+        {
+          "in": "XLII",
+          "out": "42"
+        },
+        {
+          "in": "MMXXIV",
+          "out": "2024"
+        },
+        {
+          "in": "DCCCLXXXVIII",
+          "out": "888"
+        }
+      ]
+    },
+    {
+      "id": "expr_eval",
+      "category": "parse",
+      "title": "Arithmetic expression evaluator",
+      "spec": "The input is a single line: an arithmetic expression over non-negative integers with binary operators + - * /, parentheses ( ), and optional spaces. Use standard precedence (* and / bind tighter than + and -) and left-to-right association within equal precedence. Division is integer division truncating toward zero; assume no division by zero. Output the integer result.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "2+3*4",
+          "out": "14"
+        },
+        {
+          "in": "(1+2)*3",
+          "out": "9"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "10-2*3",
+          "out": "4"
+        },
+        {
+          "in": "100/7",
+          "out": "14"
+        },
+        {
+          "in": "(2+3)*(4-1)",
+          "out": "15"
+        },
+        {
+          "in": "7-3-2",
+          "out": "2"
+        }
+      ]
+    },
+    {
+      "id": "two_sum",
+      "category": "algo",
+      "title": "Two sum (indices)",
+      "spec": "The first line is an integer target. The second line is space-separated integers (length >= 2). Exactly one pair of distinct indices sums to the target. Output the two 0-based indices, smaller first, space-separated.",
+      "pilot": true,
+      "samples": [
+        {
+          "in": "9\n2 7 11 15",
+          "out": "0 1"
+        },
+        {
+          "in": "6\n3 2 4",
+          "out": "1 2"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "8\n1 2 3 4 5",
+          "out": "2 4"
+        },
+        {
+          "in": "-1\n-3 4 1 2",
+          "out": "0 3"
+        },
+        {
+          "in": "0\n0 5 0",
+          "out": "0 2"
+        }
+      ]
+    },
+    {
+      "id": "merge_intervals",
+      "category": "algo",
+      "title": "Merge intervals",
+      "spec": "The first line is an integer N. Each of the next N lines has two integers 'a b' with a<=b. Merge intervals that overlap or touch (touching means the next start <= current end). Output the merged intervals sorted by start, one per line as 'a b'.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "3\n1 3\n2 6\n8 10",
+          "out": "1 6\n8 10"
+        },
+        {
+          "in": "2\n1 4\n5 6",
+          "out": "1 4\n5 6"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "1\n5 7",
+          "out": "5 7"
+        },
+        {
+          "in": "3\n1 4\n4 5\n6 8",
+          "out": "1 5\n6 8"
+        },
+        {
+          "in": "4\n1 10\n2 3\n4 5\n11 12",
+          "out": "1 10\n11 12"
+        }
+      ]
+    },
+    {
+      "id": "group_anagrams",
+      "category": "algo",
+      "title": "Group anagrams",
+      "spec": "The input is words separated by whitespace. Group words that are anagrams of one another. Within each group sort the words lexicographically; sort the groups by their first word lexicographically. Output one group per line, words space-separated.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "eat tea tan ate nat bat",
+          "out": "ate eat tea\nbat\nnat tan"
+        },
+        {
+          "in": "abc bca cab",
+          "out": "abc bca cab"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "a",
+          "out": "a"
+        },
+        {
+          "in": "listen silent enlist",
+          "out": "enlist listen silent"
+        },
+        {
+          "in": "x y z",
+          "out": "x\ny\nz"
+        }
+      ]
+    },
+    {
+      "id": "search_insert",
+      "category": "algo",
+      "title": "Binary search insert position",
+      "spec": "The first line is space-separated, non-decreasing integers (may be an empty line). The second line is an integer target. Output the leftmost 0-based index at which target could be inserted to keep the array sorted (equivalently, the count of elements strictly less than target).",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "1 3 5 6\n5",
+          "out": "2"
+        },
+        {
+          "in": "1 3 5 6\n2",
+          "out": "1"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "1 3 5 6\n7",
+          "out": "4"
+        },
+        {
+          "in": "1 3 5 6\n0",
+          "out": "0"
+        },
+        {
+          "in": "\n4",
+          "out": "0"
+        },
+        {
+          "in": "2 2 2\n2",
+          "out": "0"
+        }
+      ]
+    },
+    {
+      "id": "bigint_add",
+      "category": "numeric",
+      "title": "Big integer addition",
+      "spec": "Two lines, each a non-negative integer that may be very large (hundreds of digits, no leading zeros except the value 0 itself). Output their sum as a decimal integer with no leading zeros. NOTE: the values can exceed 64-bit range.",
+      "pilot": true,
+      "samples": [
+        {
+          "in": "2\n3",
+          "out": "5"
+        },
+        {
+          "in": "99\n1",
+          "out": "100"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "12345678901234567890\n98765432109876543210",
+          "out": "111111111011111111100"
+        },
+        {
+          "in": "0\n0",
+          "out": "0"
+        },
+        {
+          "in": "999999999999999999999999\n1",
+          "out": "1000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "base_convert",
+      "category": "numeric",
+      "title": "Base conversion",
+      "spec": "Three lines: (1) a number written in base B1 using digits 0-9 and uppercase A-Z, (2) the source base B1 (2..36), (3) the target base B2 (2..36). Output the same value written in base B2 using digits 0-9 and uppercase A-Z, with no leading zeros (the value 0 outputs '0').",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "FF\n16\n2",
+          "out": "11111111"
+        },
+        {
+          "in": "10\n2\n10",
+          "out": "2"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "0\n10\n2",
+          "out": "0"
+        },
+        {
+          "in": "Z\n36\n10",
+          "out": "35"
+        },
+        {
+          "in": "255\n10\n16",
+          "out": "FF"
+        }
+      ]
+    },
+    {
+      "id": "prime_count",
+      "category": "numeric",
+      "title": "Count primes <= N",
+      "spec": "The input is a single integer N (0..1000000). Output how many prime numbers p satisfy 2 <= p <= N.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "10",
+          "out": "4"
+        },
+        {
+          "in": "2",
+          "out": "1"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "1",
+          "out": "0"
+        },
+        {
+          "in": "100",
+          "out": "25"
+        },
+        {
+          "in": "0",
+          "out": "0"
+        },
+        {
+          "in": "30",
+          "out": "10"
+        }
+      ]
+    },
+    {
+      "id": "csv_col_sum",
+      "category": "io",
+      "title": "Sum a CSV column",
+      "spec": "The first line is an integer C (a 0-based column index). The remaining lines are CSV rows (simple comma-separated, no quoting). Column C of every non-empty row holds an integer. Output the sum of column C over all non-empty rows.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "1\na,10,x\nb,20,y",
+          "out": "30"
+        },
+        {
+          "in": "0\n5\n7\n8",
+          "out": "20"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "2\np,q,3\nr,s,4",
+          "out": "7"
+        },
+        {
+          "in": "1\nonly,42",
+          "out": "42"
+        }
+      ]
+    },
+    {
+      "id": "matrix_transpose",
+      "category": "io",
+      "title": "Transpose a matrix",
+      "spec": "The first line is two integers 'R C' (rows, columns). The next R lines each contain C space-separated integers. Output the transpose: C lines of R space-separated integers.",
+      "pilot": false,
+      "samples": [
+        {
+          "in": "2 3\n1 2 3\n4 5 6",
+          "out": "1 4\n2 5\n3 6"
+        },
+        {
+          "in": "1 1\n9",
+          "out": "9"
+        }
+      ],
+      "hidden": [
+        {
+          "in": "3 2\n1 2\n3 4\n5 6",
+          "out": "1 3 5\n2 4 6"
+        },
+        {
+          "in": "2 2\n1 0\n0 1",
+          "out": "1 0\n0 1"
+        }
+      ]
+    }
+  ]
+}

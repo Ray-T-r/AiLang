@@ -1,0 +1,19 @@
+// AiLang reference solution for the two_sum study task.
+s := read_stdin()
+lines := split(s, "\n")
+t := str_to_int(lines[0])
+parts := split(lines[1], " ")
+n := len(parts)
+mu i := 0
+mu done := 0
+lp i < n && done == 0 {
+  mu k := 0
+  lp k < i && done == 0 {
+    if str_to_int(parts[k]) + str_to_int(parts[i]) == t {
+      println(int_to_str(k) + " " + int_to_str(i))
+      done = 1
+    }
+    k += 1
+  }
+  i += 1
+}

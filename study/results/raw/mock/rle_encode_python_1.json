@@ -1,0 +1,20 @@
+{
+  "task": "rle_encode",
+  "category": "string",
+  "lang": "python",
+  "trial": 1,
+  "model": "claude-sonnet-4-6",
+  "rounds_used": 1,
+  "first_check_clean": true,
+  "samples_passed": true,
+  "hidden_passed": 4,
+  "hidden_total": 4,
+  "correct": true,
+  "input_tokens": 50,
+  "output_tokens": 55,
+  "cache_read_input_tokens": 0,
+  "cache_creation_input_tokens": 0,
+  "total_tokens": 105,
+  "effective_total_tokens": 105,
+  "wall_ms": 396
+}
